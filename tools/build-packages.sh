@@ -79,10 +79,11 @@ else
             shift && exec ./build-package.sh "$@"' - "$host_packages" "${build_flags[@]}" -a aarch64 "${packages[@]}"
     else
         if test -n "$host_packages"; then
-            # As root, since the image's sudo cannot switch users in some Docker setups.
-            TERMUX_DOCKER_EXEC_EXTRA_ARGS='--user root' ./scripts/run-docker.sh apt-get update -qq
-            TERMUX_DOCKER_EXEC_EXTRA_ARGS='--user root' ./scripts/run-docker.sh \
-                env DEBIAN_FRONTEND=noninteractive apt-get install -yqq --no-install-recommends $host_packages
+            # As root, and with apt kept from switching to its _apt user: the builder's AppArmor
+            # profile denies setuid and setgid, so neither sudo nor apt's own sandbox can change user.
+            TERMUX_DOCKER_EXEC_EXTRA_ARGS='--user root' ./scripts/run-docker.sh apt-get -o APT::Sandbox::User=root update -qq
+            TERMUX_DOCKER_EXEC_EXTRA_ARGS='--user root' ./scripts/run-docker.sh env DEBIAN_FRONTEND=noninteractive \
+                apt-get -o APT::Sandbox::User=root install -yqq --no-install-recommends $host_packages
         fi
         ./scripts/run-docker.sh ./build-package.sh "${build_flags[@]}" -a aarch64 "${packages[@]}"
     fi

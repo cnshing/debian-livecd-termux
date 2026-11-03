@@ -175,11 +175,13 @@ jobs:
       working-directory: termux-packages
       env:
         HOST_PACKAGES: ${{ matrix.host_packages }}
-        # As root, since the image's sudo cannot switch users in Docker on GitHub's runners.
+        # As root, and with apt kept from switching to its _apt user: the builder's AppArmor profile
+        # denies setuid and setgid, so neither sudo nor apt's own sandbox can change user.
         TERMUX_DOCKER_EXEC_EXTRA_ARGS: --user root
       run: |
-        ./scripts/run-docker.sh apt-get update -qq
-        ./scripts/run-docker.sh env DEBIAN_FRONTEND=noninteractive apt-get install -yqq --no-install-recommends $HOST_PACKAGES
+        ./scripts/run-docker.sh apt-get -o APT::Sandbox::User=root update -qq
+        ./scripts/run-docker.sh env DEBIAN_FRONTEND=noninteractive \
+          apt-get -o APT::Sandbox::User=root install -yqq --no-install-recommends $HOST_PACKAGES
     - name: Free disk space
       if: matrix.large
       working-directory: termux-packages

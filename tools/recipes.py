@@ -29,6 +29,10 @@ LARGE = {'chromium', 'code-oss', 'easyeffects', 'livecd-mixtapes', 'livecd-mozjs
 SEPARATE = {'chromium'}
 # Minutes. GitHub stops any job on its own runners at 360; others stop sooner so the caches still save.
 TIMEOUT, SEPARATE_TIMEOUT = 350, 360
+# Termux's repository keeps only the newest version of each package, so CI takes whatever version it has
+# rather than compiling the pinned builder's older one. These recipes still need the builder's exact
+# versions: Chromium's host tools must match its source, and a newer release would break the build.
+EXACT_DEPENDENCIES = {'chromium'}
 # What termux-packages fills in when it applies a patch; the values only matter for applying.
 PLACEHOLDERS = {'@TERMUX_PREFIX@': '/data/data/com.termux/files/usr', '@TERMUX_HOME@': '/data/data/com.termux/files/home'}
 READ = '''set +u
@@ -119,7 +123,8 @@ def plan(names):
         ordered = closure(group[name])
         include.append({'name': '_'.join(sorted(group[name])), 'packages': ' '.join(ordered),
                         'hash': directory_hash(ordered), 'large': bool(group[name] & LARGE),
-                        'timeout': SEPARATE_TIMEOUT if separate else TIMEOUT})
+                        'timeout': SEPARATE_TIMEOUT if separate else TIMEOUT,
+                        'exact': bool(group[name] & EXACT_DEPENDENCIES)})
     return {'include': include}
 
 

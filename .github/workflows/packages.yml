@@ -179,7 +179,14 @@ jobs:
       working-directory: termux-packages
       env:
         PACKAGES: ${{ matrix.packages }}
-      run: ./scripts/run-docker.sh ./build-package.sh -I -C -a aarch64 $PACKAGES
+        EXACT: ${{ matrix.exact }}
+      # Termux's repository keeps only each package's newest version, so a dependency held to the pinned
+      # builder's version is usually gone and gets compiled instead, Node.js and Electron included.
+      # -w downloads the repository's version. See EXACT_DEPENDENCIES in tools/recipes.py.
+      run: |
+        unbound=-w
+        test "$EXACT" != true || unbound=
+        ./scripts/run-docker.sh ./build-package.sh -I -C $unbound -a aarch64 $PACKAGES
 
     # Saved even when the build fails, so that fixing a patch does not download everything again.
     - name: Make the caches readable

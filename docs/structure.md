@@ -161,6 +161,12 @@ hours, so it always gets a job of its own, with only `libva`, and the full 360 m
 python3 tools/recipes.py plan --all
 ```
 
+**Dependency versions.** Termux's repository keeps only the newest version of each package, so the pinned
+builder's versions soon disappear from it, and the builder would compile each missing one from source,
+Node.js and Electron included. CI therefore passes `-w`, which downloads the repository's current
+version. Chromium is the exception, listed in `EXACT_DEPENDENCIES`, because its host tools must match its
+source exactly.
+
 **Caching.** Builder dependencies are kept with `actions/cache`, even when a build fails. The toolchain and
 host tools share one entry. Downloaded dependency packages and source archives have one entry per job, and
 a new job can start from another job's. All of them are tied to the pinned builder revision. The

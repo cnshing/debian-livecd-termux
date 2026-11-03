@@ -48,8 +48,10 @@ class Packaging(unittest.TestCase):
         jobs = {job['name']: job for job in recipes.plan(recipes.all_names())['include']}
         self.assertEqual(jobs['chromium']['packages'], 'libva chromium')
         self.assertEqual(jobs['chromium']['timeout'], 360)
+        self.assertTrue(jobs['chromium']['exact'])
         self.assertEqual(jobs['libva_livecd-gst-va']['packages'], 'libva livecd-gst-va')
         self.assertEqual(jobs['libva_livecd-gst-va']['timeout'], 350)
+        self.assertFalse(jobs['libva_livecd-gst-va']['exact'])
         built = [package for job in jobs.values() for package in job['packages'].split()]
         self.assertEqual(sorted(set(built)), recipes.all_names())
         alone = recipes.plan(['chromium'])['include']

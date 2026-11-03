@@ -146,16 +146,17 @@ jobs:
         mkdir -p ~/.termux-build
         echo "TERMUX_DOCKER_RUN_EXTRA_ARGS=--volume $HOME/.termux-build:/home/builder/.termux-build" >> "$GITHUB_ENV"
 
-    # Builder dependencies. The toolchain and host tools are the same for every job, so they share
-    # one entry. Downloaded .debs and sources differ, so each job has its own and may start from
-    # any other job's. The container image is not cached: at 2.5 GB compressed it would take a
-    # quarter of the repository's 10 GB allowance, and every job must still decompress and load it.
-    - name: Restore the toolchain and host tools
+    # Builder dependencies, one entry of each kind per job. Host tools differ between jobs, such as the
+    # Python that Chromium's build compiles for itself, and a shared entry would hold only what the
+    # first job to save it set up. A job starts only from its own earlier entries, so one job's
+    # downloads never pile into another's. The container image is not cached: at 2.5 GB compressed it
+    # would take a quarter of the repository's 10 GB allowance, and every job must still load it.
+    - name: Restore the host tools
       id: tools
       uses: actions/cache/restore@v6
       with:
         path: ~/.termux-build/_cache
-        key: termux-tools-${{ env.TERMUX_PACKAGES_COMMIT }}
+        key: termux-host-tools-${{ env.TERMUX_PACKAGES_COMMIT }}-${{ matrix.name }}
     - name: Restore dependency packages and sources
       id: deps
       uses: actions/cache/restore@v6
@@ -163,10 +164,8 @@ jobs:
         path: |
           ~/.termux-build/_cache-aarch64
           ~/.termux-build/*/cache
-        key: termux-deps-${{ env.TERMUX_PACKAGES_COMMIT }}-${{ matrix.name }}-${{ matrix.hash }}
-        restore-keys: |
-          termux-deps-${{ env.TERMUX_PACKAGES_COMMIT }}-${{ matrix.name }}-
-          termux-deps-${{ env.TERMUX_PACKAGES_COMMIT }}-
+        key: termux-downloads-${{ env.TERMUX_PACKAGES_COMMIT }}-${{ matrix.name }}-${{ matrix.hash }}
+        restore-keys: termux-downloads-${{ env.TERMUX_PACKAGES_COMMIT }}-${{ matrix.name }}-
 
     - name: Start the builder container
       working-directory: termux-packages
@@ -186,6 +185,7 @@ jobs:
       working-directory: termux-packages
       run: ./scripts/free-space.sh
     - name: Build
+      id: build
       working-directory: termux-packages
       env:
         PACKAGES: ${{ matrix.packages }}
@@ -198,18 +198,19 @@ jobs:
         test "$EXACT" != true || unbound=
         ./scripts/run-docker.sh ./build-package.sh -I -C $unbound -a aarch64 $PACKAGES
 
-    # Saved even when the build fails, so that fixing a patch does not download everything again.
+    # Saved only after a successful build. An entry can never be replaced, so one saved by a job that
+    # failed early would hold only what it restored, and later runs would keep restoring that.
     - name: Make the caches readable
-      if: ${{ !cancelled() }}
+      if: steps.build.outcome == 'success'
       run: sudo chown -R "$(id -u):$(id -g)" ~/.termux-build
-    - name: Save the toolchain and host tools
-      if: ${{ !cancelled() && steps.tools.outputs.cache-hit != 'true' }}
+    - name: Save the host tools
+      if: steps.build.outcome == 'success' && steps.tools.outputs.cache-hit != 'true'
       uses: actions/cache/save@v6
       with:
         path: ~/.termux-build/_cache
         key: ${{ steps.tools.outputs.cache-primary-key }}
     - name: Save dependency packages and sources
-      if: ${{ !cancelled() && steps.deps.outputs.cache-hit != 'true' }}
+      if: steps.build.outcome == 'success' && steps.deps.outputs.cache-hit != 'true'
       uses: actions/cache/save@v6
       with:
         path: |

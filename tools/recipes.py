@@ -23,8 +23,9 @@ import tempfile
 PACKAGES = Path(__file__).resolve().parents[1] / 'packages'
 BUILD_CONFIG = Path(__file__).with_name('termux-build.json')
 CACHE = Path(os.environ.get('LIVECD_RECIPE_CACHE', str(Path.home() / '.cache/livecd-recipes')))
-# Groups that need more disk than a runner has free by default, so CI clears some first.
-LARGE = {'chromium', 'code-oss', 'easyeffects', 'livecd-mixtapes', 'livecd-mozjs-128', 'lsp-plugins-lv2', 'mission-center', 'nautilus', 'serein'}
+# Groups that may need more disk than a runner has free, so CI clears some first. ubuntu-26.04 runners
+# had 78 GB free in November 2026, plenty for every other recipe, and clearing takes 3 to 7 minutes.
+LARGE = {'chromium'}
 # Recipes that take most of a job's time on their own. Each gets a job of its own, holding only the
 # recipes it needs, so nothing that shares a dependency with it adds to its build time.
 SEPARATE = {'chromium'}

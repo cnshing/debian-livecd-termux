@@ -173,10 +173,13 @@ inside a recipe, so `HOST_PACKAGES` in `tools/recipes.py` lists them and CI and 
 install them in the builder container first. lsp-plugins-lv2's resource tools, for example, link cairo
 and libsndfile.
 
-**Caching.** Builder dependencies are kept with `actions/cache`, even when a build fails. The toolchain and
-host tools share one entry. Downloaded dependency packages and source archives have one entry per job, and
-a new job can start from another job's. All of them are tied to the pinned builder revision. The
-container image and Rust's crate registry are not cached. The image and revision are pinned together in `tools/termux-build.json`, because the image holds the matching NDK. CI and the local helper read the same file.
+**Caching.** Builder dependencies are kept with `actions/cache`. Each job has its own entry for host tools,
+such as the Python that Chromium's build compiles, and one for downloaded dependency packages and source
+archives. A job starts only from its own earlier entries, and saves only after a successful build: an entry
+can never be replaced, so one saved by an early failure would hold only what it had restored. All of them
+are tied to the pinned builder revision. The container image and Rust's crate registry are not cached;
+measured, Termux's downloads take under a minute per job, Chromium's 1.9 GB source 7 seconds, and Rust's
+installation 15. The image and revision are pinned together in `tools/termux-build.json`, because the image holds the matching NDK. CI and the local helper read the same file.
 
 To check that every patch still applies to its pinned source, without building anything:
 
@@ -191,7 +194,7 @@ Check [its documentation](https://docs.github.com/en/actions/reference/limits) f
 
 | Limit | Value |
 |---|---|
-| Standard runner | 4 CPUs, 16 GB RAM, 14 GB SSD |
+| Standard runner | 4 CPUs, 16 GB RAM; `ubuntu-26.04` had 78 GB of disk free in November 2026, so only Chromium's job clears more |
 | Concurrent jobs | 20 on the Free plan |
 | One job | 6 hours, however high `timeout-minutes` is set; this workflow stops at 350 minutes so the caches still save, and Chromium's job at 360 |
 | Cache | 10 GB per repository; a job that restores nothing downloads everything again |

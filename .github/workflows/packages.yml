@@ -5,7 +5,9 @@
 #                             or: gh workflow run packages.yml -f packages="nautilus easyeffects"
 #   Every package:            leave packages empty.
 #   Publish a release:        push a tag such as v1, or set release: v1 with packages left empty.
-#   Pushes and pull requests build only the packages they change, and publish nothing.
+#   Pushes and pull requests build only the packages they change, and publish nothing. A push counts
+#   every change since the last push whose run succeeded, so a cancelled or failed run's packages
+#   are built by the next one.
 #
 # Each dependent set of recipes gets its own job, so unrelated packages build concurrently. A job
 # always includes the recipes from this repository that its target depends on, for example
@@ -45,6 +47,9 @@ env:
 jobs:
   plan:
     runs-on: ubuntu-26.04
+    permissions:
+      contents: read
+      actions: read  # To find the last successful run.
     outputs:
       matrix: ${{ steps.plan.outputs.matrix }}
       count: ${{ steps.plan.outputs.count }}
@@ -69,8 +74,8 @@ jobs:
       env:
         INPUT_PACKAGES: ${{ inputs.packages }}
         INPUT_RELEASE: ${{ inputs.release }}
-        PUSH_BEFORE: ${{ github.event.before }}
         PR_BASE: ${{ github.event.pull_request.base.sha }}
+        GH_TOKEN: ${{ github.token }}
       run: |
         set -f  # Package names are split into words below, and must not expand as globs.
         release=
@@ -93,7 +98,16 @@ jobs:
               release=$GITHUB_REF_NAME
               matrix=$(python3 tools/recipes.py plan --all)
             else
-              matrix=$(python3 tools/recipes.py plan $(python3 tools/recipes.py changed "$PUSH_BEFORE"))
+              # Not the previous commit: GitHub cancels a waiting run when a newer push queues, and
+              # that run's changes would otherwise never be built.
+              base=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/packages.yml/runs?branch=$GITHUB_REF_NAME&event=push&status=success&per_page=1" \
+                --jq '.workflow_runs[0].head_sha // empty')
+              if test -n "$base"; then
+                echo "Building changes since $base, the last successful push run."
+                matrix=$(python3 tools/recipes.py plan $(python3 tools/recipes.py changed "$base"))
+              else
+                matrix=$(python3 tools/recipes.py plan --all)
+              fi
             fi;;
         esac
         count=$(printf '%s' "$matrix" | python3 -c 'import json,sys; print(len(json.load(sys.stdin)["include"]))')

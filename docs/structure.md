@@ -146,7 +146,7 @@ python src/apply-overlays.py "Audio Effects"
 | Several packages | `gh workflow run packages.yml -f packages="nautilus easyeffects"` |
 | Everything | `gh workflow run packages.yml` |
 | Everything, and publish a release | Push a tag such as `v1`, or add `-f release=v1` |
-| Only what changed | Automatic on pushes to `main` and on pull requests that change `packages/` |
+| Only what changed | Automatic on pushes to `main` and on pull requests that change `packages/`. A push builds everything changed since the last push whose run succeeded, so nothing from a cancelled or failed run is skipped |
 
 Only a full build can publish, because `install.sh` takes the latest release as complete. The result of any
 other run is available as a workflow artifact, and `install.sh --repo-tarball` can install it.

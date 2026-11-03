@@ -1,0 +1,11 @@
+// Permanent command line arguments for Code OSS. See docs/code-oss/README.md.
+// Changing this file requires restarting the editor.
+{
+	// The product grants proposed APIs to no extension, so these two are named one by one.
+	// Both are APIs these extensions need in order to load, not a general switch.
+	"enable-proposed-api": ["jeanp413.open-remote-ssh", "GitHub.vscode-pull-request-github"],
+
+	// Keep secrets in the Secret Service however the editor was started. Without this and
+	// outside GNOME, the editor offers to "use weaker encryption" instead.
+	"password-store": "gnome-libsecret"
+}

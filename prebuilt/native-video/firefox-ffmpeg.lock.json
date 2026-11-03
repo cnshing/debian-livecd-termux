@@ -1,0 +1,11 @@
+{
+  "version": "9.0.2",
+  "url": "https://codeload.github.com/FFmpeg/FFmpeg/tar.gz/refs/tags/n9.0.2",
+  "sha256": "6e374ed621e48faa40639307dff48ba6fe574a509977956d2cce9669b7cc27e9",
+  "termux_patches_commit": "538685c906074926fd19650e38c6dad91379eb0f",
+  "patches": {
+    "configure.patch": "af1d15da2ddca5ecd620fc4e1bf2475987a8f833c4387028826cd489c719bb3f",
+    "libavutil-file_open.c.patch": "627de7e2c537f4c7ec9ffc2a64c5d0fba07376caddab581a64294d8dafc46bbe"
+  },
+  "commit": "946fcce07b6dcd0331c8cc609192aeff5e1924f8"
+}

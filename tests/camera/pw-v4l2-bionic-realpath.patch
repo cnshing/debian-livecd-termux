@@ -1,0 +1,17 @@
+--- a/pipewire-v4l2/src/pipewire-v4l2.c
++++ b/pipewire-v4l2/src/pipewire-v4l2.c
+@@ -792,8 +792,14 @@
+ 	bool passthrough = true;
+ 	uint32_t dev_id = SPA_ID_INVALID;
+ 	char *real_path;
++	/* Bionic's realpath() calls open(), which would re-enter this wrapper. */
++	static __thread bool in_realpath;
+ 
++	if (in_realpath)
++		return globals.old_fops.openat(dirfd, path, oflag, mode);
++	in_realpath = true;
+ 	real_path = realpath(path, NULL);
++	in_realpath = false;
+ 	if (!real_path)
+ 		real_path = (char *)path;
+ 

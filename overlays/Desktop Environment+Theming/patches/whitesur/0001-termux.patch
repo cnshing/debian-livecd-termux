@@ -1,0 +1,43 @@
+Run WhiteSur's installer on Termux: no passwd database, no sudo, no /tmp, and no app
+icon install, because the appearance extension owns the theme selection.
+
+--- a/install.sh
++++ b/install.sh
+@@ -203,7 +203,7 @@
+     prompt -i "Desktop          : $(gnome-shell --version)"
+   fi
+ 
+-  install_app
++  # LiveCD owns appearance through its native extension.
+ 
+   if [[ "${libadwaita}" == 'true' ]]; then
+     if [[ "$UID" != '0' ]]; then
+--- a/libs/lib-core.sh
++++ b/libs/lib-core.sh
+@@ -22,7 +22,7 @@
+ 
+ export WHITESUR_PID=$$
+ MY_USERNAME="${SUDO_USER:-$(logname 2> /dev/null || echo "${USER}")}"
+-MY_HOME=$(getent passwd "${MY_USERNAME}" | cut -d: -f6)
++MY_HOME="$HOME"
+ 
+ # Check command availability
+ has_command() {
+@@ -60,7 +60,7 @@
+   SED_OPT="-i"
+ fi
+ 
+-SUDO_BIN="$(which sudo)"
++SUDO_BIN=""
+ 
+ #------------Directories--------------#
+ THEME_SRC_DIR="${REPO_DIR}/src"
+@@ -80,7 +80,7 @@
+ FIREFOX_FLATPAK_THEME_DIR="${FIREFOX_FLATPAK_DIR_HOME}/.mozilla/firefox/firefox-themes"
+ FIREFOX_SNAP_DIR_HOME="${MY_HOME}/snap/firefox/common/.mozilla/firefox"
+ FIREFOX_SNAP_THEME_DIR="${FIREFOX_SNAP_DIR_HOME}/firefox-themes"
+-export WHITESUR_TMP_DIR="/tmp/WhiteSur.lock"
++export WHITESUR_TMP_DIR="@TERMUX_PREFIX@/tmp/WhiteSur.lock"
+ 
+ # Destination directory
+ if [[ -w "/root" ]]; then

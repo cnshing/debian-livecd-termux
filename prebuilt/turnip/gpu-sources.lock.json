@@ -1,0 +1,21 @@
+{
+  "format": 1,
+  "architecture": "aarch64",
+  "mesa_version": "26.2.6",
+  "packages": [
+    {
+      "package": "mesa-vulkan-icd-freedreno",
+      "version": "26.2.6",
+      "file": "mesa-vulkan-icd-freedreno_26.2.6_aarch64.deb",
+      "url": "https://packages.termux.dev/apt/termux-main/pool/main/m/mesa-vulkan-icd-freedreno/mesa-vulkan-icd-freedreno_26.2.6_aarch64.deb",
+      "sha256": "6f6e5890fe67957f1c54a76f3538a331a5a83472d65a5e2c5dc8d9e1e9850980"
+    },
+    {
+      "package": "vulkan-tools",
+      "version": "1.4.366",
+      "file": "vulkan-tools_1.4.366_aarch64.deb",
+      "url": "https://packages.termux.dev/apt/termux-main/pool/main/v/vulkan-tools/vulkan-tools_1.4.366_aarch64.deb",
+      "sha256": "f98b5943a07f3f8066dfc4ed19e7a8ccbc78a58d7df7794269e6afa2b69e3074"
+    }
+  ]
+}

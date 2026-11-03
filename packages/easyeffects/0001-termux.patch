@@ -1,0 +1,33 @@
+--- a/meson.build
++++ b/meson.build
+@@ -97,7 +97,7 @@
+ 
+ subdir('data')
+ subdir('po')
+-subdir('help')
++# Offline help requires itstool, which is not packaged in Termux.
+ subdir('src')
+ 
+ gnome_mod.post_install(
+--- a/src/autogain.cpp
++++ b/src/autogain.cpp
+@@ -187,7 +187,7 @@
+ 
+   // The value given to ebur128_set_max_history must be in milliseconds
+ 
+-  ebur128_set_max_history(ebur_state, static_cast<ulong>(seconds) * 1000UL);
++  ebur128_set_max_history(ebur_state, static_cast<unsigned long>(seconds) * 1000UL);
+ }
+ 
+ void AutoGain::setup() {
+--- a/src/application.cpp
++++ b/src/application.cpp
+@@ -402,7 +402,7 @@
+ 
+     g_application_activate(gapp);
+ 
+-    return G_APPLICATION_CLASS(application_parent_class)->command_line(gapp, cmdline);
++    return EXIT_SUCCESS;
+   };
+ 
+   application_class->activate = [](GApplication* gapp) {

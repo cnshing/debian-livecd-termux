@@ -1,0 +1,10 @@
+DING's thumbnail helper runs under the private runtime's GJS, not /usr/bin/gjs.
+
+--- a/usr/share/gnome-shell/extensions/ding@rastersoft.com/app/createThumbnail.js
++++ b/usr/share/gnome-shell/extensions/ding@rastersoft.com/app/createThumbnail.js
+@@ -1,4 +1,4 @@
+-#!/usr/bin/gjs
++#!@TERMUX_PREFIX@/opt/gnome-48/bin/gjs
+ 
+ /* DING: Desktop Icons New Generation for GNOME Shell
+  *

@@ -1,0 +1,62 @@
+Keep the launcher behind each startup ID after its sequence ends. Shell otherwise compares a
+window's ID only with active sequences, so an application that ends its sequence early gets the
+generic icon although it carries a valid ID. An ID belongs to one launch, so it cannot match wrongly.
+
+--- a/src/shell-window-tracker.c
++++ b/src/shell-window-tracker.c
+@@ -45,6 +45,7 @@
+ 
+   /* <MetaWindow * window, ShellApp *app> */
+   GHashTable *window_to_app;
++  GHashTable *startup_id_to_app;
+ };
+ 
+ G_DEFINE_TYPE (ShellWindowTracker, shell_window_tracker, G_TYPE_OBJECT);
+@@ -459,6 +460,16 @@
+               break;
+             }
+         }
++
++      /* Applications such as Firefox and LibreOffice end their sequence
++       * before mapping the window that carries its ID.
++       */
++      if (result == NULL)
++        {
++          result = g_hash_table_lookup (tracker->startup_id_to_app, startup_id);
++          if (result != NULL)
++            g_object_ref (result);
++        }
+     }
+ 
+   /* If we didn't get a startup-notification match, see if we matched
+@@ -641,7 +652,12 @@
+ 
+   app = shell_startup_sequence_get_app (sequence);
+   if (app)
+-    _shell_app_handle_startup_sequence (app, sequence);
++    {
++      _shell_app_handle_startup_sequence (app, sequence);
++      g_hash_table_replace (self->startup_id_to_app,
++                            g_strdup (meta_startup_sequence_get_id (sequence)),
++                            g_object_ref (app));
++    }
+ 
+   g_signal_emit (G_OBJECT (self), signals[STARTUP_SEQUENCE_CHANGED], 0, sequence);
+ }
+@@ -669,6 +685,8 @@
+   MetaDisplay *display = shell_global_get_display (shell_global_get ());
+   MetaStartupNotification *sn = meta_display_get_startup_notification (display);
+ 
++  self->startup_id_to_app = g_hash_table_new_full (g_str_hash, g_str_equal,
++                                                   g_free, g_object_unref);
+   self->window_to_app = g_hash_table_new_full (g_direct_hash, g_direct_equal,
+                                                NULL, (GDestroyNotify) g_object_unref);
+ 
+@@ -689,6 +707,7 @@
+   ShellWindowTracker *self = SHELL_WINDOW_TRACKER (object);
+ 
+   g_hash_table_destroy (self->window_to_app);
++  g_hash_table_destroy (self->startup_id_to_app);
+ 
+   G_OBJECT_CLASS (shell_window_tracker_parent_class)->finalize(object);
+ }

@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schemalist>
+
+  <schema id="org.gnome.shell.extensions.noannoyance-fork" path="/org/gnome/shell/extensions/noannoyance-fork/">
+    <key name="blocklist" type="as">
+      <default>['Microsoft Teams - Preview']</default>
+      <summary>By 'WM_CLASS.'</summary>
+      <description>Applications not permitted to grab your 'focus.'</description>
+    </key>
+  </schema>
+
+</schemalist>

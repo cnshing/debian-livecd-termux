@@ -1,0 +1,184 @@
+--- a/modules/lsp-runtime-lib/dependencies.mk
++++ b/modules/lsp-runtime-lib/dependencies.mk
+@@ -30,6 +30,7 @@
+ #------------------------------------------------------------------------------
+ # Linux dependencies
+ LINUX_DEPENDENCIES = \
++  LIBICONV \
+   LIBPTHREAD \
+   LIBDL \
+   LIBRT \
+--- a/modules/lsp-runtime-lib/include/lsp-plug.in/ipc/SharedMutex.h
++++ b/modules/lsp-runtime-lib/include/lsp-plug.in/ipc/SharedMutex.h
+@@ -35,7 +35,7 @@
+ {
+     namespace ipc
+     {
+-    #if defined(PLATFORM_LINUX) || defined(PLATFORM_FREEBSD)
++    #if (defined(PLATFORM_LINUX) || defined(PLATFORM_FREEBSD)) && !defined(__ANDROID__)
+         #define LSP_ROBUST_MUTEX_SUPPORTED
+     #endif /* PLATFORM_LINUX, PLATFORM_FREEBSD */
+ 
+--- a/modules/lsp-runtime-lib/src/main/ipc/Thread.cpp
++++ b/modules/lsp-runtime-lib/src/main/ipc/Thread.cpp
+@@ -242,8 +242,10 @@
+             pThis           = _this;
+ 
+             // Cleanup cancellation state
++#ifndef __ANDROID__
+             pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, NULL);
+             pthread_setcanceltype(PTHREAD_CANCEL_DEFERRED, NULL);
++#endif
+ 
+             // Wait until we are ready to launch
+             while (!atomic_cas(&_this->enState, TS_PENDING, TS_RUNNING)) {}
+--- a/modules/lsp-runtime-lib/src/main/ipc/Library.cpp
++++ b/modules/lsp-runtime-lib/src/main/ipc/Library.cpp
+@@ -73,7 +73,7 @@
+                 if (str == NULL)
+                     return STATUS_NO_MEM;
+ 
+-            #ifdef _GNU_SOURCE
++            #if defined(_GNU_SOURCE) && !defined(__ANDROID__)
+                 void * const handle    = (new_namespace) ?
+                     ::dlmopen(LM_ID_NEWLM, str, RTLD_NOW) :
+                     ::dlopen(str, RTLD_NOW);
+--- a/modules/lsp-runtime-lib/src/main/ipc/SharedMem.cpp
++++ b/modules/lsp-runtime-lib/src/main/ipc/SharedMem.cpp
+@@ -49,6 +49,36 @@
+     #include <unistd.h>
+ #endif /* PLATFORM_WINDOWS */
+ 
++#ifdef __ANDROID__
++#include <string>
++#include <cstdlib>
++#include <cstring>
++// Bionic has mmap but no POSIX shm_open. Keep named segments in the app's
++// private temporary directory, with ordinary O_CREAT/O_EXCL and unlink semantics.
++static std::string android_shm_path(const char *name)
++{
++    if (name == NULL || name[0] != '/' || name[1] == 0 || strchr(name + 1, '/') != NULL)
++    {
++        errno = EINVAL;
++        return {};
++    }
++    const char *tmp = getenv("TMPDIR");
++    if (tmp == NULL || tmp[0] == 0)
++        tmp = "@TERMUX_PREFIX@/tmp";
++    return std::string(tmp) + "/lsp-shm-" + (name + 1);
++}
++static int shm_open(const char *name, int flags, mode_t mode)
++{
++    auto path = android_shm_path(name);
++    return path.empty() ? -1 : open(path.c_str(), flags | O_CLOEXEC | O_NOFOLLOW, mode & 0600);
++}
++static int shm_unlink(const char *name)
++{
++    auto path = android_shm_path(name);
++    return path.empty() ? -1 : unlink(path.c_str());
++}
++#endif
++
+ namespace lsp
+ {
+     namespace ipc
+--- a/modules/lsp-runtime-lib/src/main/runtime/system.cpp
++++ b/modules/lsp-runtime-lib/src/main/runtime/system.cpp
+@@ -118,7 +118,7 @@
+             if (nname == NULL)
+                 return STATUS_NO_MEM;
+ 
+-		#if defined(_GNU_SOURCE) && !defined(PLATFORM_HAIKU)
++		#if defined(_GNU_SOURCE) && !defined(PLATFORM_HAIKU) && !defined(__ANDROID__)
+             char *var = secure_getenv(nname);
+ 		#else
+             char *var = getenv(nname);
+@@ -646,7 +646,12 @@
+ 
+             while (true)
+             {
++#ifdef __ANDROID__
++                // Bionic has getpwuid_r (used above), but no getlogin_r.
++                error = ENOENT;
++#else
+                 error = getlogin_r(buf, capacity);
++#endif
+                 switch (error)
+                 {
+                     case 0:
+@@ -679,7 +684,13 @@
+         {
+             if (path == NULL)
+                 return STATUS_BAD_ARGUMENTS;
++#ifdef __ANDROID__
++            const char *tmp = getenv("TMPDIR");
++            return path->set_native((tmp != NULL && tmp[0] != 0) ? tmp :
++                "@TERMUX_PREFIX@/tmp") ? STATUS_OK : STATUS_NO_MEM;
++#else
+             return (path->set_ascii("/tmp")) ? STATUS_OK : STATUS_NO_MEM;
++#endif
+         }
+ 
+         status_t get_system_temporary_dir(io::Path *path)
+@@ -1012,7 +1023,20 @@
+                 }
+ 
+                 // Fill fields
++#ifdef __ANDROID__
++                bool bind = false;
++                const char *option = mnt->mnt_opts;
++                while (option != NULL && *option != 0)
++                {
++                    const char *end = strchr(option, ',');
++                    size_t length = (end != NULL) ? size_t(end - option) : strlen(option);
++                    if (length == 4 && memcmp(option, "bind", 4) == 0)
++                        bind = true;
++                    option = (end != NULL) ? end + 1 : NULL;
++                }
++#else
+                 bool bind   = hasmntopt (mnt, "bind");
++#endif
+                 if (!info->device.set_utf8(mnt->mnt_fsname))
+                     return STATUS_NO_MEM;
+                 if (!info->target.set_utf8(mnt->mnt_dir))
+--- a/modules/lsp-common-lib/src/main/stdlib.cpp
++++ b/modules/lsp-common-lib/src/main/stdlib.cpp
+@@ -57,7 +57,37 @@
+     LSP_COMMON_LIB_PUBLIC
+     void qsort_r(void *data, size_t count, size_t szof, sort_compar_r_t compar, void *arg)
+     {
+-        #if defined(PLATFORM_LINUX) || defined(_GNU_SOURCE) || defined(__GNU__) || defined(PLATFORM_HAIKU)
++        #if defined(__ANDROID__)
++            // Bionic before API 36 has no qsort_r. Use an allocation-free heapsort.
++            auto bytes = static_cast<unsigned char *>(data);
++            auto at = [&](size_t i) { return bytes + i * szof; };
++            auto swap = [&](size_t a, size_t b) {
++                for (size_t j = 0; j < szof; ++j) {
++                    unsigned char tmp = at(a)[j];
++                    at(a)[j] = at(b)[j];
++                    at(b)[j] = tmp;
++                }
++            };
++            auto sift = [&](size_t root, size_t end) {
++                while (end > 1 && root <= (end - 2) / 2) {
++                    size_t child = root * 2 + 1;
++                    if (child + 1 < end && compar(at(child), at(child + 1), arg) < 0)
++                        ++child;
++                    if (compar(at(root), at(child), arg) >= 0)
++                        break;
++                    swap(root, child);
++                    root = child;
++                }
++            };
++            if (count < 2 || szof == 0)
++                return;
++            for (size_t start = count / 2; start > 0; --start)
++                sift(start - 1, count);
++            for (size_t end = count; end > 1; --end) {
++                swap(0, end - 1);
++                sift(0, end - 1);
++            }
++        #elif defined(PLATFORM_LINUX) || defined(_GNU_SOURCE) || defined(__GNU__) || defined(PLATFORM_HAIKU)
+             ::qsort_r(data, count, szof, compar, arg);
+         #elif defined(PLATFORM_BSD) || defined(PLATFORM_MACOSX)
+             bsd_qsort_r_t sort;

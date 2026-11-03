@@ -1,0 +1,6 @@
+[Desktop Entry]
+Type=Application
+Name=Easy Effects
+Exec=easyeffects
+Icon=com.github.wwmm.easyeffects
+NoDisplay=true

@@ -1,0 +1,49 @@
+[org/gnome/desktop/interface]
+cursor-theme='Adwaita'
+font-name='Cantarell 11'
+document-font-name='Cantarell 11'
+monospace-font-name='Monospace 11'
+font-antialiasing='grayscale'
+font-hinting='slight'
+text-scaling-factor=1.0
+gtk-key-theme='Default'
+locate-pointer=false
+gtk-enable-primary-paste=true
+clock-show-weekday=true
+clock-show-date=true
+clock-show-seconds=true
+
+[org/gnome/desktop/sound]
+theme-name='freedesktop'
+allow-volume-above-100-percent=false
+
+[org/gnome/desktop/background]
+picture-options='zoom'
+
+[org/gnome/desktop/input-sources]
+show-all-sources=false
+
+[org/gnome/mutter]
+overlay-key='Super_L'
+attach-modal-dialogs=true
+center-new-windows=true
+
+[org/gnome/desktop/peripherals/touchpad]
+disable-while-typing=true
+click-method='fingers'
+
+[org/gnome/desktop/peripherals/mouse]
+accel-profile='default'
+
+[org/gnome/desktop/calendar]
+show-weekdate=false
+
+[org/gnome/desktop/wm/preferences]
+titlebar-font='Adwaita Sans Bold 11'
+action-double-click-titlebar='toggle-maximize'
+action-middle-click-titlebar='none'
+action-right-click-titlebar='menu'
+resize-with-right-button=false
+mouse-button-modifier='<Super>'
+focus-mode='click'
+auto-raise=false

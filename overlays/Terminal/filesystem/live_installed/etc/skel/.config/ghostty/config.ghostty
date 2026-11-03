@@ -1,0 +1,13 @@
+# palette=1 (Tango); colorset1: foreground rgb(192,192,192), background black, cursor white
+theme = Builtin Tango Dark
+foreground = #c0c0c0
+# Sakura highlights selections in reverse video instead of the theme's light blue
+selection-background =
+selection-foreground =
+
+# blinking_cursor=No. `no-cursor` keeps the shell integration from switching to a blinking bar at the prompt.
+cursor-style-blink = false
+shell-integration-features = no-cursor
+
+# Conservatively add color for user@host and prevent xterm-ghostty terminfo
+term = xterm-256color

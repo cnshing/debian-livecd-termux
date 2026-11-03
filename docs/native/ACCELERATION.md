@@ -1,0 +1,93 @@
+# Shared GPU rendering and hardware video
+
+Raw capture paths beginning with `temp/` refer to local files excluded from Git.
+See the [privacy notes](../privacy.md).
+
+The desktop's existing Turnip/Zink renderer remains the common native GPU layer.
+The shared application launcher adds video support through ABI-specific private
+drivers and the existing Termux:VA MediaCodec daemon. Native Termux libraries
+remain separate from glibc libraries.
+
+[Hardware encoding](ENCODING.md) offers the same stack's H.264 and HEVC encoders
+to every desktop program as `/dev/dri/renderD128`, without per-program settings;
+it is built and tested on the phone but not yet installed there.
+
+Installation and successful compilation do not establish correct pixels, smooth
+playback, or hardware decoding in a particular application. The
+[fixes and checks](../browsers/native-acceleration-checks.md) pass Firefox
+VP9/HEVC and mpv VP9/H.264/HEVC hardware decoding, GPU process checks and numbered-frame
+pixel comparisons. The Chromium build was stopped at the user's request; its
+installed stock package still uses software video decoding.
+The earlier fullscreen frame-freshness failure remains unresolved.
+
+## Applications
+
+| Application | GPU configuration | Video configuration |
+| --- | --- | --- |
+| Google Chrome | Shared glibc Turnip and ANGLE Vulkan | Shared glibc Termux:VA driver and pinned ION adapter; VP9/HEVC enabled by the saved opt-in |
+| Native Firefox | Turnip/Zink and WebRender; private KGSL graphics probe port | VP9/HEVC VA-API, GPU and pixel checks pass with private VA-API-enabled FFmpeg libraries |
+| Native Chromium | Existing Vulkan/ANGLE support | Enabled only when the installed package carries the VA-API build receipt; stock Termux build stays on software video |
+| Native mpv | Vulkan `gpu-next` / `x11vk` | VP9/H.264/HEVC hardware decoding and pixel checks pass through native MediaCodec |
+| Other applications | Inherited native rendering, or an explicit glibc profile | Standard VA-API available through the shared launcher when the application includes a compatible backend |
+
+Chrome and the managed Firefox/mpv launchers use the shared module on their next
+launch. Chromium's existing Termux launcher loads the common configuration from
+`$PREFIX/etc/chromium/livecd-gpu.conf`, preserving its normal user flag overrides.
+Applications already running must be fully quit and reopened to load new drivers
+and preferences. No desktop restart is performed by this setup.
+
+## Commands and overrides
+
+```sh
+# Read installation metadata; this does not launch a driver or decode a frame.
+livecd-accelerate status
+
+# Supply VA-API to a native client. The client still selects its decode backend.
+livecd-accelerate run -- your-vaapi-application arguments
+
+# A glibc client uses Bionilux and the separate glibc driver stack.
+livecd-accelerate run --abi glibc -- /path/to/glibc-application arguments
+
+# Keep GPU rendering and force software decoding for this launch.
+livecd-accelerate run --profile mpv --video off -- mpv video.mp4
+```
+
+`~/.config/livecd-native/acceleration.json` stores `hardware_video` and
+`disabled_va_codecs`. `LIVECD_HARDWARE_VIDEO=0` or `1` overrides the saved common
+preference. Existing browser controls (`LIVECD_CHROME_HARDWARE_VIDEO`,
+`LIVECD_CHROMIUM_HARDWARE_VIDEO`, `LIVECD_FIREFOX_HARDWARE_VIDEO`) take precedence
+over that common variable. Chrome also retains its earlier saved opt-in.
+`--video off/on` explicitly overrides those choices for a direct launcher call.
+
+`LIVECD_CHROME_GPU`, `LIVECD_CHROMIUM_GPU`, `LIVECD_FIREFOX_GPU`,
+`LIVECD_MPV_GPU`, and `LIVECD_GENERIC_GPU` select a per-application GPU override.
+Automatic GPU selection follows the native renderer and checks the fullscreen-fix
+receipt. Software rendering remains available through the existing desktop mode.
+
+The conservative VA-API profile hides H.264, whose bridge path has an unresolved
+stream failure, and AV1, which this phone cannot decode in hardware. Native mpv's
+direct MediaCodec route is separate and can use H.264. Codec availability still
+depends on the phone and stream.
+
+Only the managed Firefox profile's marked block in `user.js` is updated;
+surrounding preferences are preserved. Explicitly supplied Firefox profiles keep
+their own settings. User mpv configuration remains in place, with the launcher's
+GPU/decode options passed on the command line.
+
+## Driver and daemon ownership
+
+Driver directories live under `~/.local/opt/livecd-native/acceleration/`, with
+separate `bionic` and `glibc` selectors. A launcher resolves its selector to an
+immutable directory before starting a process. Updates therefore keep an
+application on one driver version for its lifetime.
+
+The existing daemon can serve both ABIs through its socket. When a caller supplies
+`TERMUX_VA_SOCKET` or `TERMUX_VA_SOCKET_DIR`, the launcher respects its ownership.
+Otherwise startup is serialized, reuses a listening endpoint, and starts the
+daemon directly if absent. It never invokes upstream's process-wide kill helpers
+or runs a decode health probe. There is no global video preload on GNOME Shell.
+
+Setup and build instructions are in [prebuilt/native-video](../../prebuilt/native-video/README.md).
+The upstream design and application settings are documented in the
+[Termux:VA developer guide](https://github.com/lfdevs/termux-va/blob/main/doc/developer-guide.md)
+and [user guide](https://github.com/lfdevs/termux-va/blob/main/doc/user-guide.md).

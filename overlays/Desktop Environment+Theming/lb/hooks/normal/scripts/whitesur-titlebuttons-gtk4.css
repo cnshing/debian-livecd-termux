@@ -1,0 +1,84 @@
+
+/* Replaces WhiteSur's PNG window buttons with GNOME-style symbolic window buttons for GTK 4.
+ * Adapted from Colloid's "normal" window buttons (vinceliuice/Colloid-gtk-theme, --tweaks normal).
+*/
+windowcontrols > button:not(.raised):not(.suggested-action):not(.destructive-action):not(.opaque) {
+  min-height: calc(22px * 1.2); /* Special change to increase button size */
+  min-width: calc(22px * 1.2); /* Special change to increase button size */
+  padding: 6px 0;
+  margin-left: 4px;
+  margin-right: 4px;
+}
+
+windowcontrols > button.minimize:not(.raised):not(.suggested-action):not(.destructive-action):not(.opaque),
+windowcontrols > button.maximize:not(.raised):not(.suggested-action):not(.destructive-action):not(.opaque),
+windowcontrols > button.close:not(.raised):not(.suggested-action):not(.destructive-action):not(.opaque) {
+  color: alpha(currentColor, 0.75);
+  background: none; /* Drops WhiteSur's titlebutton PNGs */
+  box-shadow: none;
+}
+
+windowcontrols > button.minimize:not(.raised):not(.suggested-action):not(.destructive-action):not(.opaque) > image,
+windowcontrols > button.maximize:not(.raised):not(.suggested-action):not(.destructive-action):not(.opaque) > image,
+windowcontrols > button.close:not(.raised):not(.suggested-action):not(.destructive-action):not(.opaque) > image {
+  color: inherit; /* WhiteSur hides the symbolic icon with color: transparent */
+  -gtk-icon-transform: scale(1.2); /* Special change to increase button size */
+  min-height: calc(16px * 1.2); /* Special change to increase button size */
+  min-width: calc(16px * 1.2); /* Special change to increase button size */
+  padding: 0;
+  border-radius: 100%;
+  background-color: alpha(currentColor, 0.1);
+  transition: background 200ms cubic-bezier(0.25, 0.46, 0.45, 0.94);
+}
+
+windowcontrols > button.minimize:hover:not(.raised):not(.suggested-action):not(.destructive-action):not(.opaque),
+windowcontrols > button.maximize:hover:not(.raised):not(.suggested-action):not(.destructive-action):not(.opaque),
+windowcontrols > button.close:hover:not(.raised):not(.suggested-action):not(.destructive-action):not(.opaque),
+windowcontrols > button.minimize:active:not(.raised):not(.suggested-action):not(.destructive-action):not(.opaque),
+windowcontrols > button.maximize:active:not(.raised):not(.suggested-action):not(.destructive-action):not(.opaque),
+windowcontrols > button.close:active:not(.raised):not(.suggested-action):not(.destructive-action):not(.opaque) {
+  color: currentColor;
+}
+
+windowcontrols > button.minimize:hover:not(.raised):not(.suggested-action):not(.destructive-action):not(.opaque) > image,
+windowcontrols > button.maximize:hover:not(.raised):not(.suggested-action):not(.destructive-action):not(.opaque) > image,
+windowcontrols > button.close:hover:not(.raised):not(.suggested-action):not(.destructive-action):not(.opaque) > image {
+  background-color: alpha(currentColor, 0.15);
+}
+
+windowcontrols > button.minimize:active:not(.raised):not(.suggested-action):not(.destructive-action):not(.opaque) > image,
+windowcontrols > button.maximize:active:not(.raised):not(.suggested-action):not(.destructive-action):not(.opaque) > image,
+windowcontrols > button.close:active:not(.raised):not(.suggested-action):not(.destructive-action):not(.opaque) > image {
+  background-color: alpha(currentColor, 0.2);
+}
+
+windowcontrols > button.minimize:backdrop:not(.raised):not(.suggested-action):not(.destructive-action):not(.opaque),
+windowcontrols > button.maximize:backdrop:not(.raised):not(.suggested-action):not(.destructive-action):not(.opaque),
+windowcontrols > button.close:backdrop:not(.raised):not(.suggested-action):not(.destructive-action):not(.opaque) {
+  opacity: 0.65;
+}
+
+/* Override for Chromium.
+Chromium draws its own caption buttons from this style path, outside windowcontrols. */
+window.background.chromium headerbar.header-bar.titlebar button.titlebutton:not(.raised):not(.suggested-action):not(.destructive-action):not(.opaque) {
+  min-height: 22px;
+  min-width: 22px;
+  padding: 0;
+  border-radius: 100%;
+  color: alpha(currentColor, 0.75);
+  background-color: alpha(currentColor, 0.1);
+}
+
+window.background.chromium headerbar.header-bar.titlebar button.titlebutton:hover:not(.raised):not(.suggested-action):not(.destructive-action):not(.opaque) {
+  color: currentColor;
+  background-color: alpha(currentColor, 0.15);
+}
+
+window.background.chromium headerbar.header-bar.titlebar button.titlebutton:active:not(.raised):not(.suggested-action):not(.destructive-action):not(.opaque) {
+  color: currentColor;
+  background-color: alpha(currentColor, 0.2);
+}
+
+window.background.chromium headerbar.header-bar.titlebar button.titlebutton:backdrop:not(.raised):not(.suggested-action):not(.destructive-action):not(.opaque) {
+  opacity: 0.65;
+}

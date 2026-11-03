@@ -1,0 +1,20 @@
+# Overlays that `install.sh` applies by default. This is Termux's counterpart to upstream's
+# os/config.yaml. Opt-in overlays are named on the command line, for example:
+#   bash install.sh "Audio Effects"
+#   python src/apply-overlays.py "Desktop Environment+Phone Sync"
+#
+# Opt-in overlays: Audio Effects, Browser+Chromium, Desktop Environment+Phone Sync, Microphone, Music Player,
+# Text Editor+Code OSS
+overlays:
+- Desktop Environment
+- Desktop Environment+Shell
+- Desktop Environment+Tweaks
+- Desktop Environment+Theming
+- Desktop Environment+Thumbnailers
+- Terminal
+- File Manager
+- Text Editor
+- Video Player
+- System Monitor
+- Browser
+- Browser+Ad blocking

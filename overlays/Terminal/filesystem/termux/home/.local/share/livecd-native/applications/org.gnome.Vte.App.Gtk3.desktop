@@ -1,0 +1,5 @@
+[Desktop Entry]
+Type=Application
+Name=VTE Terminal for GTK3
+Exec=vte-2.91
+NoDisplay=true

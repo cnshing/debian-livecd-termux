@@ -1,0 +1,47 @@
+Disable unavailable Evolution integration explicitly at build time.
+
+--- a/meson.options
++++ b/meson.options
+@@ -63,3 +63,5 @@
+   value: true,
+   description: 'Enable polkit support'
+ )
++
++option('calendar_server', type: 'boolean', value: true, description: 'Build Evolution calendar integration')
+--- a/meson.build
++++ b/meson.build
+@@ -69,8 +69,8 @@
+ endif
+ 
+ atk_bridge_dep = dependency('atk-bridge-2.0')
+-ecal_dep = dependency('libecal-2.0', version: ecal_req)
+-eds_dep = dependency('libedataserver-1.2', version: eds_req)
++ecal_dep = dependency('libecal-2.0', version: ecal_req, required: get_option('calendar_server'))
++eds_dep = dependency('libedataserver-1.2', version: eds_req, required: get_option('calendar_server'))
+ gcr_dep = dependency('gcr-4', version: gcr_req)
+ gdk_pixbuf_dep = dependency('gdk-pixbuf-2.0')
+ gi_dep = dependency('gobject-introspection-1.0', version: gi_req)
+--- a/src/meson.build
++++ b/src/meson.build
+@@ -10,7 +10,9 @@
+   'fatal_warnings': get_option('werror'),
+ }
+ 
+-subdir('calendar-server')
++if get_option('calendar_server')
++  subdir('calendar-server')
++endif
+ subdir('hotplug-sniffer')
+ subdir('st')
+ if have_x11_client
+--- a/js/ui/sessionMode.js
++++ b/js/ui/sessionMode.js
+@@ -78,7 +78,7 @@
+ 
+     'user': {
+         hasOverview: true,
+-        showCalendarEvents: true,
++        showCalendarEvents: false,
+         showWelcomeDialog: true,
+         allowSettings: true,
+         allowScreencast: true,

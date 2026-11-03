@@ -1,0 +1,45 @@
+Probe the cleanup definition added by newer Pango instead of defining it twice.
+
+--- a/meson.build
++++ b/meson.build
+@@ -558,6 +558,11 @@
+ have_eventfd = cc.has_header('sys/eventfd.h')
+ 
+ cdata = configuration_data()
++if have_fonts
++  cdata.set('HAVE_PANGO_RENDERER_AUTOPTR', cc.compiles(
++    '#include <pango/pango.h>\nint main(void) { g_autoptr(PangoRenderer) renderer = NULL; return 0; }',
++    dependencies: pango_dep, name: 'PangoRenderer autoptr support'))
++endif
+ cdata.set_quoted('GETTEXT_PACKAGE', gettext_package)
+ cdata.set_quoted('VERSION', meson.project_version())
+ cdata.set_quoted('PACKAGE_NAME', meson.project_name())
+--- a/config.h.meson
++++ b/config.h.meson
+@@ -144,3 +144,6 @@
+ 
+ /* Building with font rendering integration support */
+ #mesondefine HAVE_FONTS
++
++/* Pango already provides the renderer cleanup definition */
++#mesondefine HAVE_PANGO_RENDERER_AUTOPTR
+--- a/clutter/clutter/pango/clutter-pango-private.h
++++ b/clutter/clutter/pango/clutter-pango-private.h
+@@ -35,6 +35,7 @@
+ 
+ #pragma once
+ 
++#include "config.h"
+ #include <pango/pango.h>
+ 
+ #include "clutter/clutter-color-state.h"
+@@ -79,7 +80,9 @@
+                           ClutterColorState *color_state,
+                           ClutterColorState *target_color_state);
+ 
++#ifndef HAVE_PANGO_RENDERER_AUTOPTR
+ G_DEFINE_AUTOPTR_CLEANUP_FUNC (PangoRenderer, g_object_unref)
++#endif
+ 
+ static inline PangoDirection
+ clutter_text_direction_to_pango_direction (ClutterTextDirection dir)

@@ -1,0 +1,230 @@
+# Compiles packages/ with termux-packages' builder and publishes them as an apt repository
+# tarball, which install.sh fetches.
+#
+#   One or several packages:  Actions > Packages > Run workflow, packages: "nautilus easyeffects"
+#                             or: gh workflow run packages.yml -f packages="nautilus easyeffects"
+#   Every package:            leave packages empty.
+#   Publish a release:        push a tag such as v1, or set release: v1 with packages left empty.
+#   Pushes and pull requests build only the packages they change, and publish nothing.
+#
+# Each dependent set of recipes gets its own job, so unrelated packages build concurrently. A job
+# always includes the recipes from this repository that its target depends on, for example
+# nautilus brings gnome-autoar. See tools/recipes.py.
+name: Packages
+
+on:
+  workflow_dispatch:
+    inputs:
+      packages:
+        description: Space-separated package names. Empty builds every package.
+        required: false
+        default: ""
+      release:
+        description: Release tag to publish. Needs a full build, so leave packages empty.
+        required: false
+        default: ""
+  push:
+    tags: ["v*"]
+    branches: [main]
+    paths: ["packages/**", "src/**", "tools/recipes.py", "tools/termux-build.json", ".github/workflows/packages.yml"]
+  pull_request:
+    paths: ["packages/**", "src/**", "tools/recipes.py", "tools/termux-build.json", ".github/workflows/packages.yml"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: packages-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  # The builder revision and matching NDK image are pinned in tools/termux-build.json.
+  REPO_TARBALL: livecd-termux-repo-aarch64.tar.gz
+
+jobs:
+  plan:
+    runs-on: ubuntu-26.04
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+      count: ${{ steps.plan.outputs.count }}
+      release: ${{ steps.plan.outputs.release }}
+      revision: ${{ steps.config.outputs.revision }}
+      image: ${{ steps.config.outputs.image }}
+    steps:
+    - uses: actions/checkout@v7
+      with:
+        fetch-depth: 0
+    - name: Test the AutoEq converter
+      run: python3 tests/audio/test-autoeq.py
+    - name: Test Bluetooth microphone session cleanup
+      run: python3 tests/mic/test-bluetooth.py
+    - name: Test packaging and profile integration
+      run: python3 tests/packaging/test-packaging.py
+    - name: Read the shared builder pin
+      id: config
+      run: python3 tools/recipes.py config >> "$GITHUB_OUTPUT"
+    - name: Choose what to build
+      id: plan
+      env:
+        INPUT_PACKAGES: ${{ inputs.packages }}
+        INPUT_RELEASE: ${{ inputs.release }}
+        PUSH_BEFORE: ${{ github.event.before }}
+        PR_BASE: ${{ github.event.pull_request.base.sha }}
+      run: |
+        set -f  # Package names are split into words below, and must not expand as globs.
+        release=
+        case "$GITHUB_EVENT_NAME" in
+          workflow_dispatch)
+            release=$INPUT_RELEASE
+            if test -z "$INPUT_PACKAGES"; then
+              matrix=$(python3 tools/recipes.py plan --all)
+            elif test -n "$release"; then
+              # install.sh takes the latest release as complete, so a partial one would break it.
+              echo "::error::A release needs every package: leave packages empty."
+              exit 1
+            else
+              matrix=$(python3 tools/recipes.py plan $INPUT_PACKAGES)
+            fi;;
+          pull_request)
+            matrix=$(python3 tools/recipes.py plan $(python3 tools/recipes.py changed "$PR_BASE"));;
+          *)
+            if test "$GITHUB_REF_TYPE" = tag; then
+              release=$GITHUB_REF_NAME
+              matrix=$(python3 tools/recipes.py plan --all)
+            else
+              matrix=$(python3 tools/recipes.py plan $(python3 tools/recipes.py changed "$PUSH_BEFORE"))
+            fi;;
+        esac
+        count=$(printf '%s' "$matrix" | python3 -c 'import json,sys; print(len(json.load(sys.stdin)["include"]))')
+        printf 'matrix=%s\ncount=%s\nrelease=%s\n' "$matrix" "$count" "$release" >> "$GITHUB_OUTPUT"
+        printf 'Building %s job(s): %s\n' "$count" "$matrix"
+
+  build:
+    name: ${{ matrix.name }}
+    needs: plan
+    if: needs.plan.outputs.count != '0'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 350
+    env:
+      TERMUX_PACKAGES_COMMIT: ${{ needs.plan.outputs.revision }}
+      TERMUX_BUILDER_IMAGE_NAME: ${{ needs.plan.outputs.image }}
+    strategy:
+      fail-fast: false
+      max-parallel: 20
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    steps:
+    - uses: actions/checkout@v7
+    - name: Check that the patches still apply
+      env:
+        PACKAGES: ${{ matrix.packages }}
+      run: python3 tools/recipes.py check-patches $PACKAGES
+    - uses: actions/checkout@v7
+      with:
+        repository: termux/termux-packages
+        ref: ${{ env.TERMUX_PACKAGES_COMMIT }}
+        path: termux-packages
+    - name: Add this repository's recipes
+      run: python3 tools/recipes.py prepare termux-packages
+    - name: Keep the builder's work directory on the runner, where it can be cached
+      run: |
+        mkdir -p ~/.termux-build
+        echo "TERMUX_DOCKER_RUN_EXTRA_ARGS=--volume $HOME/.termux-build:/home/builder/.termux-build" >> "$GITHUB_ENV"
+
+    # Builder dependencies. The toolchain and host tools are the same for every job, so they share
+    # one entry. Downloaded .debs and sources differ, so each job has its own and may start from
+    # any other job's. The container image is not cached: at 2.5 GB compressed it would take a
+    # quarter of the repository's 10 GB allowance, and every job must still decompress and load it.
+    - name: Restore the toolchain and host tools
+      id: tools
+      uses: actions/cache/restore@v6
+      with:
+        path: ~/.termux-build/_cache
+        key: termux-tools-${{ env.TERMUX_PACKAGES_COMMIT }}
+    - name: Restore dependency packages and sources
+      id: deps
+      uses: actions/cache/restore@v6
+      with:
+        path: |
+          ~/.termux-build/_cache-aarch64
+          ~/.termux-build/*/cache
+        key: termux-deps-${{ env.TERMUX_PACKAGES_COMMIT }}-${{ matrix.name }}-${{ matrix.hash }}
+        restore-keys: |
+          termux-deps-${{ env.TERMUX_PACKAGES_COMMIT }}-${{ matrix.name }}-
+          termux-deps-${{ env.TERMUX_PACKAGES_COMMIT }}-
+
+    - name: Start the builder container
+      working-directory: termux-packages
+      run: ./scripts/run-docker.sh true
+    - name: Free disk space
+      if: matrix.large
+      working-directory: termux-packages
+      run: ./scripts/free-space.sh
+    - name: Build
+      working-directory: termux-packages
+      env:
+        PACKAGES: ${{ matrix.packages }}
+      run: ./scripts/run-docker.sh ./build-package.sh -I -C -a aarch64 $PACKAGES
+
+    # Saved even when the build fails, so that fixing a patch does not download everything again.
+    - name: Make the caches readable
+      if: ${{ !cancelled() }}
+      run: sudo chown -R "$(id -u):$(id -g)" ~/.termux-build
+    - name: Save the toolchain and host tools
+      if: ${{ !cancelled() && steps.tools.outputs.cache-hit != 'true' }}
+      uses: actions/cache/save@v6
+      with:
+        path: ~/.termux-build/_cache
+        key: ${{ steps.tools.outputs.cache-primary-key }}
+    - name: Save dependency packages and sources
+      if: ${{ !cancelled() && steps.deps.outputs.cache-hit != 'true' }}
+      uses: actions/cache/save@v6
+      with:
+        path: |
+          ~/.termux-build/_cache-aarch64
+          ~/.termux-build/*/cache
+        key: ${{ steps.deps.outputs.cache-primary-key }}
+
+    - uses: actions/upload-artifact@v7
+      with:
+        name: debs-${{ matrix.name }}
+        path: termux-packages/output/*.deb
+        if-no-files-found: error
+        # Only the assemble job needs these.
+        retention-days: 1
+
+  assemble:
+    # Skipped unless every build job succeeded, so a release is never missing a package.
+    needs: [plan, build]
+    if: needs.plan.outputs.count != '0'
+    runs-on: ubuntu-26.04
+    permissions:
+      contents: write
+    steps:
+    - uses: actions/checkout@v7
+    - uses: actions/download-artifact@v8
+      with:
+        pattern: debs-*
+        path: debs
+        merge-multiple: true
+    - name: Build the apt repository tarball
+      run: |
+        command -v apt-ftparchive >/dev/null || { sudo apt-get update; sudo apt-get install --yes apt-utils; }
+        tools/make-apt-repo.sh debs repo
+        tar -czf "$REPO_TARBALL" repo
+        sha256sum "$REPO_TARBALL" > "$REPO_TARBALL.sha256"
+    - uses: actions/upload-artifact@v7
+      with:
+        name: livecd-termux-repo-aarch64
+        path: |
+          ${{ env.REPO_TARBALL }}
+          ${{ env.REPO_TARBALL }}.sha256
+        retention-days: 30
+    - name: Publish the release
+      if: needs.plan.outputs.release != ''
+      env:
+        GH_TOKEN: ${{ github.token }}
+        TAG: ${{ needs.plan.outputs.release }}
+      run: |
+        gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 ||
+          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --generate-notes
+        gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" --clobber "$REPO_TARBALL" "$REPO_TARBALL.sha256"

@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=GSConnect
+Exec=livecd-gsconnect ui
+Icon=org.gnome.Shell.Extensions.GSConnect
+Terminal=false
+Categories=Network;

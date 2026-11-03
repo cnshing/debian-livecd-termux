@@ -1,0 +1,110 @@
+diff --git a/Cargo.lock b/Cargo.lock
+index c9770a7..bc50898 100644
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -4323,8 +4323,6 @@ dependencies = [
+ [[package]]
+ name = "rustls-platform-verifier"
+ version = "0.7.0"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "26d1e2536ce4f35f4846aa13bff16bd0ff40157cdb14cc056c7b14ba41233ba0"
+ dependencies = [
+  "core-foundation 0.10.1",
+  "core-foundation-sys",
+diff --git a/Cargo.toml b/Cargo.toml
+index 846f97a..c04a756 100644
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -65,12 +65,14 @@ image = { version = "0.25.9", default-features = false, features = ["jpeg", "png
+ # Embedded sign-in page, like ui/login_webview.py. WebKitGTK 6.0 (GNOME 48 runtime ships 2.48).
+ # Windows has no WebKitGTK; its sign-in window is WebView2.
+ webkit6 = { version = "0.6", features = ["v2_44"] }
+-# BotGuard in an embedded V8, for the PO tokens uploaded songs need. V8 has no
+-# prebuilt library for windows-gnu, so Windows runs the bundled program instead.
+-rustypipe-botguard = "0.1.2"
+ # mallopt, setrlimit and pathconf. See bootstrap.rs and downloads/naming.rs.
+ libc = "0.2"
+ 
++[target.'cfg(not(any(windows, target_os = "android")))'.dependencies]
++# BotGuard in an embedded V8, for the PO tokens uploaded songs need. V8 has no
++# prebuilt library for windows-gnu or Android, so those run the bundled program instead.
++rustypipe-botguard = "0.1.2"
++
+ [target.'cfg(windows)'.dependencies]
+ # The sign-in page in WebView2 (ui/login.rs), where Linux uses WebKitGTK.
+ wry = { version = "0.57", default-features = false, features = ["os-webview"] }
+@@ -93,7 +95,7 @@ windows = { version = "0.62", features = [
+ # SQLite is not a system library on Windows. The Linux builds link the system one.
+ rusqlite = { version = "0.40", features = ["bundled"] }
+ 
+-[target.'cfg(target_os = "linux")'.dependencies]
++[target.'cfg(any(target_os = "linux", target_os = "android"))'.dependencies]
+ # MPRIS D-Bus interface. Wired in when player/mpris.py is ported.
+ mpris-server = { version = "0.10", features = ["tokio"] }
+ 
+@@ -120,3 +122,7 @@ strip = "debuginfo"
+ 
+ [dev-dependencies]
+ tempfile = "3.27.0"
++
++[patch.crates-io]
++# Its Android verifier needs a JVM. Termux is a Unix userland with a CA bundle.
++rustls-platform-verifier = { path = "vendor/rustls-platform-verifier" }
+diff --git a/src/main.rs b/src/main.rs
+index 8c4f4ae..729a66e 100644
+--- a/src/main.rs
++++ b/src/main.rs
+@@ -18,7 +18,7 @@ mod local_library;
+ mod lyrics;
+ mod model;
+ // MPRIS on Linux. Elsewhere the same two calls land in smtc.rs.
+-#[cfg_attr(not(target_os = "linux"), path = "smtc.rs")]
++#[cfg_attr(not(any(target_os = "linux", target_os = "android")), path = "smtc.rs")]
+ mod mpris;
+ mod net;
+ mod paths;
+diff --git a/src/net/mod.rs b/src/net/mod.rs
+index 634f2b0..34757db 100644
+--- a/src/net/mod.rs
++++ b/src/net/mod.rs
+@@ -20,10 +20,10 @@ pub mod offline;
+ pub mod online;
+ pub mod player_endpoint;
+ pub mod playlists;
+-#[cfg(not(windows))]
++#[cfg(not(any(windows, target_os = "android")))]
+ pub mod potoken;
+-// Windows has no prebuilt V8 for its GNU target. The bundled program mints tokens there.
+-#[cfg(windows)]
++// Windows and Android have no prebuilt V8. The bundled program mints tokens there.
++#[cfg(any(windows, target_os = "android"))]
+ #[path = "potoken_cli.rs"]
+ pub mod potoken;
+ pub mod search;
+diff --git a/src/net/offline.rs b/src/net/offline.rs
+index daef50f..ed37928 100644
+--- a/src/net/offline.rs
++++ b/src/net/offline.rs
+@@ -58,7 +58,8 @@ impl Resolve for Gate {
+ 
+ /// A client builder behind the gate. Every client the app keeps starts here.
+ pub fn client_builder() -> reqwest::ClientBuilder {
+-    reqwest::Client::builder().dns_resolver(Arc::new(Gate))
++    // YouTube's landing page sends 17 KB of headers, and HTTP/2's default limit here is 16 KB.
++    reqwest::Client::builder().dns_resolver(Arc::new(Gate)).http2_max_header_list_size(64 * 1024)
+ }
+ 
+ #[cfg(test)]
+diff --git a/src/net/stream.rs b/src/net/stream.rs
+index f5deeef..bb1122b 100644
+--- a/src/net/stream.rs
++++ b/src/net/stream.rs
+@@ -296,7 +296,7 @@ pub fn find_executable(name: &str) -> Option<PathBuf> {
+     if let Some(home) = std::env::var_os("HOME") {
+         candidates.push(PathBuf::from(home).join(".cargo/bin").join(name));
+     }
+-    candidates.push(PathBuf::from("/usr/lib/mixtapes/bin").join(name));
++    candidates.push(PathBuf::from("@TERMUX_PREFIX@/lib/mixtapes/bin").join(name));
+     candidates.push(PathBuf::from("/usr/local/bin").join(name));
+     candidates.push(PathBuf::from("/usr/bin").join(name));
+     candidates.into_iter().find(|p| p.is_file())

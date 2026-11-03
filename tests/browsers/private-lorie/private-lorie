@@ -1,0 +1,25 @@
+#!/data/data/com.termux/files/usr/bin/bash
+# Start Termux:X11's X server on a private display, invisible to the Android app.
+# Usage: private-lorie :N [X server arguments]. See README.md.
+set -euo pipefail
+display=${1:?Usage: private-lorie :N [X server arguments]}
+shift
+here=$(dirname "$(readlink -f "$0")")
+apk=$(/system/bin/pm path com.termux.x11 </dev/null | sed -n 's/^package://p' | head -1)
+[[ -f $apk ]] || { echo 'Termux:X11 is not installed' >&2; exit 1; }
+cache=${LIVECD_LORIE_CACHE:-$HOME/.cache/livecd-private-lorie}
+# Extracted once per installed APK: System.load needs a plain file, and this keeps the
+# server's code the same as the running app's after an update.
+stamp=$(sha256sum "$apk" | cut -d' ' -f1)
+if [[ ! -f $cache/$stamp/libXlorie.so ]]; then
+    mkdir -p "$cache/$stamp"
+    unzip -q -o -j "$apk" lib/arm64-v8a/libXlorie.so -d "$cache/$stamp"
+fi
+unset LD_LIBRARY_PATH LD_PRELOAD
+export TMPDIR=${TMPDIR:-/data/data/com.termux/files/usr/tmp}
+export XKB_CONFIG_ROOT=${XKB_CONFIG_ROOT:-/data/data/com.termux/files/usr/share/X11/xkb}
+export LIVECD_LORIE_LIBRARY=$cache/$stamp/libXlorie.so
+export CLASSPATH=$here/private-lorie.dex:$apk
+# A tag moves the server's knock port away from the one the app uses for :0.
+exec /system/bin/app_process -Xnoimage-dex2oat / --nice-name="livecd-private-lorie $display" \
+    com.termux.x11.CmdEntryPoint "$display" -tag "livecd-private-${display#:}" "$@"

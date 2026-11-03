@@ -1,0 +1,5 @@
+[Desktop Entry]
+Type=Application
+Name=VTE Terminal for GTK4
+Exec=vte-2.91-gtk4
+NoDisplay=true

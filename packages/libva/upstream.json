@@ -1,0 +1,8 @@
+{
+  "revision": "538685c906074926fd19650e38c6dad91379eb0f",
+  "path": "x11-packages/libva/build.sh",
+  "sha256": "27a045a342dbd6ae32f895e2beb1013e884b177bc9c658a75787f9395e2532fe",
+  "remove_files": {
+    "va-va_internal.h.patch": "73216e53796334cc2fdfd34b5f33d5ac8b1a0592c5b3b65b0cbbb53df1a8ff26"
+  }
+}

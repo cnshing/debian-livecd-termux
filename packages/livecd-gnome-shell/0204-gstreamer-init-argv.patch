@@ -1,0 +1,16 @@
+Pass an empty argv array to current GStreamer introspection bindings.
+A null array raises a JS type error before screencast capability detection.
+Unpack the boolean result from the returned tuple.
+
+--- a/js/dbusServices/screencast/screencastService.js
++++ b/js/dbusServices/screencast/screencastService.js
+@@ -513,7 +513,8 @@
+ 
+ export const ScreencastService = class extends ServiceImplementation {
+     static canScreencast() {
+-        if (!Gst.init_check(null))
++        const [initialized] = Gst.init_check([]);
++        if (!initialized)
+             return false;
+ 
+         let elements = [

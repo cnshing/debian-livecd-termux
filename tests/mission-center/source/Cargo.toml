@@ -1,0 +1,11 @@
+[package]
+name = "missioncenter-source-test"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+libc = "=0.2.187"
+
+[[bin]]
+name = "source-probe"
+path = "main.rs"

@@ -1,0 +1,16 @@
+--- a/pipewire-v4l2/src/pipewire-v4l2.c
++++ b/pipewire-v4l2/src/pipewire-v4l2.c
+@@ -672,6 +672,13 @@
+ 		    !spa_atou32(str, &serial, 10))
+ 			return;
+ 
++		/* A node can claim a device number with object.path=v4l2:/dev/videoN,
++		 * the form PipeWire's own V4L2 nodes use. */
++		if ((str = spa_dict_lookup(props, PW_KEY_OBJECT_PATH)) != NULL &&
++		    spa_strstartswith(str, "v4l2:/dev/video") &&
++		    spa_atou32(str + 15, &dev, 10) && dev != file->dev_id)
++			return;
++
+ 		if ((str = getenv("PIPEWIRE_V4L2_TARGET")) != NULL
+ 				&& spa_atou32(str, &req_serial, 10)
+ 				&& req_serial != serial)

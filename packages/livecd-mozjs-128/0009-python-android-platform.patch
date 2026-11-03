@@ -1,0 +1,20 @@
+Python 3.14 identifies Android separately from Linux. The standalone Unix build
+still uses Mozilla's linux platform category, with Android's reported version.
+
+--- a/testing/mozbase/mozinfo/mozinfo/mozinfo.py
++++ b/testing/mozbase/mozinfo/mozinfo/mozinfo.py
+@@ -54,7 +54,13 @@
+ (bits, linkage) = platform.architecture()
+ 
+ # get os information and related data
+-if system in ["Microsoft", "Windows"]:
++if system == "Android":
++    info["os"] = "linux"
++    info["linux_distro"] = "Android"
++    os_version = release or "0"
++    version = "Android %s" % os_version
++    processor = machine
++elif system in ["Microsoft", "Windows"]:
+     info["os"] = "win"
+     # There is a Python bug on Windows to determine platform values
+     # http://bugs.python.org/issue7860

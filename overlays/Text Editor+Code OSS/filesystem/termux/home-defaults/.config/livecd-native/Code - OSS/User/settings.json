@@ -1,0 +1,4 @@
+{
+    "chat.disableAIFeatures": true,
+    "github-authentication.preferDeviceCodeFlow": true
+}

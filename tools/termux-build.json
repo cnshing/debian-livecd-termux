@@ -1,0 +1,6 @@
+{
+  "repository": "https://github.com/termux/termux-packages.git",
+  "revision": "538685c906074926fd19650e38c6dad91379eb0f",
+  "image": "ghcr.io/termux/package-builder@sha256:e2de051a518d8b188c59c4a1ecf357d373b9ccf48d6c06d7681fdc3f61a77287",
+  "architecture": "aarch64"
+}

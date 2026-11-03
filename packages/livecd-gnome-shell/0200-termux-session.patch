@@ -1,0 +1,585 @@
+Termux session integration. Adapted from the readable JS resources shipped by
+Gass-OS/GNOME-Termux at 42a890c7603609d1c6a7e6edf9cd05c084923d8f.
+Rebased on 48.8; authorization fails closed and unsupported authentication,
+rotation and system package/power integration are disabled. Android owns these.
+
+--- a/js/js-resources.gresource.xml
++++ b/js/js-resources.gresource.xml
+@@ -21,6 +21,9 @@
+     <file>misc/dbusErrors.js</file>
+     <file>misc/dbusUtils.js</file>
+     <file>misc/dependencies.js</file>
++    <file>misc/termux/accountsService.js</file>
++    <file>misc/termux/gdm.js</file>
++    <file>misc/termux/polkit.js</file>
+     <file>misc/errorUtils.js</file>
+     <file>misc/extensionUtils.js</file>
+     <file>misc/fileUtils.js</file>
+--- a/js/ui/sessionMode.js
++++ b/js/ui/sessionMode.js
+@@ -11,7 +11,7 @@
+ const DEFAULT_MODE = 'restrictive';
+ 
+ const USER_SESSION_COMPONENTS = [
+-    'polkitAgent', 'keyring',
++    'keyring',
+     'autorunManager', 'automountManager',
+ ];
+ 
+@@ -54,8 +54,8 @@
+         isPrimary: true,
+         unlockDialog: LoginDialog,
+         components: Config.HAVE_NETWORKMANAGER
+-            ? ['networkAgent', 'polkitAgent']
+-            : ['polkitAgent'],
++            ? ['networkAgent']
++            : [],
+         panel: {
+             left: [],
+             center: ['dateMenu'],
+@@ -67,7 +67,7 @@
+     'unlock-dialog': {
+         isLocked: true,
+         unlockDialog: undefined,
+-        components: ['polkitAgent'],
++        components: [],
+         panel: {
+             left: [],
+             center: [],
+@@ -89,7 +89,7 @@
+         hasNotifications: true,
+         isLocked: false,
+         isPrimary: true,
+-        unlockDialog: UnlockDialog,
++        unlockDialog: null,
+         components: USER_SESSION_COMPONENTS,
+         panel: {
+             left: ['activities'],
+--- a/js/ui/endSessionDialog.js
++++ b/js/ui/endSessionDialog.js
+@@ -15,13 +15,13 @@
+  * along with this program; if not, see <http://www.gnu.org/licenses/>.
+  */
+ 
+-import AccountsService from 'gi://AccountsService';
++import * as AccountsService from '../misc/termux/accountsService.js';
+ import Clutter from 'gi://Clutter';
+ import Gio from 'gi://Gio';
+ import GLib from 'gi://GLib';
+ import GObject from 'gi://GObject';
+ import Pango from 'gi://Pango';
+-import Polkit from 'gi://Polkit';
++import * as Polkit from '../misc/termux/polkit.js';
+ import Shell from 'gi://Shell';
+ import St from 'gi://St';
+ import UPower from 'gi://UPowerGlib';
+@@ -240,23 +240,11 @@
+         this._user = this._userManager.get_user(GLib.get_user_name());
+         this._updatesPermission = null;
+ 
+-        this._pkOfflineProxy = new PkOfflineProxy(Gio.DBus.system,
+-            'org.freedesktop.PackageKit',
+-            '/org/freedesktop/PackageKit',
+-            this._onPkOfflineProxyCreated.bind(this));
+-
+-        this._powerProxy = new UPowerProxy(Gio.DBus.system,
+-            'org.freedesktop.UPower',
+-            '/org/freedesktop/UPower/devices/DisplayDevice',
+-            (proxy, error) => {
+-                if (error) {
+-                    log(error.message);
+-                    return;
+-                }
+-                this._powerProxy.connect('g-properties-changed',
+-                    this._sync.bind(this));
+-                this._sync();
+-            });
++        // Termux does not provide PackageKit, UPower, or system D-Bus.
++        // Keep the end-session dialog functional without those services.
++        this._pkOfflineProxy = null;
++        this._updatesPermission = null;
++        this._powerProxy = null;
+ 
+         this._secondsLeft = 0;
+         this._totalSecondsToStayOpen = 0;
+@@ -331,9 +319,8 @@
+     }
+ 
+     _isDischargingBattery() {
+-        return this._powerProxy.IsPresent &&
+-            this._powerProxy.State !== UPower.DeviceState.CHARGING &&
+-            this._powerProxy.State !== UPower.DeviceState.FULLY_CHARGED;
++        // No UPower service in Termux.
++        return false;
+     }
+ 
+     _isBatteryLow() {
+--- a/js/ui/unlockDialog.js
++++ b/js/ui/unlockDialog.js
+@@ -1,7 +1,7 @@
+-import AccountsService from 'gi://AccountsService';
++import * as AccountsService from '../misc/termux/accountsService.js';
+ import Atk from 'gi://Atk';
+ import Clutter from 'gi://Clutter';
+-import Gdm from 'gi://Gdm';
++import * as Gdm from '../misc/termux/gdm.js';
+ import Gio from 'gi://Gio';
+ import GnomeDesktop from 'gi://GnomeDesktop';
+ import GLib from 'gi://GLib';
+--- a/js/ui/screenShield.js
++++ b/js/ui/screenShield.js
+@@ -1,4 +1,4 @@
+-import AccountsService from 'gi://AccountsService';
++import * as AccountsService from '../misc/termux/accountsService.js';
+ import Clutter from 'gi://Clutter';
+ import Gio from 'gi://Gio';
+ import GLib from 'gi://GLib';
+--- a/js/ui/environment.js
++++ b/js/ui/environment.js
+@@ -12,7 +12,7 @@
+ import GObject from 'gi://GObject';
+ import Meta from 'gi://Meta';
+ import Mtk from 'gi://Mtk';
+-import Polkit from 'gi://Polkit';
++import * as Polkit from '../misc/termux/polkit.js';
+ import Shell from 'gi://Shell';
+ import St from 'gi://St';
+ 
+@@ -31,7 +31,6 @@
+ Gio._promisify(Gio.DBusProxy.prototype, 'init_async');
+ Gio._promisify(Gio.DBusProxy.prototype, 'call_with_unix_fd_list');
+ Gio._promisify(Gio.File.prototype, 'query_info_async');
+-Gio._promisify(Polkit.Permission, 'new');
+ Gio._promisify(Shell.App.prototype, 'activate_action');
+ 
+ // We can't import shell JS modules yet, because they may have
+--- a/js/gdm/loginDialog.js
++++ b/js/gdm/loginDialog.js
+@@ -15,10 +15,10 @@
+  * along with this program; if not, see <http://www.gnu.org/licenses/>.
+  */
+ 
+-import AccountsService from 'gi://AccountsService';
++import * as AccountsService from '../misc/termux/accountsService.js';
+ import Atk from 'gi://Atk';
+ import Clutter from 'gi://Clutter';
+-import Gdm from 'gi://Gdm';
++import * as Gdm from '../misc/termux/gdm.js';
+ import Gio from 'gi://Gio';
+ import GLib from 'gi://GLib';
+ import GObject from 'gi://GObject';
+--- a/js/gdm/util.js
++++ b/js/gdm/util.js
+@@ -1,5 +1,5 @@
+ import Clutter from 'gi://Clutter';
+-import Gdm from 'gi://Gdm';
++import * as Gdm from '../misc/termux/gdm.js';
+ import Gio from 'gi://Gio';
+ import GLib from 'gi://GLib';
+ import * as Signals from '../misc/signals.js';
+--- a/js/misc/dependencies.js
++++ b/js/misc/dependencies.js
+@@ -4,12 +4,10 @@
+  * Required dependencies
+  */
+ 
+-import 'gi://AccountsService?version=1.0';
+ import 'gi://Atk?version=1.0';
+ import 'gi://Atspi?version=2.0';
+ import 'gi://Gcr?version=4';
+ import 'gi://Gdk?version=4.0';
+-import 'gi://Gdm?version=1.0';
+ import 'gi://Geoclue?version=2.0';
+ import 'gi://Gio?version=2.0';
+ import 'gi://GioUnix?version=2.0';
+@@ -21,8 +19,6 @@
+ import 'gi://GWeather?version=4.0';
+ import 'gi://IBus?version=1.0';
+ import 'gi://Pango?version=1.0';
+-import 'gi://Polkit?version=1.0';
+-import 'gi://PolkitAgent?version=1.0';
+ import 'gi://Rsvg?version=2.0';
+ import 'gi://Soup?version=3.0';
+ import 'gi://UPowerGlib?version=1.0';
+--- a/js/misc/systemActions.js
++++ b/js/misc/systemActions.js
+@@ -1,6 +1,6 @@
+-import AccountsService from 'gi://AccountsService';
++import * as AccountsService from './termux/accountsService.js';
+ import Clutter from 'gi://Clutter';
+-import Gdm from 'gi://Gdm';
++import * as Gdm from '../misc/termux/gdm.js';
+ import Gio from 'gi://Gio';
+ import GLib from 'gi://GLib';
+ import GObject from 'gi://GObject';
+@@ -151,9 +151,9 @@
+             available: true,
+         });
+ 
+-        this._loginScreenSettings = new Gio.Settings({schema_id: LOGIN_SCREEN_SCHEMA});
++        this._loginScreenSettings = null;
+         this._lockdownSettings = new Gio.Settings({schema_id: LOCKDOWN_SCHEMA});
+-        this._orientationSettings = new Gio.Settings({schema_id: 'org.gnome.settings-daemon.peripherals.touchscreen'});
++        this._orientationSettings = null;
+ 
+         this._session = new GnomeSession.SessionManager();
+         this._loginManager = LoginManager.getLoginManager();
+@@ -189,10 +189,7 @@
+ 
+         this.forceUpdate();
+ 
+-        this._orientationSettings.connect('changed::orientation-lock', () => {
+-            this._updateOrientationLock();
+-            this._updateOrientationLockStatus();
+-        });
++
+         Main.layoutManager.connect('monitors-changed',
+             () => this._updateOrientationLock());
+         this._monitorManager.connect('notify::panel-orientation-managed',
+@@ -237,29 +234,18 @@
+     }
+ 
+     _updateOrientationLock() {
+-        const available = this._monitorManager.get_panel_orientation_managed();
+-
+-        this._actions.get(LOCK_ORIENTATION_ACTION_ID).available = available;
+-
++        this._actions.get(LOCK_ORIENTATION_ACTION_ID).available = false;
+         this.notify('can-lock-orientation');
+     }
+ 
+     _updateOrientationLockStatus() {
+-        let locked = this._orientationSettings.get_boolean('orientation-lock');
+         let action = this._actions.get(LOCK_ORIENTATION_ACTION_ID);
+ 
+-        // Translators: The name of the lock orientation action in search
+-        // and in the system status menu
+-        let name = locked
+-            ? C_('search-result', 'Unlock Screen Rotation')
+-            : C_('search-result', 'Lock Screen Rotation');
+-        let iconName = locked
+-            ? 'rotation-locked-symbolic'
+-            : 'rotation-allowed-symbolic';
+-
+-        action.name = name;
+-        action.iconName = iconName;
+-
++        action.available = false;
++        action.name = C_('search-result', 'Lock Screen Rotation');
++        action.iconName = 'rotation-allowed-symbolic';
++
++        this.notify('can-lock-orientation');
+         this.notify('orientation-lock-icon');
+     }
+ 
+@@ -354,7 +340,7 @@
+     _updatePowerOff() {
+         let disabled = Main.sessionMode.isLocked ||
+                        (Main.sessionMode.isGreeter &&
+-                        this._loginScreenSettings.get_boolean(DISABLE_RESTART_KEY));
++                        false);
+         this._actions.get(POWER_OFF_ACTION_ID).available = this._canHavePowerOff && !disabled;
+         this.notify('can-power-off');
+ 
+@@ -373,7 +359,7 @@
+         let disabled = (Main.sessionMode.isLocked &&
+                         this._suspendNeedsAuth) ||
+                        (Main.sessionMode.isGreeter &&
+-                        this._loginScreenSettings.get_boolean(DISABLE_RESTART_KEY));
++                        false);
+         this._actions.get(SUSPEND_ACTION_ID).available = this._canHaveSuspend && !disabled;
+         this.notify('can-suspend');
+     }
+@@ -414,8 +400,7 @@
+         if (!this._actions.get(LOCK_ORIENTATION_ACTION_ID).available)
+             throw new Error('The lock-orientation action is not available!');
+ 
+-        let locked = this._orientationSettings.get_boolean('orientation-lock');
+-        this._orientationSettings.set_boolean('orientation-lock', !locked);
++        return;
+     }
+ 
+     activateLockScreen() {
+--- /dev/null
++++ b/js/misc/termux/gdm.js
+@@ -0,0 +1,15 @@
++// SPDX-License-Identifier: GPL-2.0-or-later
++// Android owns authentication; this X11 desktop cannot act as a login manager.
++export const UserVerifierChoiceList = {
++    interface_info() {
++        return {name: 'org.gnome.DisplayManager.UserVerifierChoiceList'};
++    },
++};
++export class Client {
++    constructor() {
++        throw new Error('GDM authentication is unavailable in Termux');
++    }
++}
++export function get_session_ids() { return []; }
++export function get_session_name_and_description() { return ['', '']; }
++export function goto_login_session_sync() { return false; }
+--- /dev/null
++++ b/js/misc/termux/polkit.js
+@@ -0,0 +1,69 @@
++/*
++ * GNOME Shell Polkit compatibility layer for Termux.
++ *
++ * Termux does not provide the normal Polkit/PolkitAgent stack.
++ * GNOME Shell therefore gets local objects that never grant authorization.
++ */
++
++export class Permission {
++    constructor() {
++        this.allowed = false;
++        this.canAcquire = false;
++        this.challenge = false;
++    }
++
++    static new(_actionId, _subject = null, _cancellable = null, callback = null) {
++        if (callback)
++            callback(null, {});
++        return Promise.resolve(new Permission());
++    }
++
++    static new_finish(_result) {
++        return new Permission();
++    }
++
++    static new_sync(_actionId, _subject = null, _cancellable = null) {
++        return new Permission();
++    }
++
++    get_allowed() {
++        return false;
++    }
++
++    get_can_acquire() {
++        return false;
++    }
++
++    get_can_acquire_via_agent() {
++        return false;
++    }
++
++    get_is_challenge() {
++        return false;
++    }
++}
++
++export class UnixUser {
++    constructor(name) {
++        this.name = name;
++    }
++
++    static new_for_name(name) {
++        return new UnixUser(name);
++    }
++}
++
++export class Subject {
++    constructor() {
++    }
++
++    static new_for_process_sync() {
++        return new Subject();
++    }
++}
++
++export default {
++    Permission,
++    UnixUser,
++    Subject,
++};
+--- /dev/null
++++ b/js/misc/termux/accountsService.js
+@@ -0,0 +1,152 @@
++import GLib from 'gi://GLib';
++import GObject from 'gi://GObject';
++
++export const UserPasswordMode = {
++    NONE: 0,
++    REGULAR: 1,
++    ADMINISTRATOR: 2,
++};
++
++const TermuxUser = GObject.registerClass({
++    Signals: {
++        'changed': {},
++    },
++
++    Properties: {
++        'is-loaded': GObject.ParamSpec.boolean(
++            'is-loaded',
++            'Is Loaded',
++            'Whether user information is loaded',
++            GObject.ParamFlags.READABLE,
++            true
++        ),
++
++        'locked': GObject.ParamSpec.boolean(
++            'locked',
++            'Locked',
++            'Whether the user is locked',
++            GObject.ParamFlags.READABLE,
++            false
++        ),
++
++        'password-mode': GObject.ParamSpec.int(
++            'password-mode',
++            'Password Mode',
++            'Password mode',
++            GObject.ParamFlags.READABLE,
++            0,
++            2,
++            0
++        ),
++    },
++}, class TermuxUser extends GObject.Object {
++    _init(userName = GLib.get_user_name()) {
++        super._init();
++
++        this._userName = userName;
++        this._realName = GLib.get_real_name() || userName;
++    }
++
++    get_user_name() {
++        return this._userName;
++    }
++
++    get_real_name() {
++        return this._realName;
++    }
++
++    get_icon_file() {
++        return null;
++    }
++
++    get_password_mode() {
++        return UserPasswordMode.NONE;
++    }
++
++    is_logged_in() {
++        return true;
++    }
++
++    get is_loaded() {
++        return true;
++    }
++
++    get locked() {
++        return false;
++    }
++
++    get password_mode() {
++        return UserPasswordMode.NONE;
++    }
++});
++
++const TermuxUserManager = GObject.registerClass({
++    Properties: {
++        'is-loaded': GObject.ParamSpec.boolean(
++            'is-loaded',
++            'Is Loaded',
++            'Whether the user database is loaded',
++            GObject.ParamFlags.READABLE,
++            true
++        ),
++
++        'has-multiple-users': GObject.ParamSpec.boolean(
++            'has-multiple-users',
++            'Has Multiple Users',
++            'Whether multiple users exist',
++            GObject.ParamFlags.READABLE,
++            false
++        ),
++    },
++
++    Signals: {
++        'user-added': {
++            param_types: [GObject.TYPE_OBJECT],
++        },
++
++        'user-removed': {
++            param_types: [GObject.TYPE_OBJECT],
++        },
++    },
++}, class TermuxUserManager extends GObject.Object {
++    static get_default() {
++        if (!this._default)
++            this._default = new TermuxUserManager();
++
++        return this._default;
++    }
++
++    _init() {
++        super._init();
++
++        this._user = new TermuxUser(GLib.get_user_name());
++    }
++
++    get is_loaded() {
++        return true;
++    }
++
++    get has_multiple_users() {
++        return false;
++    }
++
++    can_switch() {
++        return false;
++    }
++
++    get_user(userName) {
++        if (!userName)
++            return null;
++
++        return userName === this._user.get_user_name()
++            ? this._user
++            : null;
++    }
++
++    list_users() {
++        return [this._user];
++    }
++});
++
++export const UserManager = TermuxUserManager;
++export const User = TermuxUser;
+--- a/js/ui/components/polkitAgent.js
++++ b/js/ui/components/polkitAgent.js
+@@ -1,10 +1,10 @@
+-import AccountsService from 'gi://AccountsService';
++import * as AccountsService from '../../misc/termux/accountsService.js';
+ import Clutter from 'gi://Clutter';
+ import GLib from 'gi://GLib';
+ import GObject from 'gi://GObject';
+ import Pango from 'gi://Pango';
+-import PolkitAgent from 'gi://PolkitAgent';
+-import Polkit from 'gi://Polkit';
++import * as PolkitAgent from '../../misc/termux/polkit.js';
++import * as Polkit from '../../misc/termux/polkit.js';
+ import Shell from 'gi://Shell';
+ import St from 'gi://St';
+ 
+--- a/js/ui/status/thunderbolt.js
++++ b/js/ui/status/thunderbolt.js
+@@ -3,7 +3,7 @@
+ import Gio from 'gi://Gio';
+ import GLib from 'gi://GLib';
+ import GObject from 'gi://GObject';
+-import Polkit from 'gi://Polkit';
++import * as Polkit from '../../misc/termux/polkit.js';
+ import Shell from 'gi://Shell';
+ import * as Signals from '../../misc/signals.js';
+ 
+--- a/js/ui/status/network.js
++++ b/js/ui/status/network.js
+@@ -4,7 +4,7 @@
+ import GLib from 'gi://GLib';
+ import GObject from 'gi://GObject';
+ import NM from 'gi://NM';
+-import Polkit from 'gi://Polkit';
++import * as Polkit from '../../misc/termux/polkit.js';
+ import Shell from 'gi://Shell';
+ import St from 'gi://St';
+ 

@@ -1,0 +1,5 @@
+Explanation: Only livecd-upower may provide UPower. Without this, apt removes it and installs
+Explanation: upstream for "apt install upower" or a dependency newer than it provides.
+Package: upower
+Pin: version *
+Pin-Priority: -1

@@ -1,0 +1,13 @@
+{
+  "manifest_version": 3,
+  "name": "Hardware video on YouTube",
+  "description": "This phone has no AV1 decoder, so YouTube is told AV1 is unavailable and serves a codec the hardware can decode.",
+  "version": "1.0",
+  "content_scripts": [{
+    "matches": ["*://*.youtube.com/*"],
+    "js": ["no-av1.js"],
+    "run_at": "document_start",
+    "world": "MAIN",
+    "all_frames": true
+  }]
+}

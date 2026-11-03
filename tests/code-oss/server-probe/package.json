@@ -1,0 +1,12 @@
+{
+  "name": "server-probe",
+  "publisher": "livecd-test",
+  "version": "0.0.1",
+  "engines": { "vscode": "^1.144.0" },
+  "main": "./extension.js",
+  "extensionKind": ["workspace"],
+  "activationEvents": ["onCommand:serverProbe.run"],
+  "contributes": {
+    "commands": [{ "command": "serverProbe.run", "title": "Server Probe: Run" }]
+  }
+}

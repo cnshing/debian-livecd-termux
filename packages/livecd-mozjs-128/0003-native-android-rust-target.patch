@@ -1,0 +1,16 @@
+Termux uses the Unix platform configuration with the Android Rust ABI. Select
+that ABI for both native build tools and target code rather than guessing GNU.
+This port currently supports aarch64 only.
+
+--- a/build/moz.configure/rust.configure
++++ b/build/moz.configure/rust.configure
+@@ -283,6 +283,9 @@
+ def detect_rustc_target(
+     host_or_target, compiler_info, arm_target, rust_supported_targets
+ ):
++    if host_or_target.cpu == "aarch64" and "android" in host_or_target.raw_os:
++        return "aarch64-linux-android"
++
+     # Rust's --target options are similar to, but not exactly the same
+     # as, the autoconf-derived targets we use.  An example would be that
+     # Rust uses distinct target triples for targetting the GNU C++ ABI

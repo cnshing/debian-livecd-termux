@@ -1,0 +1,16 @@
+__pycache__/
+*.pyc
+# Compiled packages: published through GitHub Releases, unpacked here by install.sh.
+/repo/
+# Snapshots taken before the repository restructure and source port.
+/.backup/
+# Native Rust validation tools.
+/tests/mission-center/source/target/
+
+/packages/livecd-resources/target/
+
+# Local session notes and raw device captures can contain machine identifiers,
+# network details, process inventories and screenshots. Publish reviewed summaries.
+/CLAUDE-HANDOFF*.md
+/docs/evidence/
+/temp/

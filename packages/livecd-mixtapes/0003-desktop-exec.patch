@@ -1,0 +1,13 @@
+This port installs the program as mixtapes, not muse.
+
+--- a/com.pocoguy.Muse.desktop
++++ b/com.pocoguy.Muse.desktop
+@@ -1,7 +1,7 @@
+ [Desktop Entry]
+ Name=Mixtapes
+ Comment=A modern, Linux-first YouTube Music player
+-Exec=muse %U
++Exec=mixtapes %U
+ Icon=com.pocoguy.Muse
+ Terminal=false
+ Type=Application

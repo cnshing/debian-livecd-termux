@@ -1,0 +1,6 @@
+{
+  "revision": "538685c906074926fd19650e38c6dad91379eb0f",
+  "path": "x11-packages/code-oss/build.sh",
+  "sha256": "8bf5d2fd32bdee6eb58ba86026dd71007d7441dcacada9fcf9a85d022c4edfc1",
+  "note": "Retain the pinned upstream recipe directory, including all patches and code.mjs, when staging this override."
+}

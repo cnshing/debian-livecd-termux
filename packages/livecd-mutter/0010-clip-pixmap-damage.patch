@@ -1,0 +1,26 @@
+--- a/cogl/cogl/winsys/cogl-texture-pixmap-x11.c
++++ b/cogl/cogl/winsys/cogl-texture-pixmap-x11.c
+@@ -559,9 +559,20 @@
+   display = cogl_xlib_renderer_get_display (ctx->display->renderer);
+   visual = tex_pixmap->visual;
+ 
+-  /* If the damage region is empty then there's nothing to do */
+-  if (tex_pixmap->damage_rect.x == tex_pixmap->damage_rect.width)
+-    return;
++  /* Damage queued during a resize can describe the previous, larger
++   * window. The named pixmap has fixed dimensions: never read or upload
++   * outside it, including on the XGetImage fallback path. */
++  MtkRectangle pixmap_bounds = MTK_RECTANGLE_INIT (0, 0,
++                                                 cogl_texture_get_width (tex),
++                                                 cogl_texture_get_height (tex));
++
++  if (!mtk_rectangle_intersect (&tex_pixmap->damage_rect,
++                               &pixmap_bounds,
++                               &tex_pixmap->damage_rect))
++    {
++      memset (&tex_pixmap->damage_rect, 0, sizeof (MtkRectangle));
++      return;
++    }
+ 
+   x = tex_pixmap->damage_rect.x;
+   y = tex_pixmap->damage_rect.y;

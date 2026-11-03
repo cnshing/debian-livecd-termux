@@ -1,0 +1,6 @@
+# Broad Unicode coverage through Noto and its recommended packages, plus fallback fonts.
+- fonts-noto
+- fonts-noto-color-emoji
+- fonts-dejavu
+- fonts-unifont
+- fonts-hanazono

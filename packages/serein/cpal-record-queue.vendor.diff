@@ -1,0 +1,17 @@
+PulseAudio can post several requested fragments as one fixed-size source block.
+Allow eight fragments in the record queue so play() does not wait forever when
+the source uses 125 ms blocks and Serein requests 20 ms. Proven by the audio probe.
+
+--- a/src/host/pulseaudio/mod.rs
++++ b/src/host/pulseaudio/mod.rs
+@@ -647,7 +647,9 @@
+             protocol::stream::BufferAttr {
+                 // fragment_size controls the delivery chunk size for record
+                 // streams; target_length is playback-only and is ignored here.
+-                max_length: len,
++                // Sources with fixed blocks post several fragments at once, and a
++                // smaller queue would discard every block.
++                max_length: len.saturating_mul(8),
+                 fragment_size: len,
+                 ..Default::default()
+             }

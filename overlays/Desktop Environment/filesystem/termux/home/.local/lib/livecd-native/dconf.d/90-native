@@ -1,0 +1,37 @@
+[org/gnome/desktop/lockdown]
+disable-lock-screen=true
+
+[org/gnome/desktop/screensaver]
+lock-enabled=false
+
+[org/gnome/desktop/session]
+idle-delay=uint32 0
+
+[org/gnome/desktop/interface]
+enable-animations=false
+color-scheme='prefer-dark'
+accent-color='yellow'
+gtk-theme='Adwaita-dark'
+
+[org/gnome/shell]
+disable-user-extensions=false
+enabled-extensions=['arcmenu@arcmenu.com', 'dash-to-panel@jderose9.github.com', 'ding@rastersoft.com', 'ubuntu-appindicators@ubuntu.com', 'user-theme@gnome-shell-extensions.gcampax.github.com', 'noannoyance-fork@vrba.dev', 'tiling-assistant@leleat-on-github']
+
+[org/gnome/shell/extensions/ding]
+show-network-volumes=false
+
+[org/gnome/shell/extensions/dash-to-panel]
+hide-overview-on-startup=true
+
+[org/gnome/shell/extensions/arcmenu]
+update-notifier-enabled=false
+show-external-devices=false
+context-menu-items=[{'id': 'org.gnome.Extensions.desktop'}, {'id': 'ArcMenu_Settings', 'name': 'ArcMenu Settings', 'icon': 'ArcMenu_ArcMenuIcon'}, {'id': 'ArcMenu_PanelExtensionSettings', 'name': 'Panel Extension Settings', 'icon': 'application-x-addon-symbolic'}, {'id': 'ArcMenu_Separator', 'name': 'Separator', 'icon': 'list-remove-symbolic'}, {'id': 'ArcMenu_ActivitiesOverview', 'name': 'Activities Overview', 'icon': 'view-fullscreen-symbolic'}, {'id': 'ArcMenu_ShowDesktop', 'name': 'Show Desktop', 'icon': 'computer-symbolic'}]
+
+[org/gnome/desktop/wm/preferences]
+titlebar-font='Cantarell Bold 11'
+
+[org/freedesktop/tracker/miner/files]
+index-recursive-directories=@as []
+index-single-directories=@as []
+enable-monitors=false

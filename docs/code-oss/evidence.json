@@ -1,0 +1,265 @@
+{
+ "scope": "Native Termux phone as Remote Tunnels client; workspace extensions execute on separate development machine.",
+ "termux_packages_commit": "ed2ff96a1160c710303c260e08eb62786bfcfda1",
+ "project_ci_termux_packages_commit": "538685c906074926fd19650e38c6dad91379eb0f",
+ "project_pin_has_identical_code_oss_recipe": true,
+ "termux_package": {
+  "version": "1.144.0",
+  "architecture": "aarch64",
+  "url": "https://packages.termux.dev/apt/termux-x11/pool/main/c/code-oss/code-oss_1.144.0_aarch64.deb",
+  "bytes": 58538112,
+  "sha256": "503b2735ea20cb553752407e164209c57fa4f9f97b530ca71f1fe95cc39d2409",
+  "sha256_matches_downloaded_apt_index": true,
+  "product": {
+   "commit": "2c33b50b16c472efe58357d1d2a8a5414bc23fbf",
+   "quality": "stable",
+   "urlProtocol": "code-oss",
+   "serverApplicationName": "code-server-oss",
+   "serverDataFolderName": ".vscode-server-oss",
+   "tunnelApplicationName": "code-tunnel-oss"
+  },
+  "settings_sync_store_present": false,
+  "gallery": {
+   "serviceUrl": "https://open-vsx.org/vscode/gallery",
+   "itemUrl": "https://open-vsx.org/vscode/item"
+  },
+  "native_tunnel_executable_present": false,
+  "builtin_extensions_present": [
+   "git",
+   "github",
+   "github-authentication"
+  ]
+ },
+ "official_arm64_archive": {
+  "nameShort": "Code",
+  "applicationName": "code",
+  "commit": "2c33b50b16c472efe58357d1d2a8a5414bc23fbf",
+  "quality": "stable",
+  "urlProtocol": "vscode",
+  "serverApplicationName": "code-server",
+  "serverDataFolderName": ".vscode-server",
+  "tunnelApplicationName": "code-tunnel",
+  "extensionEnabledApiProposals": {
+   "GitHub.vscode-pull-request-github": [
+    "activeComment",
+    "agentSessionsWorkspace",
+    "agentsWindowActivation",
+    "authIssuers",
+    "chatContextProvider",
+    "chatParticipantAdditions",
+    "chatParticipantPrivate",
+    "chatSessionsProvider",
+    "codiconDecoration",
+    "codeActionRanges",
+    "commentingRangeHint",
+    "commentReactor",
+    "commentReveal",
+    "commentsDraftState",
+    "commentThreadApplicability",
+    "contribAccessibilityHelpContent",
+    "contribCommentEditorActionsMenu",
+    "contribCommentPeekContext",
+    "contribCommentThreadAdditionalMenu",
+    "contribCommentsViewThreadMenus",
+    "contribEditorContentMenu",
+    "contribMultiDiffEditorMenus",
+    "contribShareMenu",
+    "diffCommand",
+    "externalUriOpener",
+    "languageModelToolResultAudience",
+    "markdownAlertSyntax",
+    "quickDiffProvider",
+    "remoteCodingAgents",
+    "shareProvider",
+    "tabInputMultiDiff",
+    "tabInputTextMerge",
+    "tokenInformation",
+    "treeItemMarkdownLabel",
+    "treeViewMarkdownMessage"
+   ],
+   "ms-vscode.remote-server": [
+    "resolvers",
+    "tunnels",
+    "contribViewsWelcome"
+   ],
+   "ms-vscode.remote-explorer": [
+    "contribRemoteHelp",
+    "contribViewsRemote",
+    "extensionsAny"
+   ]
+  },
+  "sha256": "c1758f2144c68b295fb2a3543e93bc03ab99f8ea715cfd0560377092aba0f198",
+  "archive_bytes": 344842433,
+  "source_metadata_url": "https://update.code.visualstudio.com/api/update/linux-arm64/stable/latest",
+  "archive_url": "https://vscode.download.prss.microsoft.com/dbazure/download/stable/2c33b50b16c472efe58357d1d2a8a5414bc23fbf/code-stable-arm64-1793133773.tar.gz",
+  "settings_sync_store_present": true,
+  "main_elf_interpreter": "/lib/ld-linux-aarch64.so.1",
+  "phone_runtime_tested": false
+ },
+ "extensions": [
+  {
+   "id": "GitHub.vscode-pull-request-github",
+   "version": "0.174.0",
+   "engines": {
+    "node": ">=20",
+    "vscode": "^1.144.0"
+   },
+   "declared_proposed_apis": [
+    "activeComment",
+    "agentSessionsWorkspace",
+    "authIssuers",
+    "chatContextProvider",
+    "chatParticipantAdditions",
+    "chatParticipantPrivate",
+    "chatSessionsProvider",
+    "codiconDecoration",
+    "codeActionRanges",
+    "commentingRangeHint",
+    "commentReactor",
+    "commentReveal",
+    "commentsDraftState",
+    "commentThreadApplicability",
+    "contribAccessibilityHelpContent",
+    "contribCommentEditorActionsMenu",
+    "contribCommentPeekContext",
+    "contribCommentThreadAdditionalMenu",
+    "contribCommentsViewThreadMenus",
+    "contribEditorContentMenu",
+    "contribShareMenu",
+    "diffCommand",
+    "externalUriOpener",
+    "languageModelToolResultAudience",
+    "markdownAlertSyntax",
+    "quickDiffProvider",
+    "remoteCodingAgents",
+    "shareProvider",
+    "tabInputMultiDiff",
+    "tokenInformation",
+    "treeItemMarkdownLabel",
+    "treeViewMarkdownMessage"
+   ],
+   "proposals_missing_in_vscode_1_144_0": [],
+   "official_product_allowlist": [
+    "activeComment",
+    "agentSessionsWorkspace",
+    "agentsWindowActivation",
+    "authIssuers",
+    "chatContextProvider",
+    "chatParticipantAdditions",
+    "chatParticipantPrivate",
+    "chatSessionsProvider",
+    "codiconDecoration",
+    "codeActionRanges",
+    "commentingRangeHint",
+    "commentReactor",
+    "commentReveal",
+    "commentsDraftState",
+    "commentThreadApplicability",
+    "contribAccessibilityHelpContent",
+    "contribCommentEditorActionsMenu",
+    "contribCommentPeekContext",
+    "contribCommentThreadAdditionalMenu",
+    "contribCommentsViewThreadMenus",
+    "contribEditorContentMenu",
+    "contribMultiDiffEditorMenus",
+    "contribShareMenu",
+    "diffCommand",
+    "externalUriOpener",
+    "languageModelToolResultAudience",
+    "markdownAlertSyntax",
+    "quickDiffProvider",
+    "remoteCodingAgents",
+    "shareProvider",
+    "tabInputMultiDiff",
+    "tabInputTextMerge",
+    "tokenInformation",
+    "treeItemMarkdownLabel",
+    "treeViewMarkdownMessage"
+   ],
+   "termux_product_allowlist": null,
+   "vsix_sha256": "d777b9c7d59bc1e34a93366633ac254a4299110df3fa77eb4e5fa3ba2d49ed5f",
+   "native_payload_suffix_matches": []
+  },
+  {
+   "id": "ms-vscode.remote-server",
+   "version": "1.6.2026092109",
+   "engines": {
+    "vscode": "^1.87.0"
+   },
+   "declared_proposed_apis": [
+    "resolvers"
+   ],
+   "proposals_missing_in_vscode_1_144_0": [],
+   "official_product_allowlist": [
+    "resolvers",
+    "tunnels",
+    "contribViewsWelcome"
+   ],
+   "termux_product_allowlist": null,
+   "vsix_sha256": "2b48819c8df2ecfe508bc508d251740c8cc815ccda7b1afaa688530d4bc27b1a",
+   "native_payload_suffix_matches": []
+  },
+  {
+   "id": "ms-vscode.remote-explorer",
+   "version": "0.6.2026100809",
+   "engines": {
+    "vscode": "^1.87.0"
+   },
+   "declared_proposed_apis": [
+    "contribViewsRemote",
+    "extensionsAny"
+   ],
+   "proposals_missing_in_vscode_1_144_0": [],
+   "official_product_allowlist": [
+    "contribRemoteHelp",
+    "contribViewsRemote",
+    "extensionsAny"
+   ],
+   "termux_product_allowlist": null
+  }
+ ],
+ "published_desktop_file_defects": {
+  "url_handler_mime_type": "x-scheme-handler/@@URLPROTOCOL@@;",
+  "startup_wm_class": "@@DESKTOP_NAME@@"
+ },
+ "patch_verification": {
+  "patch": "termux-desktop-metadata.patch",
+  "dry_run_passed": true,
+  "applied_to_temporary_termux_recipe": true,
+  "bash_syntax_passed": true,
+  "actual_recipe_sed_rendered_source_templates": true,
+  "desktop_file_validate": {
+   "code.desktop": {
+    "validator_exit": 0,
+    "unresolved_placeholders": false
+   },
+   "code-url-handler.desktop": {
+    "validator_exit": 0,
+    "unresolved_placeholders": false
+   }
+  },
+  "corrected_url_handler": "x-scheme-handler/code-oss;",
+  "corrected_startup_wm_class": "code-oss",
+  "startup_wm_class_correction": "This field first recorded com.visualstudio.CodeOSS, substituted from product.json without running the editor. A real window on the phone reports WM_CLASS \"code-oss\", \"code-oss\", because the recipe's code.mjs calls app.setName(\"code-oss\"). See VERIFICATION.md."
+ },
+ "incompatible_bundled_addon": {
+  "path": "@vscode/os-proxy-resolver-linux-arm64-gnu/os_proxy_resolver.node",
+  "method": "readelf -d",
+  "glibc_dependencies_observed": [
+   "libc.so.6",
+   "libpthread.so.0",
+   "libm.so.6",
+   "libdl.so.2",
+   "ld-linux-aarch64.so.1"
+  ],
+  "runtime_impact_tested": false
+ },
+ "validation_limits": [
+  "No package installed on phone",
+  "No OAuth flow completed",
+  "No real remote tunnel connected",
+  "No editor GUI runtime tested",
+  "No complete official VS Code runtime port built"
+ ],
+ "validation_limits_superseded": "validation_limits describes the initial assessment. Later device results are in VERIFICATION.md."
+}

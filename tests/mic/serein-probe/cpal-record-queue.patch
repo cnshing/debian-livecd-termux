@@ -1,0 +1,17 @@
+PulseAudio drops any block larger than a record stream's max_length, so a source with fixed
+blocks never delivers data and play(), which waits for the first bytes, never returns.
+Serein's 20 ms buffer is smaller than the blocks of a sink monitor and of module-sles-source.
+
+--- a/src/host/pulseaudio/mod.rs
++++ b/src/host/pulseaudio/mod.rs
+@@ -647,7 +647,9 @@
+             protocol::stream::BufferAttr {
+                 // fragment_size controls the delivery chunk size for record
+                 // streams; target_length is playback-only and is ignored here.
+-                max_length: len,
++                // Sources with fixed blocks post several fragments at once, and a
++                // smaller queue would discard every block.
++                max_length: len.saturating_mul(8),
+                 fragment_size: len,
+                 ..Default::default()
+             }

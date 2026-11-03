@@ -1,0 +1,235 @@
+Wallpapers in /usr/share/backgrounds, one folder per artist. Each file is named
+<source>-<id>, where <id> is the photo's ID on that source.
+
+JPEG files are the original uploads. AVIF files were encoded at quality 92 from the
+highest quality version each source offers, at full resolution.
+
+Pexels photos are used under the Pexels License: https://www.pexels.com/license/
+Unsplash photos are used under the Unsplash License: https://unsplash.com/license
+
+bosichong/ - 宇峰杨, https://www.pexels.com/@bosichong/
+
+pexels-27096825.jpg
+https://www.pexels.com/photo/decoration-with-a-miniature-yellow-palm-tree-and-a-house-27096825/
+
+pexels-27096826.jpg
+https://www.pexels.com/photo/drops-on-green-leaf-27096826/
+
+pexels-27221166.avif
+https://www.pexels.com/photo/abstract-blue-shapes-27221166/
+
+pexels-27221167.avif
+https://www.pexels.com/photo/dark-and-abstract-shapes-27221167/
+
+pexels-27453102.jpg
+https://www.pexels.com/photo/27453102/
+
+pexels-27453120.jpg
+https://www.pexels.com/photo/27453120/
+
+pexels-27660300.jpg
+https://www.pexels.com/photo/27660300/
+
+pexels-27759232.avif
+https://www.pexels.com/photo/abstract-desktop-background-the-glass-27759232/
+
+pexels-27759233.avif
+https://www.pexels.com/photo/abstract-desktop-background-the-glass-27759233/
+
+pexels-28544348.avif
+https://www.pexels.com/photo/28544348/
+
+pexels-28544349.avif
+https://www.pexels.com/photo/minimalist-abstract-composition-in-soft-blues-28544349/
+
+pexels-28544350.avif
+https://www.pexels.com/photo/abstract-minimalist-3d-rings-on-blue-background-28544350/
+
+pexels-28544351.avif
+https://www.pexels.com/photo/abstract-minimalist-bubble-design-with-soft-hues-28544351/
+
+pexels-28544352.avif
+https://www.pexels.com/photo/28544352/
+
+pexels-28544353.avif
+https://www.pexels.com/photo/abstract-minimalist-3d-cubes-on-soft-background-28544353/
+
+pexels-28796588.avif
+https://www.pexels.com/photo/28796588/
+
+pexels-28796589.avif
+https://www.pexels.com/photo/28796589/
+
+
+steve_j/ - Steve A Johnson, https://unsplash.com/@steve_j
+
+unsplash-OCjskoxFMuc.avif
+https://unsplash.com/photos/abstract-blue-and-purple-shapes-with-metallic-sheen-OCjskoxFMuc
+
+unsplash-tNuVYLKi16c.avif
+https://unsplash.com/photos/a-white-egg-with-a-pink-dot-tNuVYLKi16c
+
+
+4xel/ - Axel Ruffini, https://unsplash.com/@4xel
+
+unsplash-cVNocf2UtbY.avif
+https://unsplash.com/photos/an-abstract-blue-background-with-curved-lines-cVNocf2UtbY
+
+
+hassaanhre/ - Hassaan Here, https://unsplash.com/@hassaanhre
+
+unsplash-IL6u91RSndg.avif
+https://unsplash.com/photos/a-blue-and-black-abstract-background-with-curves-IL6u91RSndg
+
+unsplash-iBtpWJRz9p8.avif
+https://unsplash.com/photos/abstract-blue-paper-curves-forming-a-spiral-pattern-iBtpWJRz9p8
+
+unsplash-DJ6_r-xZOnk.avif
+https://unsplash.com/photos/blue-striped-ribbons-elegantly-swirl-across-the-screen-DJ6_r-xZOnk
+
+
+declansun/ - Declan Sun, https://unsplash.com/@declansun
+
+unsplash-FHZWd7x7XZs.avif
+https://unsplash.com/photos/a-close-up-of-a-black-and-white-photo-of-a-fan-FHZWd7x7XZs
+
+
+abikphotography/ - Abik Peravan, https://unsplash.com/@abikphotography
+
+unsplash-WY0_xzHiPCE.avif
+https://unsplash.com/photos/background-pattern-WY0_xzHiPCE
+
+
+trapper123/ - tyrone biggums, https://unsplash.com/@trapper123
+
+unsplash-knP9Ai8srDc.avif
+https://unsplash.com/photos/abstract-blue-and-black-flowing-curves-knP9Ai8srDc
+
+
+fakurian/ - Milad Fakurian, https://unsplash.com/@fakurian
+
+unsplash-bMSA5-tLFao.avif
+https://unsplash.com/photos/spiral-of-colorful-discs-bMSA5-tLFao
+
+unsplash-gJk9y8zKCyo.avif
+https://unsplash.com/photos/a-close-up-of-a-cell-phone-with-a-blurry-background-gJk9y8zKCyo
+
+unsplash-7Ra7YDFR4Pw.avif
+https://unsplash.com/photos/a-close-up-of-a-circular-object-with-a-blurry-background-7Ra7YDFR4Pw
+
+
+loganvoss/ - Logan Voss, https://unsplash.com/@loganvoss
+
+unsplash-Uu0xfoRe0i4.avif
+https://unsplash.com/photos/curved-purple-and-teal-abstract-shapes-Uu0xfoRe0i4
+
+
+pramodtiwari/ - Pramod Tiwari, https://unsplash.com/@pramodtiwari
+
+unsplash-3lb6R9bxtfE.avif
+https://unsplash.com/photos/background-pattern-3lb6R9bxtfE
+
+
+melkszr/ - Esma Melike Sezer, https://unsplash.com/@melkszr
+
+unsplash-gQSKMLOv1Jw.avif
+https://unsplash.com/photos/blue-abstract-spirals-and-chrome-spheres-gQSKMLOv1Jw
+
+unsplash-oMyUsgk9Td0.avif
+https://unsplash.com/photos/blue-organic-shapes-and-metallic-spheres-oMyUsgk9Td0
+
+
+pawel_czerwinski/ - Pawel Czerwinski, https://unsplash.com/@pawel_czerwinski
+
+unsplash-WSPZvp0efjM.avif
+https://unsplash.com/photos/a-close-up-of-a-cell-phone-with-a-black-background-WSPZvp0efjM
+
+unsplash-jaWb09QDCqw.avif
+https://unsplash.com/photos/a-close-up-of-a-black-and-blue-object-jaWb09QDCqw
+
+unsplash-YlXdoyiYYW8.avif
+https://unsplash.com/photos/a-close-up-of-a-white-wall-with-wavy-lines-YlXdoyiYYW8
+
+unsplash-TQrpnoTkl-I.avif
+https://unsplash.com/photos/background-pattern-TQrpnoTkl-I
+
+unsplash-fZTKBU8OqXk.avif
+https://unsplash.com/photos/swirling-light-blue-ribbons-create-an-abstract-design-fZTKBU8OqXk
+
+unsplash-6ooil14ZcQQ.avif
+https://unsplash.com/photos/a-close-up-of-a-cell-phone-with-a-black-background-6ooil14ZcQQ
+
+
+cader_/ - 灿雄 邱, https://unsplash.com/@cader_
+
+unsplash-MJ-Y_X1WMGU.avif
+https://unsplash.com/photos/a-blurry-photo-of-a-white-cloth-MJ-Y_X1WMGU
+
+
+lukaszlada/ - Łukasz Łada, https://unsplash.com/@lukaszlada
+
+unsplash-m7LvrF-Dvxg.avif
+https://unsplash.com/photos/abstract-white-curves-on-blue-m7LvrF-Dvxg
+
+unsplash-Fjaei4_oAaw.avif
+https://unsplash.com/photos/abstract-translucent-purple-shapes-Fjaei4_oAaw
+
+
+faded_gallery/ - Faded_Gallery, https://unsplash.com/@faded_gallery
+
+unsplash-sXNy4Lhm0XA.avif
+https://unsplash.com/photos/a-close-up-of-a-purple-flower-on-a-black-background-sXNy4Lhm0XA
+
+
+lllezz/ - Faseeh Fawaz, https://unsplash.com/@lllezz
+
+unsplash-A6H2BwIskZQ.avif
+https://unsplash.com/photos/a-black-and-blue-abstract-background-with-curves-A6H2BwIskZQ
+
+
+vikomio77/ - Viktor Mindt, https://unsplash.com/@vikomio77
+
+unsplash-KfVRH2i3ruo.avif
+https://unsplash.com/photos/icon-KfVRH2i3ruo
+
+
+theshubhamdhage/ - Shubham Dhage, https://unsplash.com/@theshubhamdhage
+
+unsplash--WMRCV9a-3U.avif
+https://unsplash.com/photos/a-blue-object-is-floating-in-the-air--WMRCV9a-3U
+
+
+and_machines/ - and machines, https://unsplash.com/@and_machines
+
+unsplash-YLplJ9m_RKE.avif
+https://unsplash.com/photos/a-close-up-of-a-white-circle-YLplJ9m_RKE
+
+
+gdkbg/ - G. DOCHEV, https://unsplash.com/@gdkbg
+
+unsplash-bNXlg5fEuuY.avif
+https://unsplash.com/photos/abstract-blue-organic-shapes-bNXlg5fEuuY
+
+
+jipy32/ - Jean-Philippe Delberghe, https://unsplash.com/@jipy32
+
+unsplash-75xPHEQBmvA.avif
+https://unsplash.com/photos/a-close-up-of-a-white-wall-with-wavy-lines-75xPHEQBmvA
+
+
+heberdavisphotography/ - Heber Davis, https://unsplash.com/@heberdavisphotography
+
+unsplash-ewW6dPCL_Vw.avif
+https://unsplash.com/photos/a-black-and-white-photo-of-a-curved-wall-ewW6dPCL_Vw
+
+
+unstable_affliction/ - Ivan Bandura, https://unsplash.com/@unstable_affliction
+
+unsplash-WhIff5iuW-E.avif
+https://unsplash.com/photos/smooth-white-curves-with-shadows-WhIff5iuW-E
+
+
+allisonsaeng/ - Allison Saeng, https://unsplash.com/@allisonsaeng
+
+unsplash-kJA4mtHv0go.avif
+https://unsplash.com/photos/a-blurry-image-of-a-green-background-kJA4mtHv0go

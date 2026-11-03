@@ -1,0 +1,244 @@
+rustls-platform-verifier's Android module needs a JVM to reach the Android trust store.
+Build its Unix module instead, which reads Termux's CA bundle.
+
+--- a/vendor/rustls-platform-verifier/Cargo.toml
++++ b/vendor/rustls-platform-verifier/Cargo.toml
+@@ -91,10 +91,10 @@
+ [dev-dependencies.webpki-root-certs]
+ version = "1"
+ 
+-[target.'cfg(all(unix, not(target_os = "android"), not(target_vendor = "apple"), not(target_arch = "wasm32")))'.dependencies.rustls-native-certs]
++[target.'cfg(all(unix, not(target_os = "disabling_this_because_it_is_for_building_an_apk"), not(target_vendor = "apple"), not(target_arch = "wasm32")))'.dependencies.rustls-native-certs]
+ version = "0.8"
+ 
+-[target.'cfg(all(unix, not(target_os = "android"), not(target_vendor = "apple"), not(target_arch = "wasm32")))'.dependencies.webpki]
++[target.'cfg(all(unix, not(target_os = "disabling_this_because_it_is_for_building_an_apk"), not(target_vendor = "apple"), not(target_arch = "wasm32")))'.dependencies.webpki]
+ version = "0.103"
+ default-features = false
+ package = "rustls-webpki"
+@@ -119,21 +119,21 @@
+ [target.'cfg(target_arch = "wasm32")'.dependencies.webpki-root-certs]
+ version = "1"
+ 
+-[target.'cfg(target_os = "android")'.dependencies.android_logger]
++[target.'cfg(target_os = "disabling_this_because_it_is_for_building_an_apk")'.dependencies.android_logger]
+ version = "0.15"
+ optional = true
+ 
+-[target.'cfg(target_os = "android")'.dependencies.jni]
++[target.'cfg(target_os = "disabling_this_because_it_is_for_building_an_apk")'.dependencies.jni]
+ version = "0.22"
+ default-features = false
+ 
+-[target.'cfg(target_os = "android")'.dependencies.once_cell]
++[target.'cfg(target_os = "disabling_this_because_it_is_for_building_an_apk")'.dependencies.once_cell]
+ version = "1.9"
+ 
+-[target.'cfg(target_os = "android")'.dependencies.rustls-platform-verifier-android]
++[target.'cfg(target_os = "disabling_this_because_it_is_for_building_an_apk")'.dependencies.rustls-platform-verifier-android]
+ version = "0.1.0"
+ 
+-[target.'cfg(target_os = "android")'.dependencies.webpki]
++[target.'cfg(target_os = "disabling_this_because_it_is_for_building_an_apk")'.dependencies.webpki]
+ version = "0.103"
+ default-features = false
+ package = "rustls-webpki"
+--- a/vendor/rustls-platform-verifier/src/lib.rs
++++ b/vendor/rustls-platform-verifier/src/lib.rs
+@@ -16,8 +16,8 @@
+ // Build the Android module when generating docs so that
+ // the Android-specific functions are included regardless of
+ // the host.
+-#[cfg(any(all(doc, docsrs), target_os = "android"))]
+-#[cfg_attr(docsrs, doc(cfg(target_os = "android")))]
++#[cfg(any(all(doc, docsrs), target_os = "disabling_this_because_it_is_for_building_an_apk"))]
++#[cfg_attr(docsrs, doc(cfg(target_os = "disabling_this_because_it_is_for_building_an_apk")))]
+ pub mod android;
+ 
+ /// Fixures and data to support testing the server
+--- a/vendor/rustls-platform-verifier/src/tests/ffi.rs
++++ b/vendor/rustls-platform-verifier/src/tests/ffi.rs
+@@ -2,9 +2,9 @@
+ //! in the context of a platform-native environment as required by the verifier implementation.
+ #![allow(missing_docs)]
+ 
+-#[cfg(target_os = "android")]
++#[cfg(target_os = "disabling_this_because_it_is_for_building_an_apk")]
+ pub use android::*;
+-#[cfg(target_os = "android")]
++#[cfg(target_os = "disabling_this_because_it_is_for_building_an_apk")]
+ mod android {
+     //! Tests which run inside the context of a Android device, typically an emulator.
+     //!
+@@ -119,7 +119,7 @@
+     }
+ }
+ 
+-#[cfg(not(target_os = "android"))]
++#[cfg(not(target_os = "disabling_this_because_it_is_for_building_an_apk"))]
+ mod dummy {
+     //! A module to prevent dead-code warnings all over
+     //! the `tests` module due to the weird combination of
+@@ -132,7 +132,7 @@
+     fn dummy() {
+         #[cfg(any(
+             windows,
+-            target_os = "android",
++            target_os = "disabling_this_because_it_is_for_building_an_apk",
+             target_vendor = "apple",
+             target_os = "linux"
+         ))]
+--- a/vendor/rustls-platform-verifier/src/tests/verification_mock/mod.rs
++++ b/vendor/rustls-platform-verifier/src/tests/verification_mock/mod.rs
+@@ -14,7 +14,7 @@
+ //! immediately below to see which platforms run these tests.
+ 
+ #![cfg(all(
+-    any(windows, unix, target_os = "android"),
++    any(windows, unix, target_os = "disabling_this_because_it_is_for_building_an_apk"),
+     // These OSes require a simulator runtime and bundle.
+     not(target_os = "tvos"),
+     not(target_os = "watchos"),
+@@ -67,7 +67,7 @@
+             #[cfg($target)]
+             pub(super) fn $name() {
+                 test_with_mock_root(&$test_case, Roots::OnlyExtra);
+-                #[cfg(all($target, not(target_os = "android")))]
++                #[cfg(all($target, not(target_os = "disabling_this_because_it_is_for_building_an_apk")))]
+                 test_with_mock_root(&$test_case, Roots::ExtraAndPlatform);
+             }
+         )+
+@@ -201,7 +201,7 @@
+     // Check that self-signed certificates, which may or may not be revokved, do not return any
+     // kind of revocation error. It is expected that non-public certificates without revocation information
+     // have no revocation checking performed across platforms.
+-    revoked_dns [ any(windows, target_os = "android", target_vendor = "apple") ] => TestCase {
++    revoked_dns [ any(windows, target_os = "disabling_this_because_it_is_for_building_an_apk", target_vendor = "apple") ] => TestCase {
+         reference_id: EXAMPLE_COM,
+         chain: &[include_bytes!("root1-int1-ee_example.com-revoked.crt"), ROOT1_INT1],
+         stapled_ocsp: None,
+@@ -209,7 +209,7 @@
+         expected_result: Ok(()),
+         other_error: no_error!(),
+     },
+-    stapled_revoked_dns [ any(windows, target_os = "android", target_vendor = "apple") ] => TestCase {
++    stapled_revoked_dns [ any(windows, target_os = "disabling_this_because_it_is_for_building_an_apk", target_vendor = "apple") ] => TestCase {
+         reference_id: EXAMPLE_COM,
+         chain: &[include_bytes!("root1-int1-ee_example.com-revoked.crt"), ROOT1_INT1],
+         stapled_ocsp: Some(include_bytes!("root1-int1-ee_example.com-revoked.ocsp")),
+@@ -217,7 +217,7 @@
+         expected_result: Err(TlsError::InvalidCertificate(CertificateError::Revoked)),
+         other_error: no_error!(),
+     },
+-    stapled_revoked_ipv4 [ any(windows, target_os = "android", target_vendor = "apple") ] => TestCase {
++    stapled_revoked_ipv4 [ any(windows, target_os = "disabling_this_because_it_is_for_building_an_apk", target_vendor = "apple") ] => TestCase {
+         reference_id: LOCALHOST_IPV4,
+         chain: &[include_bytes!("root1-int1-ee_127.0.0.1-revoked.crt"), ROOT1_INT1],
+         stapled_ocsp: Some(include_bytes!("root1-int1-ee_127.0.0.1-revoked.ocsp")),
+@@ -225,7 +225,7 @@
+         expected_result: Err(TlsError::InvalidCertificate(CertificateError::Revoked)),
+         other_error: no_error!(),
+     },
+-    stapled_revoked_ipv6 [ any(windows, target_os = "android", target_vendor = "apple") ] => TestCase {
++    stapled_revoked_ipv6 [ any(windows, target_os = "disabling_this_because_it_is_for_building_an_apk", target_vendor = "apple") ] => TestCase {
+         reference_id: LOCALHOST_IPV6,
+         chain: &[include_bytes!("root1-int1-ee_1-revoked.crt"), ROOT1_INT1],
+         stapled_ocsp: Some(include_bytes!("root1-int1-ee_1-revoked.ocsp")),
+@@ -343,7 +343,7 @@
+     let provider = test_provider();
+     let verifier = match root_src {
+         Roots::OnlyExtra => Verifier::new_with_fake_root(ROOT1, provider), // TODO: time
+-        #[cfg(not(target_os = "android"))]
++        #[cfg(not(target_os = "disabling_this_because_it_is_for_building_an_apk"))]
+         Roots::ExtraAndPlatform => Verifier::new_with_extra_roots([ROOT1], provider).unwrap(),
+     };
+     let mut chain = test_case
+@@ -386,6 +386,6 @@
+     /// Test with loading the extra roots and the platform trust store.
+     ///
+     /// Right now, not all platforms are supported.
+-    #[cfg(not(target_os = "android"))]
++    #[cfg(not(target_os = "disabling_this_because_it_is_for_building_an_apk"))]
+     ExtraAndPlatform,
+ }
+--- a/vendor/rustls-platform-verifier/src/verification/apple.rs
++++ b/vendor/rustls-platform-verifier/src/verification/apple.rs
+@@ -69,7 +69,7 @@
+     /// facilities with the addition of extra root certificates to trust.
+     ///
+     /// See [Verifier::new] for the external requirements the verifier needs.
+-    #[cfg_attr(docsrs, doc(cfg(not(target_os = "android"))))]
++    #[cfg_attr(docsrs, doc(cfg(not(target_os = "disabling_this_because_it_is_for_building_an_apk"))))]
+     pub fn new_with_extra_roots(
+         roots: impl IntoIterator<Item = pki_types::CertificateDer<'static>>,
+         crypto_provider: Arc<CryptoProvider>,
+--- a/vendor/rustls-platform-verifier/src/verification/mod.rs
++++ b/vendor/rustls-platform-verifier/src/verification/mod.rs
+@@ -3,14 +3,14 @@
+ 
+ #[cfg(all(
+     any(unix, target_arch = "wasm32"),
+-    not(target_os = "android"),
++    not(target_os = "disabling_this_because_it_is_for_building_an_apk"),
+     not(target_vendor = "apple"),
+ ))]
+ mod others;
+ 
+ #[cfg(all(
+     any(unix, target_arch = "wasm32"),
+-    not(target_os = "android"),
++    not(target_os = "disabling_this_because_it_is_for_building_an_apk"),
+     not(target_vendor = "apple"),
+ ))]
+ pub use others::Verifier;
+@@ -21,10 +21,10 @@
+ #[cfg(target_vendor = "apple")]
+ pub use apple::Verifier;
+ 
+-#[cfg(target_os = "android")]
++#[cfg(target_os = "disabling_this_because_it_is_for_building_an_apk")]
+ pub(crate) mod android;
+ 
+-#[cfg(target_os = "android")]
++#[cfg(target_os = "disabling_this_because_it_is_for_building_an_apk")]
+ pub use android::Verifier;
+ 
+ #[cfg(windows)]
+@@ -82,5 +82,5 @@
+ // See https://github.com/rustls/rustls-platform-verifier/issues/126#issuecomment-2306232794.
+ const ALLOWED_EKUS: &[windows_sys::core::PCSTR] =
+     &[windows_sys::Win32::Security::Cryptography::szOID_PKIX_KP_SERVER_AUTH];
+-#[cfg(target_os = "android")]
++#[cfg(target_os = "disabling_this_because_it_is_for_building_an_apk")]
+ pub const ALLOWED_EKUS: &[&std::ffi::CStr] = &[c"1.3.6.1.5.5.7.3.1"];
+--- a/vendor/rustls-platform-verifier/src/verification/others.rs
++++ b/vendor/rustls-platform-verifier/src/verification/others.rs
+@@ -31,7 +31,7 @@
+     /// Creates a new verifier whose certificate validation is provided by
+     /// WebPKI, using root certificates provided by the platform and augmented by
+     /// the provided extra root certificates.
+-    #[cfg_attr(docsrs, doc(cfg(not(target_os = "android"))))]
++    #[cfg_attr(docsrs, doc(cfg(not(target_os = "disabling_this_because_it_is_for_building_an_apk"))))]
+     pub fn new_with_extra_roots(
+         extra_roots: impl IntoIterator<Item = pki_types::CertificateDer<'static>>,
+         crypto_provider: Arc<CryptoProvider>,
+@@ -84,7 +84,7 @@
+ 
+         #[cfg(all(
+             unix,
+-            not(target_os = "android"),
++            not(target_os = "disabling_this_because_it_is_for_building_an_apk"),
+             not(target_vendor = "apple"),
+             not(target_arch = "wasm32"),
+         ))]
+--- a/vendor/rustls-platform-verifier/src/verification/windows.rs
++++ b/vendor/rustls-platform-verifier/src/verification/windows.rs
+@@ -565,7 +565,7 @@
+ 
+     /// Creates a new instance of a TLS certificate verifier that utilizes the
+     /// Windows certificate facilities and augmented by the provided extra root certificates.
+-    #[cfg_attr(docsrs, doc(cfg(not(target_os = "android"))))]
++    #[cfg_attr(docsrs, doc(cfg(not(target_os = "disabling_this_because_it_is_for_building_an_apk"))))]
+     pub fn new_with_extra_roots(
+         roots: impl IntoIterator<Item = pki_types::CertificateDer<'static>>,
+         crypto_provider: Arc<CryptoProvider>,

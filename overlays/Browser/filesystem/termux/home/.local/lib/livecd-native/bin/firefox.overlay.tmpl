@@ -1,0 +1,7 @@
+#!@TERMUX_PREFIX@/bin/python
+import os,sys
+shared = os.path.expanduser('~/.local/lib/livecd-native/acceleration.py')
+if os.path.isfile(shared) and os.path.isfile(os.path.expanduser('~/.config/livecd-native/acceleration.json')):
+    os.execv(sys.executable, [sys.executable, shared, 'run', '--profile', 'firefox', '--',
+                            '@TERMUX_PREFIX@/bin/firefox', *sys.argv[1:]])
+os.execv('@TERMUX_PREFIX@/bin/firefox', ['@TERMUX_PREFIX@/bin/firefox', '--profile', '@TERMUX_HOME@/.config/livecd-native/firefox', *sys.argv[1:]])

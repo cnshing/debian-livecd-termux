@@ -1,0 +1,31 @@
+The build script's default-linking function must type-check even when static and
+bundled features explicitly choose the link mode. Supply its missing Android
+host case; the bundled voice codec stays enabled.
+
+Termux supplies Android-targeting compiler wrappers, rather than an NDK CMake
+project. Use its normal Linux CMake system selection with those Bionic compilers.
+
+--- a/build.rs
++++ b/build.rs
+@@ -57,5 +57,12 @@
+     // Prefer Release artifacts for FFI libs regardless of Rust profile
+     cfg.profile("Release");
++    // Native Termux is a Unix userland, not an Android APK/NDK CMake project.
++    // CC/CXX still select the real Android/Bionic target in cross builds.
++    if env::var("TARGET").is_ok_and(|target| target.contains("android")) {
++        cfg.define("CMAKE_SYSTEM_NAME", "Linux");
++    }
++    cfg.define("CMAKE_POSITION_INDEPENDENT_CODE", "ON");
++
+     // Force CMake to use 'lib' instead of 'lib64' on x86_64 Linux
+     cfg.define("CMAKE_INSTALL_LIBDIR", "lib");
+ 
+@@ -168,7 +168,7 @@
+     {
+         true
+     }
+-    #[cfg(any(target_os = "freebsd", all(unix, target_env = "gnu")))]
++    #[cfg(any(target_os = "android", target_os = "freebsd", all(unix, target_env = "gnu")))]
+     {
+         false
+     }

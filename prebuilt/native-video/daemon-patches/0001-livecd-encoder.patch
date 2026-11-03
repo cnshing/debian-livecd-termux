@@ -1,0 +1,276 @@
+Termux:VA daemon encoder changes, paired with
+mesa-patches/0100-livecd-termux-va-encode.patch:
+- retry configuration without "low-latency", which ACodec rejects for OMX
+  encoders such as OMX.qcom.video.encoder.avc on Snapdragon 855;
+- ENC_UNIT_FORCE_KEY requests a sync frame for that picture, and
+  ENC_UNIT_SET_BITRATE changes the target mid-stream; the encoder's own
+  key-frame period is long, since VA-API clients choose picture types;
+- parameter sets precede every sync frame;
+- hardware encoders are listed in "<socket>.encoders", and Android's software
+  encoders are refused.
+
+--- a/common/tva_protocol.h
++++ b/common/tva_protocol.h
+@@ -153,6 +153,16 @@
+  * unchanged; both endpoints must be updated for raw frames over 8 MiB. */
+ #define MAX_ENCODE_FRAME (16 * 1024 * 1024)
+ 
++/* Encoder uplink controls in the high bits of the length word, which a raw
++ * frame (at most MAX_ENCODE_FRAME) never sets.  VA-API clients choose the
++ * picture types, and WebRTC changes its target rate and asks for key frames
++ * at any time, so these follow each picture:
++ *   FORCE_KEY    this frame must be coded as a sync frame (IDR / key frame);
++ *   SET_BITRATE  a 4-byte big-endian target bitrate follows instead of a
++ *                frame, and no packet is returned for it. */
++#define ENC_UNIT_FORCE_KEY   0x80000000u
++#define ENC_UNIT_SET_BITRATE 0x40000000u
++
+ /* Max concurrent decode sessions the daemon accepts (hardware supports 16). */
+ #define MAX_CLIENTS 8
+ 
+--- a/daemon/termux-va.c
++++ b/daemon/termux-va.c
+@@ -492,6 +492,7 @@
+     int              encoder_stride;
+     int              encoder_slice_height;
+     int              avc_profile_verified; /* explicit profile matched an output SPS */
++    int              csd_used;         /* saved parameter sets went out with a packet */
+     int              negotiated;       /* 1 = client completed the handshake */
+ 
+     /* output format details (written by the output thread only) */
+@@ -1954,6 +1955,10 @@
+                      s->id, len);
+                 rc = 0;
+             } else {
++                if (s->csd_used) {
++                    *csd_len = 0;
++                    s->csd_used = 0;
++                }
+                 rc = encoder_append_csd(csd, csd_len, csd_cap, ob + off, len);
+             }
+         } else if (len) {
+@@ -1969,19 +1974,26 @@
+                          s->id, prefix);
+                 }
+             }
+-            size_t total = payload_len + *csd_len;
++            /* Repeat the parameter sets before every sync frame that lacks
++             * them, as VA-API encoders do for each IDR, so a receiver can
++             * start at any key frame. */
++            size_t prefix = (s->frames_out == 0 ||
++                             ((info.flags & FLAG_KEY_FRAME) &&
++                              !is_param_set(codec_base_id(s->codec_id), payload,
++                                            payload_len))) ? *csd_len : 0;
++            size_t total = payload_len + prefix;
+             uint8_t *packet = malloc(total);
+             if (!packet)
+                 rc = -1;
+             else {
+-                if (*csd_len)
+-                    memcpy(packet, *csd, *csd_len);
+-                memcpy(packet + *csd_len, payload, payload_len);
++                if (prefix)
++                    memcpy(packet, *csd, prefix);
++                memcpy(packet + prefix, payload, payload_len);
+                 rc = encoder_send_packet(s, packet, total,
+                                          (uint32_t)info.flags, pts);
+                 free(packet);
+                 if (rc == 0) {
+-                    *csd_len = 0;
++                    s->csd_used = 1;
+                     *packet_sent = true;
+                 }
+             }
+@@ -2053,6 +2065,70 @@
+     return 0;
+ }
+ 
++static void encoder_set_parameter(Session *s, const char *key, int32_t value)
++{
++    AMediaFormat *params = AMediaFormat_new();
++    if (!params)
++        return;
++    AMediaFormat_setInt32(params, key, value);
++    media_status_t st = AMediaCodec_setParameters(s->codec, params);
++    AMediaFormat_delete(params);
++    if (st != AMEDIA_OK)
++        dlog(0, "[%d] encoder rejected %s=%d: %d", s->id, key, value, st);
++}
++
++static void encoder_request_sync(Session *s)
++{
++    dlog(2, "[%d] sync frame requested at unit %ld", s->id, s->units_in);
++    encoder_set_parameter(s, "request-sync", 0);
++}
++
++static void encoder_set_bitrate(Session *s, uint32_t bitrate)
++{
++    if (!bitrate || bitrate > 100000000u || bitrate == s->bitrate)
++        return;
++    dlog(1, "[%d] encoder bitrate %u -> %u", s->id, s->bitrate, bitrate);
++    s->bitrate = bitrate;
++    encoder_set_parameter(s, "video-bitrate", (int32_t)bitrate);
++}
++
++/* Android's own software codecs; a VA-API client expects hardware and has
++ * faster software encoders of its own. */
++static bool software_codec_name(const char *name)
++{
++    return !strncmp(name, "OMX.google.", 11) || !strncmp(name, "c2.android.", 11);
++}
++
++/* Write "<mime> <component>" for each hardware encoder to <socket>.encoders,
++ * so the VA driver advertises only those.  Replaced atomically. */
++static void write_encoder_list(const char *sock_path)
++{
++    static const char *const mimes[] = { "video/avc", "video/hevc", "video/x-vnd.on2.vp9" };
++    char path[600], next[620];
++    snprintf(path, sizeof(path), "%s.encoders", sock_path);
++    snprintf(next, sizeof(next), "%s.next", path);
++    FILE *f = fopen(next, "we");
++    if (!f) {
++        dlog(0, "cannot write %s: %s", next, strerror(errno));
++        return;
++    }
++    for (size_t i = 0; i < sizeof(mimes) / sizeof(mimes[0]); i++) {
++        AMediaCodec *codec = AMediaCodec_createEncoderByType(mimes[i]);
++        char *name = NULL;
++        if (codec && AMediaCodec_getName(codec, &name) == AMEDIA_OK && name) {
++            dlog(1, "%s encoder: %s%s", mimes[i], name,
++                 software_codec_name(name) ? " (software, not offered)" : "");
++            if (!software_codec_name(name))
++                fprintf(f, "%s %s\n", mimes[i], name);
++            AMediaCodec_releaseName(codec, name);
++        }
++        if (codec)
++            AMediaCodec_delete(codec);
++    }
++    if (fclose(f) != 0 || rename(next, path) != 0)
++        dlog(0, "cannot publish %s: %s", path, strerror(errno));
++}
++
+ static int encoder_run(Session *s)
+ {
+     uint8_t *input = malloc(MAX_ENCODE_FRAME);
+@@ -2069,6 +2145,16 @@
+         uint32_t sz = ntohl(sz_be);
+         if (sz == 0)
+             break;
++        if (sz & ENC_UNIT_SET_BITRATE) {
++            uint32_t rate;
++            if (sz != (ENC_UNIT_SET_BITRATE | sizeof(rate)) ||
++                recv_all(s->fd, &rate, sizeof(rate)) < 0)
++                break;
++            encoder_set_bitrate(s, ntohl(rate));
++            continue;
++        }
++        bool force_key = sz & ENC_UNIT_FORCE_KEY;
++        sz &= ~ENC_UNIT_FORCE_KEY;
+         if (sz > MAX_ENCODE_FRAME || recv_all(s->fd, input, sz) < 0) {
+             dlog(1, "[%d] invalid encoder input frame size: %u", s->id, sz);
+             break;
+@@ -2106,6 +2192,9 @@
+         uint64_t scaled = (uint64_t)pts * 1000000;
+         int64_t pts_us = (int64_t)((scaled / s->fps_num) * s->fps_den +
+             ((scaled % s->fps_num) * s->fps_den + s->fps_num / 2) / s->fps_num);
++        /* The first frame is always a sync frame. */
++        if (force_key && pts > 1)
++            encoder_request_sync(s);
+         if (AMediaCodec_queueInputBuffer(s->codec, bi, 0, queued_size,
+                                          pts_us, 0) != AMEDIA_OK)
+             break;
+@@ -2154,10 +2243,32 @@
+     if (do_handshake(s) < 0) goto out_fd;
+ 
+     if (s->encoder) {
++        s->codec = AMediaCodec_createEncoderByType(s->mime);
++        if (!s->codec) {
++            dlog(0, "[%d] no available encoder: %s", s->id, s->mime);
++            goto out_fd;
++        }
++        char *encoder_name = NULL;
++        if (AMediaCodec_getName(s->codec, &encoder_name) == AMEDIA_OK &&
++            encoder_name) {
++            dlog(1, "[%d] selected encoder: %s", s->id, encoder_name);
++            bool software = software_codec_name(encoder_name);
++            AMediaCodec_releaseName(s->codec, encoder_name);
++            if (software) {
++                dlog(0, "[%d] refusing software encoder for %s", s->id, s->mime);
++                goto out_started;
++            }
++        }
++        /* "low-latency" is an Android 11 hint, but ACodec fails the whole
++         * configuration of an OMX encoder that does not support it, such as
++         * OMX.qcom.video.encoder.avc on Snapdragon 855.  A failed configure
++         * resets the codec, so retry once without the hint. */
++        media_status_t st = AMEDIA_ERROR_UNKNOWN;
++        for (int low_latency = 1; low_latency >= 0 && st != AMEDIA_OK; low_latency--) {
+         AMediaFormat *enc_fmt = AMediaFormat_new();
+         if (!enc_fmt) {
+             dlog(0, "[%d] AMediaFormat_new failed for encoder", s->id);
+-            goto out_fd;
++            goto out_started;
+         }
+         AMediaFormat_setString(enc_fmt, TVA_MF_KEY_MIME, s->mime);
+         AMediaFormat_setInt32(enc_fmt, TVA_MF_KEY_WIDTH, s->w);
+@@ -2172,7 +2283,9 @@
+         else
+             AMediaFormat_setFloat(enc_fmt, TVA_MF_KEY_FRAME_RATE,
+                                   (float)s->fps_num / s->fps_den);
+-        AMediaFormat_setInt32(enc_fmt, TVA_MF_KEY_I_FRAME_INTERVAL, 1);
++        /* The client chooses sync frames per picture (ENC_UNIT_FORCE_KEY),
++         * as VA-API drivers do.  Keep the encoder's own period long. */
++        AMediaFormat_setInt32(enc_fmt, TVA_MF_KEY_I_FRAME_INTERVAL, 3600);
+         AMediaFormat_setInt32(enc_fmt, TVA_MF_KEY_MAX_INPUT_SIZE, MAX_ENCODE_FRAME);
+         /* Qualcomm's byte-buffer encoders accept semi-planar NV12. */
+         AMediaFormat_setInt32(enc_fmt, "color-format", COLOR_FORMAT_YUV420_SEMIPLANAR);
+@@ -2180,33 +2293,22 @@
+          * falling back to its quality-based floor in VBR mode. */
+         AMediaFormat_setInt32(enc_fmt, "bitrate-mode", 2); /* CBR */
+         AMediaFormat_setInt32(enc_fmt, "max-bframes", 0);
+-        AMediaFormat_setInt32(enc_fmt, "low-latency", 1);
++        if (low_latency)
++            AMediaFormat_setInt32(enc_fmt, "low-latency", 1);
+         int avc_profile = encoder_avc_profile(s->codec_id);
+         if (avc_profile) {
+             AMediaFormat_setInt32(enc_fmt, "profile", avc_profile);
+             dlog(1, "[%d] requested AVC MediaCodec profile=%d", s->id, avc_profile);
+         }
+-
+-        s->codec = AMediaCodec_createEncoderByType(s->mime);
+-        if (!s->codec) {
+-            dlog(0, "[%d] no available encoder: %s", s->id, s->mime);
+-            AMediaFormat_delete(enc_fmt);
+-            goto out_fd;
+-        }
+-        char *encoder_name = NULL;
+-        if (AMediaCodec_getName(s->codec, &encoder_name) == AMEDIA_OK &&
+-            encoder_name) {
+-            dlog(1, "[%d] selected encoder: %s", s->id, encoder_name);
+-            AMediaCodec_releaseName(s->codec, encoder_name);
++        st = AMediaCodec_configure(s->codec, enc_fmt, NULL, NULL, 1);
++        AMediaFormat_delete(enc_fmt);
++        if (st != AMEDIA_OK)
++            dlog(low_latency ? 1 : 0, "[%d] encoder configure failed%s: %d", s->id,
++                 low_latency ? " with low-latency" : "", st);
+         }
+-        media_status_t st = AMediaCodec_configure(s->codec, enc_fmt, NULL, NULL, 1);
+-        if (st != AMEDIA_OK) {
+-            dlog(0, "[%d] encoder configure failed: %d", s->id, st);
+-            AMediaFormat_delete(enc_fmt);
++        if (st != AMEDIA_OK)
+             goto out_started;
+-        }
+         st = AMediaCodec_start(s->codec);
+-        AMediaFormat_delete(enc_fmt);
+         if (st != AMEDIA_OK) {
+             dlog(0, "[%d] encoder start failed: %d", s->id, st);
+             goto out_started;
+@@ -2695,6 +2797,7 @@
+         return 1;
+     }
+     /* Lock acquired: no live instance.  lockfd stays open on purpose. */
++    write_encoder_list(sock_path);
+ 
+     struct stat st;
+     if (stat(sock_path, &st) == 0 && S_ISSOCK(st.st_mode)) {

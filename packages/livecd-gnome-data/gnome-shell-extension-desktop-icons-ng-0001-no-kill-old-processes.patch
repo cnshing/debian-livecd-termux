@@ -1,0 +1,13 @@
+The native desktop owner cleans up its tagged DING children.
+
+--- a/usr/share/gnome-shell/extensions/ding@rastersoft.com/extension.js
++++ b/usr/share/gnome-shell/extensions/ding@rastersoft.com/extension.js
+@@ -62,7 +62,7 @@
+         * and not in enable() or disable() (disable already guarantees that
+         * the current instance is killed).
+         */
+-        this.doKillAllOldDesktopProcesses();
++        /* The native owner cleans up its tagged DING children. */
+     }
+ 
+     enable() {

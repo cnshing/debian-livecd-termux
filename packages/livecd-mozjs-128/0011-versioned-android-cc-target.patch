@@ -1,0 +1,17 @@
+The Rust cc crate adds an unversioned Android target which overrides Termux's
+native API-level default. Preserve the native compiler's versioned target when
+building the C++ wrapper, so Bionic declarations and fortify agree.
+
+--- a/mozglue/static/rust/build.rs
++++ b/mozglue/static/rust/build.rs
+@@ -8,6 +8,10 @@
+ fn main() {
+     let mut build = cc::Build::new();
+     build.cpp(true);
++    if let Ok(target) = std::env::var("MOZ_TERMUX_TARGET") {
++        build.flag(&format!("--target={}", target));
++    }
++    println!("cargo:rerun-if-env-changed=MOZ_TERMUX_TARGET");
+     // For js-confdefs.h, see wrappers.cpp.
+     build.include(mozbuild::TOPOBJDIR.join("js").join("src"));
+     build.include(mozbuild::TOPOBJDIR.join("dist").join("include"));

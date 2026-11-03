@@ -1,0 +1,10 @@
+Android has no AccountsService. Use the shim the GNOME-Termux Shell bundle provides.
+
+--- a/usr/share/gnome-shell/extensions/arcmenu@arcmenu.com/menuWidgets.js
++++ b/usr/share/gnome-shell/extensions/arcmenu@arcmenu.com/menuWidgets.js
+@@ -1,4 +1,4 @@
+-import AccountsService from 'gi://AccountsService';
++import * as AccountsService from 'resource:///org/gnome/shell/misc/termux/accountsService.js';
+ import Atk from 'gi://Atk';
+ import Clutter from 'gi://Clutter';
+ import Cogl from 'gi://Cogl';

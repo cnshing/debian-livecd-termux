@@ -1,0 +1,33 @@
+Fix unresolved URL-handler and window-class placeholders in Termux Code OSS.
+
+Apply from a termux-packages checkout at
+ed2ff96a1160c710303c260e08eb62786bfcfda1 using patch -p1.
+This changes the packaging recipe, not the VS Code source tree.
+
+@@DESKTOP_NAME@@ is the window class. It is code-oss rather than product.json's
+linuxDesktopName because the recipe's code.mjs calls app.setName("code-oss"): a real
+window reports WM_CLASS "code-oss", "code-oss".
+
+--- a/x11-packages/code-oss/build.sh
++++ b/x11-packages/code-oss/build.sh
+@@ -3,6 +3,7 @@
+ TERMUX_PKG_LICENSE="MIT"
+ TERMUX_PKG_MAINTAINER="@licy183"
+ TERMUX_PKG_VERSION="1.144.0"
++TERMUX_PKG_REVISION=1
+ TERMUX_PKG_SRCURL=git+https://github.com/microsoft/vscode
+ TERMUX_PKG_GIT_BRANCH="$TERMUX_PKG_VERSION"
+ TERMUX_PKG_DEPENDS="electron43, libx11, libxkbfile, libsecret, ripgrep"
+@@ -151,9 +152,13 @@
+ 	ln -sf $TERMUX_PREFIX/bin/rg $TERMUX_PREFIX/lib/code-oss/resources/app/node_modules.asar.unpacked/@vscode/ripgrep-universal/bin/linux-$NPM_CONFIG_ARCH/rg
+ 
+ 	# Install appdata and desktop file
++	local _url_protocol="$(jq -r '.urlProtocol' product.json)"
+ 	sed -i "s|@@NAME_SHORT@@|Code|g
+ 			s|@@NAME_LONG@@|Code - OSS|g
+ 			s|@@NAME@@|code-oss|g
++			s|@@DESKTOP_NAME@@|code-oss|g
++			s|@@URLPROTOCOL@@|$_url_protocol|g
+ 			s|@@ICON@@|com.visualstudio.code.oss|g
+ 			s|@@EXEC@@|$TERMUX_PREFIX/bin/code-oss|g
+ 			s|@@LICENSE@@|MIT|g" resources/linux/code{.appdata.xml,-workspace.xml,.desktop,-url-handler.desktop}

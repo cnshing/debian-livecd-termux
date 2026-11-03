@@ -1,0 +1,6 @@
+Files under filesystem/live_installed, lb/ and repos/, and packages/fonts.yaml, are unmodified
+copies from https://github.com/cnshing/debian-livecd at this commit:
+cd769287d6511b90d54ad7682416b201e4c44e2f
+
+Everything else is specific to Termux: filesystem/termux, hooks/termux, patches and
+packages/termux.yaml. To see what changed upstream, diff the copied files against a newer commit.

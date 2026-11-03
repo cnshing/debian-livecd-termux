@@ -1,0 +1,6 @@
+# Termux's own packages are patched to look for UPower on the session bus. Asking there
+# starts this same daemon on that bus, on demand. The desktop controller runs the main
+# one on the system bus, for Shell, Mission Center and anything using libupower-glib.
+[D-BUS Service]
+Name=org.freedesktop.UPower
+Exec=@TERMUX_PREFIX@/bin/sh -c 'DBUS_SYSTEM_BUS_ADDRESS=$DBUS_STARTER_ADDRESS exec @TERMUX_PREFIX@/libexec/upowerd'

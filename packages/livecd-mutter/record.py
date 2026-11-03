@@ -1,0 +1,1 @@
+../livecd-gnome-runtime/record.py

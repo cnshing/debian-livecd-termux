@@ -1,0 +1,17 @@
+Attach X11 window surfaces when building without Wayland.
+The trailing else formerly bound the common surface assignment to the
+Wayland branch after preprocessing, leaving every X11 window actor empty.
+
+--- a/src/compositor/meta-window-actor.c
++++ b/src/compositor/meta-window-actor.c
+@@ -504,9 +504,9 @@
+     {
+       surface_actor = meta_surface_actor_x11_new (window);
+     }
+-  else
+ #endif
+ #ifdef HAVE_WAYLAND
++  if (meta_is_wayland_compositor ())
+     {
+       MetaWaylandSurface *surface = meta_window_get_wayland_surface (window);
+       surface_actor = surface ? meta_wayland_surface_get_actor (surface) : NULL;

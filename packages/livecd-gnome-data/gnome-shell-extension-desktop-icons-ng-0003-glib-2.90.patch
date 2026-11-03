@@ -1,0 +1,72 @@
+GLib 2.90 removed the Unix APIs from the GLib and Gio namespaces. Without this, DesktopManager
+throws before it asks the extension for monitor geometry, and no desktop icons ever appear.
+
+--- a/usr/share/gnome-shell/extensions/ding@rastersoft.com/app/desktopManager.js
++++ b/usr/share/gnome-shell/extensions/ding@rastersoft.com/app/desktopManager.js
+@@ -18,9 +18,11 @@
+ /* exported DesktopManager */
+ 'use strict';
+ const GLib = imports.gi.GLib;
++const GLibUnix = imports.gi.GLibUnix;
+ const Gtk = imports.gi.Gtk;
+ const Gdk = imports.gi.Gdk;
+ const Gio = imports.gi.Gio;
++const GioUnix = imports.gi.GioUnix;
+ const ByteArray = imports.byteArray;
+ 
+ const FileItem = imports.fileItem;
+@@ -262,7 +264,7 @@
+         }
+         this._pendingDropFiles = {};
+         if (this._asDesktop) {
+-            this._sigtermID = GLib.unix_signal_add(GLib.PRIORITY_DEFAULT, 15, () => {
++            this._sigtermID = GLibUnix.signal_add(GLib.PRIORITY_DEFAULT, 15, () => {
+                 GLib.source_remove(this._sigtermID);
+                 for (let desktop of this._desktops) {
+                     desktop.destroy();
+@@ -1113,7 +1115,7 @@
+ 
+         this._changeBackgroundMenuItem = new Gtk.MenuItem({label: _('Change Background…')});
+         this._changeBackgroundMenuItem.connect('activate', () => {
+-            const desktopFile = Gio.DesktopAppInfo.new('gnome-background-panel.desktop');
++            const desktopFile = GioUnix.DesktopAppInfo.new('gnome-background-panel.desktop');
+             const context = Gdk.Display.get_default().get_app_launch_context();
+             context.set_timestamp(Gtk.get_current_event_time());
+             desktopFile.launch([], context);
+@@ -1125,7 +1127,7 @@
+         this._settingsMenuItem = new Gtk.MenuItem({label: _('Desktop Icons Settings')});
+         if (GLib.getenv('XDG_CURRENT_DESKTOP').split(':').includes('ubuntu')) {
+             this._settingsMenuItem.connect("activate", () => {
+-                const desktopFile = Gio.DesktopAppInfo.new('gnome-ubuntu-panel.desktop');
++                const desktopFile = GioUnix.DesktopAppInfo.new('gnome-ubuntu-panel.desktop');
+                 const context = Gdk.Display.get_default().get_app_launch_context();
+                 context.set_timestamp(Gtk.get_current_event_time());
+                 desktopFile.launch([], context);
+@@ -1137,7 +1139,7 @@
+ 
+         this._displaySettingsMenuItem = new Gtk.MenuItem({label: _('Display Settings')});
+         this._displaySettingsMenuItem.connect('activate', () => {
+-            const desktopFile = Gio.DesktopAppInfo.new('gnome-display-panel.desktop');
++            const desktopFile = GioUnix.DesktopAppInfo.new('gnome-display-panel.desktop');
+             const context = Gdk.Display.get_default().get_app_launch_context();
+             context.set_timestamp(Gtk.get_current_event_time());
+             desktopFile.launch([], context);
+--- a/usr/share/gnome-shell/extensions/ding@rastersoft.com/app/fileItem.js
++++ b/usr/share/gnome-shell/extensions/ding@rastersoft.com/app/fileItem.js
+@@ -20,6 +20,7 @@
+ const Gtk = imports.gi.Gtk;
+ const Gdk = imports.gi.Gdk;
+ const Gio = imports.gi.Gio;
++const GioUnix = imports.gi.GioUnix;
+ const GLib = imports.gi.GLib;
+ const DesktopIconsUtil = imports.desktopIconsUtil;
+ const desktopIconItem = imports.desktopIconItem;
+@@ -280,7 +281,7 @@
+ 
+         if (this._isDesktopFile) {
+             try {
+-                this._desktopFile = Gio.DesktopAppInfo.new_from_filename(this._file.get_path());
++                this._desktopFile = GioUnix.DesktopAppInfo.new_from_filename(this._file.get_path());
+                 if (!this._desktopFile) {
+                     console.log(`Couldn’t parse ${this._displayName} as a desktop file, will treat it as a regular file.`);
+                     this._isValidDesktopFile = false;

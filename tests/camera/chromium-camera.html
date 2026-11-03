@@ -1,0 +1,71 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Camera test</title>
+<script>
+// Logs CAMTEST lines for run-chromium.py: the cameras Chromium found, the
+// front camera's settings, frame rate, exposure-to-JavaScript latency, the
+// mean color of a wall region, and a small JPEG of the last frame.
+// Frames are read from the track itself, since headless Chromium without a
+// GPU does not render a <video> element. camnode --stamp puts the sensor
+// timestamp (CLOCK_BOOTTIME ns) in the first 8 bytes of each frame; the page
+// URL carries ?offset=, wall-clock minus boot-clock in ns.
+const log = (message) => console.log("CAMTEST " + message);
+const offset = BigInt(new URLSearchParams(location.search).get("offset") || "0");
+
+(async () => {
+  try {
+    const first = await navigator.mediaDevices.getUserMedia({video: true});
+    first.getTracks().forEach((t) => t.stop());
+    const cameras = (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === "videoinput");
+    log("cameras " + JSON.stringify(cameras.map((d) => d.label)));
+    const front = cameras.find((d) => d.label.includes("Phone camera 1")) || cameras[0];
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: {deviceId: {exact: front.deviceId}, width: 1280, height: 720, frameRate: 30},
+    });
+    const track = stream.getVideoTracks()[0];
+    log("track " + track.label + " " + JSON.stringify(track.getSettings()));
+    const reader = new MediaStreamTrackProcessor({track}).readable.getReader();
+    for (let i = 0; i < 15; i++) (await reader.read()).value.close();
+
+    const latencies = [];
+    let count = 0, last = null;
+    const start = performance.now();
+    while (count < 150) {
+      const frame = (await reader.read()).value;
+      const now = BigInt(Math.round((performance.timeOrigin + performance.now()) * 1e3)) * 1000n;
+      const head = new Uint8Array(frame.allocationSize());
+      await frame.copyTo(head);
+      const stamp = new DataView(head.buffer).getBigInt64(0, true);
+      const ms = Number(now - (stamp + offset)) / 1e6;
+      if (ms > 0 && ms < 1000) latencies.push(ms);
+      if (last) last.close();
+      last = frame;
+      count++;
+    }
+    log("fps " + (count / ((performance.now() - start) / 1000)).toFixed(1));
+    latencies.sort((a, b) => a - b);
+    if (latencies.length) log("latency " + latencies[latencies.length >> 1].toFixed(1) + " " + last.format);
+
+    const canvas = document.createElement("canvas");
+    canvas.width = last.displayWidth;
+    canvas.height = last.displayHeight;
+    const g = canvas.getContext("2d", {willReadFrequently: true});
+    g.drawImage(last, 0, 0);
+    last.close();
+    const d = g.getImageData(300, 150, 400, 250).data;
+    const sum = [0, 0, 0];
+    for (let i = 0; i < d.length; i += 4) for (let c = 0; c < 3; c++) sum[c] += d[i + c];
+    log("wall " + sum.map((s) => Math.round(s / (d.length / 4))).join(" "));
+    const small = document.createElement("canvas");
+    small.width = 320;
+    small.height = 180;
+    small.getContext("2d").drawImage(canvas, 0, 0, 320, 180);
+    log("jpeg " + small.toDataURL("image/jpeg", 0.8));
+    reader.cancel();
+    track.stop();
+    log("done");
+  } catch (e) {
+    log("error " + e.name + ": " + e.message);
+  }
+})();
+</script>

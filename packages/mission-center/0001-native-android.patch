@@ -1,0 +1,798 @@
+diff --git a/build.rs b/build.rs
+new file mode 100644
+index 0000000..3f4686d
+--- /dev/null
++++ b/build.rs
+@@ -0,0 +1,5 @@
++fn main() {
++    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("android") {
++        println!("cargo:rustc-link-lib=iconv");
++    }
++}
+diff --git a/resources/ui/performance_page/gpu_details.blp b/resources/ui/performance_page/gpu_details.blp
+index 480526b..1bcac6b 100644
+--- a/resources/ui/performance_page/gpu_details.blp
++++ b/resources/ui/performance_page/gpu_details.blp
+@@ -611,7 +611,7 @@ template $GpuDetails: Box {
+         halign: start;
+         margin-end: 5;
+ 
+-        label: _("PCI bus address:");
++        label: _("Device ID:");
+         ellipsize: end;
+       }
+ 
+diff --git a/src/apps_page/mod.rs b/src/apps_page/mod.rs
+index 407635c..161486f 100644
+--- a/src/apps_page/mod.rs
++++ b/src/apps_page/mod.rs
+@@ -310,10 +310,20 @@ impl AppsPage {
+ 
+         let mut process_model_map = HashMap::new();
+         let root_process = readings.running_processes.keys().min().unwrap_or(&1);
+-        if let Some(init) = readings.running_processes.get(root_process) {
++        let roots = if cfg!(target_os = "android") {
++            // Android hides other UIDs, including the parents of many Termux
++            // processes. Every visible orphan must remain reachable in the UI.
++            readings.running_processes.values()
++                .filter(|p| p.parent == p.pid || !readings.running_processes.contains_key(&p.parent))
++                .map(|p| p.pid).collect()
++        } else {
++            readings.running_processes.get(root_process)
++                .map(|p| p.children.iter().copied().collect()).unwrap_or_default()
++        };
++        {
+             update_processes(
+                 &readings.running_processes,
+-                init.children.clone().drain(..).collect(),
++                roots,
+                 &imp.processes_section.children(),
+                 &imp.app_icons.borrow(),
+                 &Default::default(),
+diff --git a/src/first_run_dialog.rs b/src/first_run_dialog.rs
+index 847d7ce..be5ea9c 100644
+--- a/src/first_run_dialog.rs
++++ b/src/first_run_dialog.rs
+@@ -102,6 +102,9 @@ impl FirstRunDialog {
+         this
+     }
+     pub fn run() {
++        // The Linux setup script changes groups and system services which do
++        // not exist in Termux. Android CPU access is set up explicitly via rish.
++        if cfg!(target_os = "android") { return; }
+         let app = app!();
+ 
+         let Some(window) = app.window() else {
+diff --git a/src/magpie_client/client.rs b/src/magpie_client/client.rs
+index a27f74c..b1b4d84 100644
+--- a/src/magpie_client/client.rs
++++ b/src/magpie_client/client.rs
+@@ -504,7 +504,7 @@ impl Client {
+                         flatpak_data_dir().display()
+                     ))
+                 } else {
+-                    Arc::from(format!("ipc:///tmp/magpie_{}.ipc\0", random_string::<8>()))
++                    Arc::from(format!("ipc://{}/magpie_{}.ipc\0", std::env::temp_dir().display(), random_string::<8>()))
+                 }
+             };
+ 
+diff --git a/src/meson.build b/src/meson.build
+index 54d79f3..8aae15c 100644
+--- a/src/meson.build
++++ b/src/meson.build
+@@ -1,7 +1,7 @@
+ pkgdatadir = join_paths(get_option('prefix'), get_option('datadir'), meson.project_name())
+ 
+ gnome = import('gnome')
+-libudev = dependency('libudev', required: true)
++# GPU telemetry is collected by the platform backend, not the GUI.
+ 
+ conf = configuration_data()
+ conf.set_quoted('VERSION', meson.project_version())
+diff --git a/src/performance_page/cpu.rs b/src/performance_page/cpu.rs
+index a07e506..3ba7d9e 100644
+--- a/src/performance_page/cpu.rs
++++ b/src/performance_page/cpu.rs
+@@ -638,6 +638,16 @@ mod imp {
+             this: &super::PerformancePageCpu,
+             readings: &crate::magpie_client::Readings,
+         ) -> bool {
++            if let Some(error) = readings.cpu.sample_error.as_deref() {
++                if let Some(utilization) = this.imp().utilization.get() {
++                    utilization.set_text("Unavailable");
++                    utilization.set_tooltip_text(Some(error));
++                }
++                return true;
++            }
++            if let Some(utilization) = this.imp().utilization.get() {
++                utilization.set_tooltip_text(None);
++            }
+             let mut graph_widgets = this.imp().graph_widgets.take();
+             let this = this.imp();
+ 
+diff --git a/src/performance_page/gpu.rs b/src/performance_page/gpu.rs
+index b91b8e5..9dc301d 100644
+--- a/src/performance_page/gpu.rs
++++ b/src/performance_page/gpu.rs
+@@ -589,7 +589,7 @@ mod imp {
+                     vulkan_version.patch.unwrap_or(0)
+                 )
+             } else {
+-                i18n("Unsupported")
++                i18n(if cfg!(target_os = "android") { "Unknown" } else { "Unsupported" })
+             };
+             this.infobar_content.vulkan_version().set_text(&vk_version);
+ 
+@@ -704,14 +704,10 @@ mod imp {
+         }
+ 
+         fn update_utilization(&self, gpu: &Gpu) {
+-            let overall_usage = gpu.utilization_percent.unwrap_or_else(|| {
+-                g_warning!(
+-                    "MissionCenter::PerformancePage",
+-                    "GPU '{}' utilization data is missing",
+-                    gpu.id
+-                );
+-                0.
+-            });
++            let Some(overall_usage) = gpu.utilization_percent else {
++                self.infobar_content.utilization().set_text(&i18n("Unavailable"));
++                return;
++            };
+ 
+             self.graph_utilization
+                 .add_data_point(vec![vec![overall_usage]]);
+diff --git a/src/performance_page/mod.rs b/src/performance_page/mod.rs
+index 52ad4fe..4f56fee 100644
+--- a/src/performance_page/mod.rs
++++ b/src/performance_page/mod.rs
+@@ -2226,6 +2226,14 @@ mod imp {
+             for page in &mut pages {
+                 match page {
+                     Pages::Cpu((summary, page)) => {
++                        if let Some(error) = readings.cpu.sample_error.as_deref() {
++                            summary.set_info1("CPU counters unavailable");
++                            summary.set_info2("Check Shizuku authorization");
++                            summary.set_tooltip_text(Some(error));
++                            result &= page.update_readings(readings);
++                            continue;
++                        }
++                        summary.set_tooltip_text(None);
+                         let graph_widget = summary.graph_widget();
+ 
+                         let mut info2 = ArrayString::<256>::new();
+diff --git a/subprojects/magpie/Cargo.toml b/subprojects/magpie/Cargo.toml
+index af475e0..c236105 100644
+--- a/subprojects/magpie/Cargo.toml
++++ b/subprojects/magpie/Cargo.toml
+@@ -29,7 +29,7 @@ features = ["derive"]
+ [dependencies.magpie-platform]
+ path = "platform"
+ 
+-[target.'cfg(target_os = "linux")'.dependencies.magpie-platform-linux]
++[target.'cfg(any(target_os = "linux", target_os = "android"))'.dependencies.magpie-platform-linux]
+ path = "platform-linux"
+ 
+ [dependencies.nng-c-sys]
+diff --git a/subprojects/magpie/platform-linux/Cargo.toml b/subprojects/magpie/platform-linux/Cargo.toml
+index c89b685..c25688e 100644
+--- a/subprojects/magpie/platform-linux/Cargo.toml
++++ b/subprojects/magpie/platform-linux/Cargo.toml
+@@ -6,8 +6,6 @@ edition = "2021"
+ [dependencies]
+ anyhow = "1.0"
+ arrayvec = "0.7"
+-ash = "0.38"
+-drm = "0.14"
+ futures-lite = "2.6"
+ glob = "0.3"
+ libc = "0.2"
+@@ -17,7 +15,6 @@ regex = "1.11"
+ sysinfo = "0.37"
+ thiserror = "2.0"
+ trim-in-place = "0.1"
+-udisks2 = "0.3"
+ vt100 = "0.16"
+ virtual-terminal = "0.1"
+ futures = "0.3" # used to poll dbus streams (disk impl)
+@@ -36,12 +33,17 @@ path = "crates/app-rummage"
+ version = "0.6"
+ features = ["serde"]
+ 
+-[dependencies.egl]
++[target.'cfg(not(target_os = "android"))'.dependencies]
++ash = "0.38"
++drm = "0.14"
++udisks2 = "0.3"
++
++[target.'cfg(not(target_os = "android"))'.dependencies.egl]
+ package = "khronos-egl"
+ version = "6.0"
+ features = ["libloading", "dynamic"]
+ 
+-[dependencies.gbm]
++[target.'cfg(not(target_os = "android"))'.dependencies.gbm]
+ version = "0.18"
+ default-features = false
+ features = ["drm-support"]
+@@ -70,7 +72,7 @@ version = "1.47"
+ default-features = false
+ features = ["rt", "macros"]
+ 
+-[dependencies.uucore]
++[target.'cfg(not(target_os = "android"))'.dependencies.uucore]
+ version = "0.9"
+ features = ["fsext"]
+ 
+diff --git a/subprojects/magpie/platform-linux/build.rs b/subprojects/magpie/platform-linux/build.rs
+index 3a7ce51..9a75f57 100644
+--- a/subprojects/magpie/platform-linux/build.rs
++++ b/subprojects/magpie/platform-linux/build.rs
+@@ -262,6 +262,9 @@ fn build_nvtop(src_dir: &std::path::Path) -> Result<(), Box<dyn std::error::Erro
+ }
+ 
+ fn main() -> Result<(), Box<dyn std::error::Error>> {
++    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("android") {
++        return Ok(()); // Android GPU telemetry is explicitly unsupported.
++    }
+     let dirs = prepare_third_party_sources()?;
+     build_nvtop(
+         dirs.get("nvtop")
+diff --git a/subprojects/magpie/platform-linux/src/battery.rs b/subprojects/magpie/platform-linux/src/battery.rs
+--- a/subprojects/magpie/platform-linux/src/battery.rs
++++ b/subprojects/magpie/platform-linux/src/battery.rs
+@@ -316,6 +316,29 @@
+     sysfs_exists: bool,
+     mut update_upower: bool,
+ ) -> bool {
++    // Android's upowerd reads the battery when asked, so every refresh is a new
++    // sample that replaces the last. Without a sysfs twin, the values below would
++    // otherwise keep their first reading. The history only moves with the charge.
++    #[cfg(target_os = "android")]
++    let update_history = match device {
++        Some(device_upower) => {
++            let changed = stream_has_contents(&mut device_upower.stream).await.is_some();
++            let _ = device_upower.device.refresh().await;
++            battery.energy = None;
++            battery.voltage = None;
++            battery.charge_cycles = None;
++            battery.power = None;
++            battery.state = None;
++            battery.temp = None;
++            battery.time_to_full = None;
++            battery.time_to_empty = None;
++            let update_history = update_upower || changed;
++            update_upower = true;
++            update_history
++        }
++        None => update_upower,
++    };
++
+     battery.percentage = {
+         let parsed: std::option::Option<f32> =
+             read_from_sysfs(&battery.name, "capacity").and_then(parse_str);
+@@ -414,9 +437,22 @@
+         }
+     }
+ 
++    #[cfg(not(target_os = "android"))]
++    let update_history = update_upower;
++
+     if update_upower {
+         if let Some(device_upower) = device {
+             let device = &device_upower.device;
++            #[cfg(target_os = "android")]
++            {
++                // upower_dbus does not expose this property.
++                battery.charge_cycles = device
++                    .inner()
++                    .get_property::<i32>("ChargeCycles")
++                    .await
++                    .ok()
++                    .and_then(|x| u32::try_from(x).ok());
++            }
+             macro_rules! set_upower_value {
+                 ($e:ident, $typ:ty, $zero:expr) => {
+                     set_upower_value!($e, $e, $typ, $zero, (|x| {x}))
+@@ -461,7 +497,7 @@
+                     device.charge_threshold_enabled().await.unwrap_or(false);
+             }
+ 
+-            if device.has_history().await.unwrap_or(false) {
++            if update_history && device.has_history().await.unwrap_or(false) {
+                 const TOTAL_SECS: usize = 3600 * 24 * 7;
+ 
+                 battery.history.clear();
+diff --git a/subprojects/magpie/platform-linux/src/cpu/cpu.rs b/subprojects/magpie/platform-linux/src/cpu/cpu.rs
+index 18f090f..fa5ec59 100644
+--- a/subprojects/magpie/platform-linux/src/cpu/cpu.rs
++++ b/subprojects/magpie/platform-linux/src/cpu/cpu.rs
+@@ -28,6 +28,13 @@ use crate::read_u64;
+ pub fn name() -> &'static str {
+     static NAME: OnceLock<String> = OnceLock::new();
+     NAME.get_or_init(|| {
++        if cfg!(target_os = "android") {
++            for path in ["/sys/devices/soc0/machine", "/sys/devices/system/soc/soc0/machine"] {
++                if let Ok(name) = std::fs::read_to_string(path) {
++                    if !name.trim().is_empty() { return name.trim().to_owned(); }
++                }
++            }
++        }
+         let s = System::new_with_specifics(
+             RefreshKind::nothing().with_cpu(CpuRefreshKind::everything()),
+         );
+@@ -41,6 +48,8 @@ pub fn name() -> &'static str {
+ }
+ 
+ pub fn socket_count() -> Option<u32> {
++    // Android's physical_package_id can identify CPU clusters on one SoC.
++    if cfg!(target_os = "android") { return None; }
+     let mut sockets = HashSet::new();
+     sockets.reserve(4);
+ 
+@@ -77,6 +86,10 @@ pub fn socket_count() -> Option<u32> {
+ }
+ 
+ pub fn temperature() -> Option<f32> {
++    if cfg!(target_os = "android") {
++        return crate::proc_stat::request("thermals").ok()
++            .and_then(|snapshot| crate::proc_stat::thermal(&snapshot, &["cpu", "cpuss"]));
++    }
+     let dir = match std::fs::read_dir("/sys/class/hwmon") {
+         Ok(d) => d,
+         Err(e) => {
+diff --git a/subprojects/magpie/platform-linux/src/cpu/mod.rs b/subprojects/magpie/platform-linux/src/cpu/mod.rs
+index d1f8afb..e4f5a62 100644
+--- a/subprojects/magpie/platform-linux/src/cpu/mod.rs
++++ b/subprojects/magpie/platform-linux/src/cpu/mod.rs
+@@ -37,6 +37,7 @@ mod virt;
+ pub struct CpuCache {
+     info: Cpu,
+     ticks_prev: Ticks,
++    have_baseline: bool,
+     core_ticks_prev: Vec<Ticks>,
+     power_draw: Option<PowerDraw>,
+ 
+@@ -77,10 +78,19 @@ impl CpuCache {
+         let per_core_kernel_usage = &mut info.core_kernel_usage_percent[..cpu_count];
+         let per_core_save = &mut self.core_ticks_prev[..cpu_count];
+ 
+-        let proc_stat = std::fs::read_to_string("/proc/stat").unwrap_or_else(|e| {
+-            log::error!("Failed to read /proc/stat: {e}");
+-            String::new()
+-        });
++        let proc_stat = match crate::proc_stat::read() {
++            Ok(snapshot) => { info.sample_error = None; snapshot }
++            Err(e) => {
++                log::error!("CPU counters unavailable: {e}");
++                info.sample_error = Some(format!("CPU counters unavailable: {e}. Check Shizuku and run livecd-resources-setup."));
++                info.total_usage_percent = 0.;
++                info.kernel_usage_percent = 0.;
++                per_core_usage.fill(0.);
++                per_core_kernel_usage.fill(0.);
++                self.have_baseline = false;
++                return;
++            }
++        };
+ 
+         let mut line_iter = proc_stat
+             .lines()
+@@ -104,6 +114,14 @@ impl CpuCache {
+             per_core_kernel_usage.fill(0.);
+         }
+ 
++        // The first sample establishes a baseline, including after reconnect.
++        if !self.have_baseline {
++            info.total_usage_percent = 0.;
++            info.kernel_usage_percent = 0.;
++            per_core_usage.fill(0.);
++            per_core_kernel_usage.fill(0.);
++            self.have_baseline = true;
++        }
+         info.current_frequency_mhz = cpufreq::current();
+         info.temperature_celsius = cpu::temperature();
+         info.total_process_count = system::process_count();
+@@ -134,6 +152,7 @@ impl magpie_platform::cpu::CpuCache for CpuCache {
+         Self {
+             info,
+             ticks_prev: Ticks::default(),
++            have_baseline: false,
+             core_ticks_prev: core_ticks,
+             power_draw: PowerDraw::default(),
+ 
+diff --git a/subprojects/magpie/platform-linux/src/cpu/system.rs b/subprojects/magpie/platform-linux/src/cpu/system.rs
+index 2563fd2..0fc5414 100644
+--- a/subprojects/magpie/platform-linux/src/cpu/system.rs
++++ b/subprojects/magpie/platform-linux/src/cpu/system.rs
+@@ -27,13 +27,22 @@ use arrayvec::ArrayString;
+ use crate::{for_process_in_proc, read_u64};
+ 
+ pub fn process_count() -> u64 {
++    #[cfg(target_os = "android")]
++    { return crate::processes::counts().0; }
++    #[cfg(not(target_os = "android"))]
++    {
+     let mut count = 0;
+     for_process_in_proc(|_, _| count += 1);
+ 
+     count
++    }
+ }
+ 
+ pub fn thread_count() -> u64 {
++    #[cfg(target_os = "android")]
++    { return crate::processes::counts().1; }
++    #[cfg(not(target_os = "android"))]
++    {
+     fn task_path(pid: u32) -> ArrayString<21> {
+         const MAX_U32_LEN: usize = 10;
+         const MAX_PATH_LEN: usize = "/proc/".len() + "/task".len() + MAX_U32_LEN;
+@@ -66,6 +75,7 @@ pub fn thread_count() -> u64 {
+     });
+ 
+     result
++    }
+ }
+ 
+ pub fn handle_count() -> u64 {
+@@ -76,7 +86,7 @@ pub fn uptime() -> Duration {
+     let ts = unsafe {
+         let mut ts = std::mem::MaybeUninit::uninit();
+         if libc::clock_gettime(libc::CLOCK_BOOTTIME, ts.as_mut_ptr()) == -1 {
+-            let errno = *libc::__errno_location();
++            let errno = *crate::util::errno_location();
+             let error_string = CStr::from_ptr(libc::strerror(errno));
+             log::error!("Failed to get system uptime: {:?}", error_string);
+             return Duration::from_millis(0);
+diff --git a/subprojects/magpie/platform-linux/src/cpu/ticks.rs b/subprojects/magpie/platform-linux/src/cpu/ticks.rs
+index f861379..f3a9eb2 100644
+--- a/subprojects/magpie/platform-linux/src/cpu/ticks.rs
++++ b/subprojects/magpie/platform-linux/src/cpu/ticks.rs
+@@ -56,6 +56,7 @@ impl Ticks {
+         *self = new_ticks;
+ 
+         let total = (used + kernel + idle) as f32;
++        if total == 0. { return (0., 0.); }
+         (
+             (used + kernel) as f32 / total * 100.0,
+             kernel as f32 / total * 100.0,
+diff --git a/subprojects/magpie/platform-linux/src/disks_android.rs b/subprojects/magpie/platform-linux/src/disks_android.rs
+new file mode 100644
+index 0000000..4cdd823
+--- /dev/null
++++ b/subprojects/magpie/platform-linux/src/disks_android.rs
+@@ -0,0 +1,16 @@
++// SPDX-License-Identifier: GPL-3.0-or-later
++// Android does not run UDisks; do not offer desktop disk eject/SMART operations.
++use std::collections::HashMap;
++use magpie_platform::{disks::*, processes::Process, Mutex};
++pub struct DisksCache;
++impl magpie_platform::disks::DisksCache for DisksCache {
++ fn new() -> Self { Self }
++ fn refresh(&mut self) {}
++ fn cached_entries(&self) -> &[Disk] { &[] }
++}
++pub struct DisksManager;
++impl magpie_platform::disks::DisksManager for DisksManager {
++ fn new() -> Self { Self }
++ fn eject(&self, _id: &str, _processes: &Mutex<HashMap<u32, Process>>) -> Result<(), DisksResponseErrorEjectFailed> { Err(Default::default()) }
++ fn smart_data(&self, _id: &str) -> Option<DiskSmartData> { None }
++}
+diff --git a/subprojects/magpie/platform-linux/src/gpus_android.rs b/subprojects/magpie/platform-linux/src/gpus_android.rs
+new file mode 100644
+index 0000000..56b6289
+--- /dev/null
++++ b/subprojects/magpie/platform-linux/src/gpus_android.rs
+@@ -0,0 +1,33 @@
++// SPDX-License-Identifier: GPL-3.0-or-later
++// Qualcomm KGSL telemetry, read by shell on demand. Missing fields stay None.
++use std::collections::HashMap;
++use magpie_platform::gpus::Gpu;
++pub struct GpuCache(HashMap<String, Gpu>);
++impl magpie_platform::gpus::GpuCache for GpuCache {
++    fn new() -> Self { Self(HashMap::new()) }
++    fn refresh(&mut self) {
++        self.0.clear();
++        let Ok(snapshot) = crate::proc_stat::request("telemetry") else { return };
++        let field = |key: &str| snapshot.lines().find_map(|line| {
++            let (name, value) = line.split_once('\t')?;
++            (name == key).then_some(value.trim())
++        });
++        let Some(model) = field("gpu_model") else { return };
++        let mut gpu = Gpu::default();
++        gpu.id = "kgsl-3d0".into();
++        gpu.device_name = Some(model.into());
++        gpu.temperature_c = crate::proc_stat::thermal(&snapshot, &["gpuss", "gpu"]);
++        if let Some(busy) = field("gpubusy") {
++            let values: Vec<u64> = busy.split_whitespace().filter_map(|s| s.parse().ok()).collect();
++            if values.len() == 2 && values[1] > 0 && values[0] <= values[1] {
++                gpu.utilization_percent = Some(values[0] as f32 / values[1] as f32 * 100.);
++            }
++        }
++        gpu.clock_speed_mhz = field("gpuclk").and_then(|s| s.parse::<u64>().ok()).map(|hz| (hz / 1_000_000) as u32);
++        gpu.max_clock_speed_mhz = field("gpu_available_frequencies")
++            .and_then(|s| s.split_whitespace().filter_map(|v| v.parse::<u64>().ok()).max())
++            .map(|hz| (hz / 1_000_000) as u32);
++        self.0.insert(gpu.id.clone(), gpu);
++    }
++    fn cached_entries(&self) -> &HashMap<String, Gpu> { &self.0 }
++}
+diff --git a/subprojects/magpie/platform-linux/src/lib.rs b/subprojects/magpie/platform-linux/src/lib.rs
+index 8f4b5a1..ab08fd8 100644
+--- a/subprojects/magpie/platform-linux/src/lib.rs
++++ b/subprojects/magpie/platform-linux/src/lib.rs
+@@ -25,11 +25,24 @@ mod apps;
+ mod battery;
+ mod config_dir;
+ mod cpu;
++#[cfg(not(target_os = "android"))]
++mod disks;
++#[cfg(target_os = "android")]
++#[path = "disks_android.rs"]
+ mod disks;
+ mod fan;
++#[cfg(not(target_os = "android"))]
++mod gpus;
++#[cfg(target_os = "android")]
++#[path = "gpus_android.rs"]
+ mod gpus;
++mod proc_stat;
+ mod memory;
+ mod network;
++#[cfg(not(target_os = "android"))]
++mod processes;
++#[cfg(target_os = "android")]
++#[path = "processes_android.rs"]
+ mod processes;
+ mod services;
+ 
+diff --git a/subprojects/magpie/platform-linux/src/memory.rs b/subprojects/magpie/platform-linux/src/memory.rs
+index 6217c2f..195a6b3 100644
+--- a/subprojects/magpie/platform-linux/src/memory.rs
++++ b/subprojects/magpie/platform-linux/src/memory.rs
+@@ -220,6 +220,7 @@ fn refresh_memory(memory: &mut Memory) {
+ }
+ 
+ pub fn read_memory_device_info(devices: &mut Vec<MemoryDevice>) -> u64 {
++    if cfg!(target_os = "android") { devices.clear(); return 0; }
+     let mut cmd = Command::new("udevadm");
+     cmd.arg("info")
+         .arg("-q")
+diff --git a/subprojects/magpie/platform-linux/src/processes_android.rs b/subprojects/magpie/platform-linux/src/processes_android.rs
+new file mode 100644
+index 0000000..e696103
+--- /dev/null
++++ b/subprojects/magpie/platform-linux/src/processes_android.rs
+@@ -0,0 +1,94 @@
++// SPDX-License-Identifier: GPL-3.0-or-later
++// Read-only shell snapshots; process control retains native UID permissions.
++use std::{collections::HashMap, time::Instant};
++use std::sync::atomic::{AtomicU64, Ordering};
++use magpie_platform::processes::{NetworkStatsError, Process, ProcessState, ProcessUsageStats};
++#[path = "processes/manager.rs"]
++mod manager;
++pub use manager::ProcessManager;
++static PROCESS_COUNT: AtomicU64 = AtomicU64::new(0);
++static THREAD_COUNT: AtomicU64 = AtomicU64::new(0);
++pub fn counts() -> (u64, u64) {
++    (PROCESS_COUNT.load(Ordering::Relaxed), THREAD_COUNT.load(Ordering::Relaxed))
++}
++
++pub struct ProcessCache {
++    entries: HashMap<u32, Process>,
++    ticks: HashMap<u32, (u64, u64)>, // start time prevents PID-reuse spikes
++    timestamp: Instant,
++    network_error: Option<NetworkStatsError>,
++}
++
++fn state(value: &str) -> ProcessState {
++    match value {
++        "R" => ProcessState::Running, "S" => ProcessState::Sleeping,
++        "D" => ProcessState::SleepingUninterruptible, "Z" => ProcessState::Zombie,
++        "T" => ProcessState::Stopped, "t" => ProcessState::Tracing,
++        "X" | "x" => ProcessState::Dead, "K" => ProcessState::WakeKill,
++        "W" => ProcessState::Waking, "P" => ProcessState::Parked,
++        _ => ProcessState::Unknown,
++    }
++}
++
++impl magpie_platform::processes::ProcessCache for ProcessCache {
++    fn new() -> Self {
++        Self { entries: HashMap::new(), ticks: HashMap::new(), timestamp: Instant::now(), network_error: Some(NetworkStatsError::PermissionsError(Default::default())) }
++    }
++    fn refresh(&mut self) {
++        let snapshot = match crate::proc_stat::request("processes") {
++            Ok(snapshot) => snapshot,
++            Err(e) => {
++                log::error!("Android process snapshot unavailable: {e}");
++                self.entries.clear(); self.ticks.clear();
++                PROCESS_COUNT.store(0, Ordering::Relaxed); THREAD_COUNT.store(0, Ordering::Relaxed);
++                return;
++            }
++        };
++        let now = Instant::now();
++        let elapsed = now.duration_since(self.timestamp).as_secs_f64();
++        let old_ticks = std::mem::take(&mut self.ticks);
++        let mut entries = HashMap::new();
++        let hz = crate::util::sys_hz() as f64;
++        let page_size = crate::util::sys_page_size() as u64;
++        for line in snapshot.lines() {
++            let fields: Vec<_> = line.split('\t').collect();
++            if fields.len() != 6 || fields[0] != "P" { continue; }
++            let Ok(pid) = fields[1].parse::<u32>() else { continue };
++            let Ok(stat) = crate::proc_stat::unhex(fields[3]) else { continue };
++            let (Some(first), Some(last)) = (stat.find('('), stat.rfind(')')) else { continue };
++            if last <= first { continue; }
++            let values: Vec<_> = stat[last + 1..].split_whitespace().collect();
++            if values.len() < 22 { continue; }
++            let parse = |i: usize| values[i].parse::<u64>().unwrap_or(0);
++            let start = parse(19);
++            let ticks = parse(11).saturating_add(parse(12));
++            let cpu = old_ticks.get(&pid).filter(|(old_start, _)| *old_start == start)
++                .map(|(_, previous)| ticks.saturating_sub(*previous) as f64 / hz / elapsed * 100.)
++                .filter(|value| value.is_finite()).unwrap_or(0.) as f32;
++            self.ticks.insert(pid, (start, ticks));
++            let cmd = crate::proc_stat::unhex(fields[4]).unwrap_or_default()
++                .split('\0').filter(|part| !part.is_empty()).map(str::to_owned).collect();
++            let exe = crate::proc_stat::unhex(fields[5]).unwrap_or_default();
++            let mut usage = ProcessUsageStats::default();
++            usage.cpu_usage = cpu;
++            usage.memory_usage = parse(21).saturating_mul(page_size); // RSS, not PSS
++            entries.insert(pid, Process {
++                name: stat[first + 1..last].to_owned(), cmd, exe,
++                state: state(values[0]) as i32, pid, parent: parse(1) as u32,
++                usage_stats: usage, task_count: parse(17), children: Vec::new(),
++            });
++        }
++        // Build all trees, including Android parents that native Termux cannot see.
++        let parents: Vec<_> = entries.values().map(|p| (p.pid, p.parent)).collect();
++        for (pid, parent) in parents {
++            if pid == parent { continue; }
++            if let Some(p) = entries.get_mut(&parent) { p.children.push(pid); }
++        }
++        PROCESS_COUNT.store(entries.len() as u64, Ordering::Relaxed);
++        THREAD_COUNT.store(entries.values().map(|p| p.task_count).sum(), Ordering::Relaxed);
++        self.entries = entries;
++        self.timestamp = now;
++    }
++    fn cached_entries(&self) -> &HashMap<u32, Process> { &self.entries }
++    fn cached_network_stats_error(&self) -> &Option<NetworkStatsError> { &self.network_error }
++}
+diff --git a/subprojects/magpie/platform-linux/src/util.rs b/subprojects/magpie/platform-linux/src/util.rs
+index f4ec7c8..23ca03f 100644
+--- a/subprojects/magpie/platform-linux/src/util.rs
++++ b/subprojects/magpie/platform-linux/src/util.rs
+@@ -78,10 +78,14 @@ pub fn cpu_count() -> usize {
+     static CPU_COUNT: OnceLock<usize> = OnceLock::new();
+ 
+     *CPU_COUNT.get_or_init(|| {
+-        let proc_stat = std::fs::read_to_string("/proc/stat").unwrap_or_else(|e| {
+-            log::error!("Failed to read /proc/stat: {}", e);
+-            "".to_owned()
+-        });
++        let proc_stat = match crate::proc_stat::read() {
++            Ok(snapshot) => snapshot,
++            Err(e) => {
++                log::error!("Failed to discover CPU cores from /proc/stat: {e}");
++                // Topology only; never manufacture utilization counters.
++                return unsafe { libc::sysconf(libc::_SC_NPROCESSORS_CONF) }.max(1) as usize;
++            }
++        };
+ 
+         proc_stat
+             .lines()
+@@ -127,11 +131,11 @@ pub fn hardware_db() -> &'static Path {
+             if let Ok(path) = std::env::var("MC_MAGPIE_HW_DB") {
+                 PathBuf::from(path).canonicalize().unwrap_or_else(|e| {
+                     log::error!("Failed to canonicalize hardware database location: {e}. Using default location");
+-                    PathBuf::from("/usr/share/missioncenter/hw.db")
++                    PathBuf::from("@TERMUX_PREFIX@/share/missioncenter/hw.db")
+                 })
+             } else {
+                 log::debug!("MC_MAGPIE_HW_DB not set, using default hardware database location");
+-                PathBuf::from("/usr/share/missioncenter/hw.db")
++                PathBuf::from("@TERMUX_PREFIX@/share/missioncenter/hw.db")
+             }
+         })
+         .as_path()
+@@ -175,9 +179,9 @@ pub fn read_i64<'a>(path: impl Into<&'a str>, what: &str) -> Option<i64> {
+     let mut end_ptr: *mut libc::c_char = std::ptr::null_mut();
+ 
+     // Set errno to 0 before calling strtoull
+-    unsafe { libc::__errno_location().write(0) };
++    unsafe { crate::util::errno_location().write(0) };
+     let result = unsafe { libc::strtoll(buffer.as_ptr() as _, &mut end_ptr, 10) };
+-    let errno = unsafe { *libc::__errno_location() };
++    let errno = unsafe { *crate::util::errno_location() };
+ 
+     if errno == libc::ERANGE && result == c_longlong::MAX {
+         log::warn!(
+@@ -220,9 +224,9 @@ pub fn parse_u64(bytes: &[u8], base: u8, what: &str) -> Option<u64> {
+     let mut end_ptr: *mut libc::c_char = std::ptr::null_mut();
+ 
+     // Set errno to 0 before calling strtoull
+-    unsafe { libc::__errno_location().write(0) };
++    unsafe { crate::util::errno_location().write(0) };
+     let result = unsafe { libc::strtoull(bytes.as_ptr() as _, &mut end_ptr, base as _) };
+-    let errno = unsafe { *libc::__errno_location() };
++    let errno = unsafe { *crate::util::errno_location() };
+ 
+     if errno == libc::ERANGE && result == c_ulonglong::MAX {
+         log::warn!("Failed to read {what}. Value out of range: `{c_str:?}`",);
+@@ -372,3 +376,11 @@ pub fn user_bus() -> Option<&'static zbus::Connection> {
+         })
+         .as_ref()
+ }
++
++// Bionic exports __errno, glibc exports __errno_location.
++pub unsafe fn errno_location() -> *mut libc::c_int {
++    #[cfg(target_os = "android")]
++    { libc::__errno() }
++    #[cfg(not(target_os = "android"))]
++    { libc::__errno_location() }
++}
+diff --git a/subprojects/magpie/platform/src/cpu.rs b/subprojects/magpie/platform/src/cpu.rs
+index e852598..3789ca1 100644
+--- a/subprojects/magpie/platform/src/cpu.rs
++++ b/subprojects/magpie/platform/src/cpu.rs
+@@ -62,9 +62,11 @@ where
+     CC: CpuCache + Send,
+ {
+     pub fn new() -> Self {
++        let cpu = CC::new();
++        let local_cache = Mutex::new(cpu.cached().clone());
+         Self {
+-            cpu: Mutex::new(CC::new()),
+-            local_cache: Mutex::new(Cpu::default()),
++            cpu: Mutex::new(cpu),
++            local_cache,
+             refreshing: AtomicBool::new(false),
+         }
+     }
+diff --git a/subprojects/magpie/src/main.rs b/subprojects/magpie/src/main.rs
+index d9d2d66..3d657f3 100644
+--- a/subprojects/magpie/src/main.rs
++++ b/subprojects/magpie/src/main.rs
+@@ -31,7 +31,7 @@ use signal_hook::flag as signal_flag;
+ use magpie_platform::ipc::{Request, RequestBody, Response, ResponseBody, ResponseError};
+ use magpie_platform::DataCache;
+ 
+-#[cfg(target_os = "linux")]
++#[cfg(any(target_os = "linux", target_os = "android"))]
+ use magpie_platform_linux as magpie_platform_os;
+ 
+ use magpie_platform_os::DataCacheTypes;
+@@ -381,7 +381,7 @@ fn main() -> magpie_platform::Result<()> {
+         return Ok(());
+     }
+ 
+-    #[cfg(target_os = "linux")]
++    #[cfg(any(target_os = "linux", target_os = "android"))]
+     unsafe {
+         libc::prctl(libc::PR_SET_PDEATHSIG, SIGKILL);
+     }
+diff --git a/subprojects/magpie/src/setup_script.rs b/subprojects/magpie/src/setup_script.rs
+index 9c83f2a..9808841 100644
+--- a/subprojects/magpie/src/setup_script.rs
++++ b/subprojects/magpie/src/setup_script.rs
+@@ -27,7 +27,7 @@ use magpie_platform::setup_script::{
+     ScriptName, ScriptRequestKind, ScriptResponse, ScriptResponseKind,
+ };
+ 
+-#[cfg(target_os = "linux")]
++#[cfg(any(target_os = "linux", target_os = "android"))]
+ use magpie_platform_linux::setup_script::{get_elevation_command, get_file_name, open, run};
+ 
+ use crate::{data_cache, nng};
+diff --git a/subprojects/magpie/types/src/cpu.proto b/subprojects/magpie/types/src/cpu.proto
+index fc0fb39..993e487 100644
+--- a/subprojects/magpie/types/src/cpu.proto
++++ b/subprojects/magpie/types/src/cpu.proto
+@@ -47,6 +47,7 @@ message Cpu {
+   optional string frequency_governor = 21;
+   optional string power_preference = 22;
+   optional float power_draw_w = 23;
++  optional string sample_error = 24;
+ }
+ 
+ message CpuRequest {}

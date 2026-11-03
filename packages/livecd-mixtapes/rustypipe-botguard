@@ -1,0 +1,9 @@
+#!/data/data/com.termux/files/usr/bin/bash
+# Mints PO tokens for uploaded songs. Upstream links this into the app through V8, which has
+# no Android build, so this runs upstream's arm64 glibc program on Termux's glibc instead.
+# Termux's preload library cannot load into it, and Bionic library paths must not reach it.
+unset LD_PRELOAD LD_LIBRARY_PATH
+prefix=/data/data/com.termux/files/usr
+export SSL_CERT_FILE=$prefix/etc/tls/cert.pem
+exec "$prefix/glibc/lib/ld-linux-aarch64.so.1" --library-path "$prefix/glibc/lib" \
+    "$prefix/lib/mixtapes/rustypipe-botguard.bin" "$@"

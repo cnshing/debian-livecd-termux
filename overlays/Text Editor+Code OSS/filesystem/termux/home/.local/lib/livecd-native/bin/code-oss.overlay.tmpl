@@ -1,0 +1,14 @@
+#!@TERMUX_PREFIX@/bin/sh
+# Code OSS makes Unix sockets in XDG_RUNTIME_DIR, whose paths may be at most 107 characters, and
+# exits silently if its main one does not fit. The session's directory is too long for them, so
+# it gets a short link to that same directory. Each session has its own link.
+if [ "${#XDG_RUNTIME_DIR}" -gt 50 ]; then
+    links=${TMPDIR:-@TERMUX_PREFIX@/tmp}
+    for old in "$links"/vsc-*; do
+        [ -L "$old" ] && [ ! -e "$old" ] && rm -f "$old"
+    done
+    link=$links/vsc-$(basename "$XDG_RUNTIME_DIR" | cut -c1-8)
+    ln -sfn "$XDG_RUNTIME_DIR" "$link"
+    export XDG_RUNTIME_DIR="$link"
+fi
+exec @TERMUX_PREFIX@/bin/code-oss "$@"

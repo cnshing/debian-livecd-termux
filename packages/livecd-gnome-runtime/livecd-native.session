@@ -1,0 +1,3 @@
+[GNOME Session]
+Name=LiveCD Native
+RequiredComponents=org.gnome.Shell;

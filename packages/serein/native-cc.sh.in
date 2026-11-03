@@ -1,0 +1,3 @@
+#!@TERMUX_PREFIX@/bin/sh
+# Bound LLD's own worker pool independently of Cargo's compilation jobs.
+exec @TERMUX_PREFIX@/bin/clang -Wl,--threads=1 "$@"

@@ -1,0 +1,117 @@
+diff --git a/src/launcher/env.rs b/src/launcher/env.rs
+index 6ae023b..94454c0 100644
+--- a/src/launcher/env.rs
++++ b/src/launcher/env.rs
+@@ -67,8 +67,16 @@ fn build_from(
+             let existing = vars.get("LD_PRELOAD").cloned().unwrap_or_default();
+             let mut merged = filter_preload(&existing);
+             merged.insert(0, p.to_string());
++            // The hook drops LD_PRELOAD for this Bionic launcher, so a child can only
++            // keep another glibc preload through a variable that Bionic ignores.
++            if let Some(extra) = vars.get("BIONILUX_EXTRA_PRELOAD") {
++                merged.extend(filter_preload(extra));
++            }
+ 
+             vars.insert("LD_PRELOAD".into(), merged.join(":"));
++            if let Some(path) = vars.get("BIONILUX_LIBRARY_PATH").cloned() {
++                vars.insert("LD_LIBRARY_PATH".into(), path);
++            }
+             vars.insert("BIONILUX_TARGET_EXE".into(), target.display().to_string());
+             vars.insert(
+                 "BIONILUX_BINARY_PATH".into(),
+@@ -79,6 +87,9 @@ fn build_from(
+         }
+         None => {
+             vars.remove("LD_PRELOAD");
++            if vars.contains_key("BIONILUX_LIBRARY_PATH") {
++                vars.remove("LD_LIBRARY_PATH");
++            }
+         }
+     }
+ 
+@@ -229,6 +240,37 @@ mod tests {
+         assert!(!joined.contains("BOX64_UNAME"));
+     }
+ 
++    #[test]
++    fn glibc_target_gets_library_path_and_extra_preload() {
++        let c = test_config();
++        let mut vars = base_vars();
++        vars.insert("BIONILUX_LIBRARY_PATH".into(), "/glibc/libs".into());
++        vars.insert("BIONILUX_EXTRA_PRELOAD".into(), "/so/shim.so".into());
++        let out = build_from(vars, Some("/so/pre.so"), Path::new("/t"), Path::new("/l"), false, &c);
++        assert!(out.contains(&"LD_LIBRARY_PATH=/glibc/libs".to_string()));
++        assert!(out.contains(&"LD_PRELOAD=/so/pre.so:/so/shim.so".to_string()));
++    }
++
++    #[test]
++    fn bionic_target_never_gets_glibc_paths() {
++        let c = test_config();
++        let mut vars = base_vars();
++        vars.insert("BIONILUX_LIBRARY_PATH".into(), "/glibc/libs".into());
++        vars.insert("BIONILUX_EXTRA_PRELOAD".into(), "/so/shim.so".into());
++        vars.insert("LD_LIBRARY_PATH".into(), "/glibc/libs".into());
++        let out = build_from(vars, None, Path::new("/t"), Path::new("/l"), false, &c);
++        assert!(!out.iter().any(|e| e.starts_with("LD_LIBRARY_PATH=") || e.starts_with("LD_PRELOAD=")));
++    }
++
++    #[test]
++    fn library_path_is_untouched_without_the_option() {
++        let c = test_config();
++        let mut vars = base_vars();
++        vars.insert("LD_LIBRARY_PATH".into(), "/mine".into());
++        let out = build_from(vars, None, Path::new("/t"), Path::new("/l"), false, &c);
++        assert!(out.contains(&"LD_LIBRARY_PATH=/mine".to_string()));
++    }
++
+     #[test]
+     fn build_removes_stale_bionilux_vars() {
+         let c = test_config();
+diff --git a/src/preload/hooks.c b/src/preload/hooks.c
+index 650aecd..1c19846 100644
+--- a/src/preload/hooks.c
++++ b/src/preload/hooks.c
+@@ -49,6 +49,13 @@ static int is_launcher(const char *path, const char *launcher) {
+     return launcher && path && strcmp(path, launcher) == 0;
+ }
+ 
++// With BIONILUX_LIBRARY_PATH set, the launcher chooses LD_LIBRARY_PATH per target, so
++// that neither it nor a Bionic child ever searches glibc's libraries.
++static int hidden_from_launcher(const char *entry) {
++    if (strncmp(entry, "LD_PRELOAD=", 11) == 0) return 1;
++    return strncmp(entry, "LD_LIBRARY_PATH=", 16) == 0 && getenv("BIONILUX_LIBRARY_PATH");
++}
++
+ static char **strip_ld_preload(char *const envp[]) {
+     size_t envc = 0;
+     while (envp && envp[envc]) envc++;
+@@ -56,7 +63,7 @@ static char **strip_ld_preload(char *const envp[]) {
+     if (!ev) return NULL;
+     size_t j = 0;
+     for (size_t i = 0; i < envc; i++)
+-        if (strncmp(envp[i], "LD_PRELOAD=", 11) != 0) ev[j++] = envp[i];
++        if (!hidden_from_launcher(envp[i])) ev[j++] = envp[i];
+     ev[j] = NULL;
+     return ev;
+ }
+@@ -74,7 +81,7 @@ static char **build_child_envp(char *const envp[], const char *argv0) {
+ 
+     size_t j = 0;
+     for (size_t i = 0; i < envc; i++) {
+-        if (strncmp(envp[i], "LD_PRELOAD=", 11) == 0) continue;
++        if (hidden_from_launcher(envp[i])) continue;
+         if (strncmp(envp[i], "BIONILUX_ARGV0=", 15) == 0) continue;
+         ev[j++] = envp[i];
+     }
+@@ -116,6 +123,11 @@ static int resolve_bare_name(const char *name, char *buf, size_t size) {
+ // on reroute, 0 to pass through so the caller sees ENOENT synchronously.
+ static int reroute(const char *target, char *const argv[], char *const envp[],
+                    const char **launcher, char ***nargv, char ***nenvp) {
++    // This names the loader here and would name the launcher once it runs, so it
++    // has to become the real target first. Chrome starts some children this way.
++    if (target && strcmp(target, "/proc/self/exe") == 0 && getenv("BIONILUX_TARGET_EXE"))
++        target = getenv("BIONILUX_TARGET_EXE");
++
+     *launcher = getenv("BIONILUX_BINARY_PATH");
+     if (!*launcher || !target || is_launcher(target, *launcher)) return 0;
+ 

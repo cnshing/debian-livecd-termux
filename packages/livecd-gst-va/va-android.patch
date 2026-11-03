@@ -1,0 +1,46 @@
+--- a/gst-libs/gst/va/meson.build
++++ b/gst-libs/gst/va/meson.build
+@@ -54,12 +54,12 @@
+               '-DBUILDING_GST_VA',
+               '-DG_LOG_DOMAIN="GStreamer-VA"']
+ 
+-if host_system not in ['linux', 'windows']
++if host_system not in ['linux', 'android', 'windows']
+   subdir_done()
+ endif
+ 
+ va_opt = get_option('va')
+-if host_system == 'linux'
++if host_system in ['linux', 'android']
+   msdk_opt = get_option('msdk')
+   qsv_opt = get_option('qsv')
+   if va_opt.disabled() and msdk_opt.disabled() and qsv_opt.disabled()
+@@ -83,7 +83,7 @@
+   subdir_done()
+ endif
+ 
+-if host_system == 'linux'
++if host_system in ['linux', 'android']
+   libva_drm_dep = dependency('libva-drm', version: libva_req, required: va_required)
+   if not libva_drm_dep.found()
+     subdir_done()
+--- a/sys/va/meson.build
++++ b/sys/va/meson.build
+@@ -78,7 +78,7 @@
+   'va': pathsep.join(doc_sources)
+ }
+ 
+-if host_system not in ['linux', 'windows']
++if host_system not in ['linux', 'android', 'windows']
+   subdir_done()
+ endif
+ 
+@@ -99,7 +99,7 @@
+ extra_dep = []
+ c_std_arg = ['c_std=c99']
+ 
+-if host_system == 'linux'
++if host_system in ['linux', 'android']
+   libgudev_dep = dependency('gudev-1.0', required: get_option('udev'), allow_fallback: true)
+   if libgudev_dep.found()
+     extra_args += ['-DHAVE_GUDEV']

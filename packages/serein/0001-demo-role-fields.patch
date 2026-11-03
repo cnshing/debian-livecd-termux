@@ -1,0 +1,39 @@
+Repair stale synthetic role fixtures in the pinned release so --features demo builds.
+All fixture roles are ordinary, manually assignable roles.
+
+--- a/apps/desktop/src/main.rs
++++ b/apps/desktop/src/main.rs
+@@ -312,6 +312,7 @@
+ 					tertiary_color: None,
+ 					position: 1,
+ 					hoist: false,
++					managed: false,
+ 					bits: 0,
+ 				},
+ 			}),
+@@ -1657,6 +1658,7 @@
+ 							tertiary_color: None,
+ 							position: 2,
+ 							hoist: true,
++							managed: false,
+ 						},
+ 						model::permissions::Role {
+ 							id: model::Id(9002),
+@@ -1667,6 +1669,7 @@
+ 							tertiary_color: gradient_roles.then_some(16761760),
+ 							position: 1,
+ 							hoist: true,
++							managed: false,
+ 						},
+ 					]);
+ 				}
+--- a/apps/desktop/src/post_menu_demo.rs
++++ b/apps/desktop/src/post_menu_demo.rs
+@@ -118,6 +118,7 @@
+ 				tertiary_color: None,
+ 				position: 1,
+ 				hoist: false,
++				managed: false,
+ 			});
+ 	}
+ 	state.permissions.replace(permissions).unwrap();

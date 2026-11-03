@@ -1,0 +1,99 @@
+#!/data/data/com.termux/files/usr/bin/bash
+# Google Chrome is a glibc program on a Bionic system. Termux's preload library cannot
+# load into it, and the session's Bionic library path must not reach its loader.
+shared=$HOME/.local/lib/livecd-native/acceleration.py
+if [[ -f $shared && -f $HOME/.local/opt/livecd-native/acceleration/glibc/manifest.json ]]; then
+    exec /data/data/com.termux/files/usr/bin/python "$shared" run --profile chrome -- \
+        /data/data/com.termux/files/usr/opt/google/chrome/chrome "$@"
+fi
+unset LD_PRELOAD LD_LIBRARY_PATH
+prefix=/data/data/com.termux/files/usr
+export CHROME_WRAPPER=$prefix/bin/google-chrome
+export CHROME_VERSION_EXTRA=stable
+export TMPDIR=${TMPDIR:-$prefix/tmp}
+export XDG_DATA_DIRS=${XDG_DATA_DIRS:-$prefix/share}
+# Debian's libraries and Chrome's bundled fontconfig look under /usr and /etc.
+export FONTCONFIG_FILE=$prefix/etc/fonts/fonts.conf
+export XKB_CONFIG_ROOT=$prefix/share/X11/xkb
+export XLOCALEDIR=$prefix/share/X11/locale
+# Debian's libxcb expects /tmp/.X11-unix, but it also accepts the socket's full path.
+case ${DISPLAY:-} in
+    :*) display=${DISPLAY#:}; export DISPLAY=$prefix/tmp/.X11-unix/X${display%%.*};;
+esac
+# No sandbox is possible here: no setuid helper and no user namespaces. See README.
+# Android has no /dev/shm, so shared memory goes to $TMPDIR.
+chrome_dir=$prefix/opt/google/chrome
+gpu=$chrome_dir/gpu
+# Device opt-in, independent of the desktop's private XDG profile. An explicit
+# environment value takes precedence, including 0 for software-video controls.
+hardware_video_config=$HOME/.config/livecd-native/chrome-hardware-video
+hardware_video=${LIVECD_CHROME_HARDWARE_VIDEO-0}
+if [[ -z ${LIVECD_CHROME_HARDWARE_VIDEO+x} && -r $hardware_video_config ]]; then
+    read -r hardware_video < "$hardware_video_config" || true
+fi
+# Immutable, separately installed adapter: Chrome/Mesa updates can keep using it
+# without replacing a shared library underneath the running desktop.
+ion_adapter=$prefix/libexec/livecd-browser/liblivecd_tva_ion-bf39f8bd.so
+launcher=()
+# Without the GPU stack, Chrome's GPU process fails several times before falling back.
+flags=(--disable-gpu)
+# On a Mutter without the fullscreen fix, GPU rendering reliably crashes GNOME Shell when a
+# window leaves fullscreen, so this waits for the runtime's receipt to list that fix.
+# LIVECD_CHROME_GPU=0 or 1 overrides the check.
+receipt=$HOME/.local/opt/livecd-native/gnome-48/share/doc/mutter/build-source.json
+case ${LIVECD_CHROME_GPU:-auto} in
+    0) use_gpu= ;;
+    1) use_gpu=1 ;;
+    *) grep -q 0010-clip-pixmap-damage "$receipt" 2>/dev/null && use_gpu=1 || use_gpu= ;;
+esac
+if [[ -n $use_gpu && -x $prefix/bin/bionilux && -f $gpu/freedreno_icd.json ]]; then
+    mesa=$gpu/mesa/usr/lib/aarch64-linux-gnu
+    # Bionilux applies these to glibc programs only, so nothing Bionic that Chrome
+    # starts sees glibc's libraries. An LD_ variable here would reach those programs.
+    export BIONILUX_LIBRARY_PATH=$mesa:$gpu/lib:$chrome_dir/lib
+    unset BIONILUX_EXTRA_PRELOAD GALLIUM_DRIVER COGL_DRIVER GSK_RENDERER
+    export LIBGL_DRIVERS_PATH=$mesa/dri GBM_BACKENDS_PATH=$mesa/gbm
+    export VK_DRIVER_FILES=$gpu/freedreno_icd.json VK_ICD_FILENAMES=$gpu/freedreno_icd.json TU_DEBUG=noconform
+    export MESA_LOADER_DRIVER_OVERRIDE=kgsl TURNIP_KMD=kgsl
+    launcher=("$prefix/bin/bionilux")
+    flags=(--use-gl=angle --use-angle=vulkan --ignore-gpu-blocklist
+        --enable-features=Vulkan,VulkanFromANGLE,DefaultANGLEVulkan)
+    # Experimental and opt-in. Never select the known wrong-color hardware path
+    # unless the tested shared-dma-buf adapter is installed.
+    if [[ $hardware_video == 1 && -f $ion_adapter ]]; then
+        # A supplied endpoint belongs to its caller. In particular, tests start their own
+        # daemon directly: upstream's start helper can kill every termux-va process.
+        if [[ -z ${TERMUX_VA_SOCKET:-} && -z ${TERMUX_VA_SOCKET_DIR:-} ]]; then
+            export TERMUX_VA_SOCKET=$TMPDIR/termux-va/termux-va.sock
+            # If this fails, Chrome finds no decoder and plays video in software.
+            "$prefix/bin/termux-va-start" >/dev/null 2>&1 &
+        else
+            export TERMUX_VA_SOCKET=${TERMUX_VA_SOCKET:-$TERMUX_VA_SOCKET_DIR/termux-va.sock}
+        fi
+        # Chrome links libdrm statically, and this also supplies what its VA driver needs.
+        export BIONILUX_EXTRA_PRELOAD=$mesa/libtva_drm_shim_wayland.so:$ion_adapter
+        export LIVECD_TVA_ION_FALLBACK=${LIVECD_TVA_ION_FALLBACK:-1} TERMUX_VA_CONTIGUOUS_DMABUF=1
+        export LIBVA_DRIVERS_PATH=$mesa/dri LIBVA_DRIVER_NAME=termuxva TERMUX_VA_BRIDGE=1
+        export TERMUX_VA_GPU_BACKEND=kgsl TERMUX_VA_X11_DRI3=1
+        # This phone has no AV1 decoder. Some H.264 streams stop with a decode error.
+        export TERMUX_VA_DISABLE_AV1=1 TERMUX_VA_DISABLE_H264=${TERMUX_VA_DISABLE_H264-1}
+        flags=(--use-gl=angle --use-angle=vulkan --ignore-gpu-blocklist --enable-zero-copy
+            --enable-native-gpu-memory-buffers --hardware-video-device-path=/dev/kgsl-3d0
+            --enable-features=Vulkan,VulkanFromANGLE,DefaultANGLEVulkan,VaapiVideoDecoder,VaapiVideoDecodeLinux,PlatformHEVCDecoderSupport,AcceleratedVideoDecoder,AcceleratedVideoDecodeLinuxGL,VaapiIgnoreDriverChecks
+            --disable-features=VaapiVideoMinResolutionForPerformance)
+    fi
+fi
+"${launcher[@]}" "$chrome_dir/chrome" --no-sandbox --disable-dev-shm-usage "${flags[@]}" "$@" &
+chrome=$!
+# Chrome's process title overwrites its /proc/PID/environ, where the desktop's shutdown
+# finds what to stop, so this shell stays to be found and passes the request on.
+stop() {
+    kill -TERM "$chrome" 2>/dev/null
+    for _ in 1 2 3 4 5 6 7 8 9 10; do
+        kill -0 "$chrome" 2>/dev/null || return
+        sleep 0.5
+    done
+    kill -KILL "$chrome" 2>/dev/null
+}
+trap stop TERM INT HUP
+wait "$chrome"

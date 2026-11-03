@@ -1,0 +1,8 @@
+[org/gnome/shell]
+enabled-extensions=['arcmenu@arcmenu.com', 'dash-to-panel@jderose9.github.com', 'ding@rastersoft.com', 'ubuntu-appindicators@ubuntu.com', 'user-theme@gnome-shell-extensions.gcampax.github.com', 'noannoyance-fork@vrba.dev', 'tiling-assistant@leleat-on-github', 'livecd-appearance@local']
+favorite-apps=['org.gnome.Terminal.desktop', 'org.gnome.Nautilus.desktop', 'org.gnome.TextEditor.desktop', 'firefox.desktop']
+[org/gnome/shell/extensions/dash-to-panel]
+extension-version=9999
+[org/gnome/desktop/interface]
+font-name='Cantarell 11'
+document-font-name='Cantarell 11'

@@ -1,0 +1,18 @@
+#!/data/data/com.termux/files/usr/bin/python
+"""Nautilus Scripts action: URI decoding, argument arrays, native directory."""
+import os
+from pathlib import Path
+import subprocess
+from urllib.parse import unquote, urlsplit
+
+uri = os.environ.get('NAUTILUS_SCRIPT_SELECTED_URIS', '').splitlines()
+uri = uri[0] if uri else os.environ.get('NAUTILUS_SCRIPT_CURRENT_URI', '')
+parsed = urlsplit(uri)
+if parsed.scheme != 'file' or parsed.netloc not in ('', 'localhost'):
+    raise SystemExit('Select a local file or directory')
+path = Path(unquote(parsed.path))
+if not path.is_absolute() or '\0' in str(path):
+    raise SystemExit('Expected an absolute native path')
+if not path.is_dir():
+    path = path.parent
+subprocess.run([str(Path.home() / '.local/bin/livecd-native'), 'terminal', str(path)], check=True)

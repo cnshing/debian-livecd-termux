@@ -1,0 +1,18 @@
+The native link check can find pthread_getname_np in the device's newer libc,
+although Bionic headers only declare it for API 26+. Use the existing Linux
+prctl fallback when compiling for Termux's older native API level.
+
+--- a/js/src/threading/posix/PosixThread.cpp
++++ b/js/src/threading/posix/PosixThread.cpp
+@@ -13,6 +13,11 @@
+ #include "threading/posix/ThreadPlatformData.h"
+ #include "threading/Thread.h"
+ 
++#if defined(__BIONIC__) && __ANDROID_API__ < 26
++#  include <sys/prctl.h>
++#  undef HAVE_PTHREAD_GETNAME_NP
++#endif
++
+ namespace js {
+ 
+ inline ThreadId::PlatformData* ThreadId::platformData() {

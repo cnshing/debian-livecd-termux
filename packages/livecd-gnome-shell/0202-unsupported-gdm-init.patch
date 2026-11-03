@@ -1,0 +1,19 @@
+Skip GDM GI async wrapper initialization in the Android session.
+The fail-closed GDM module deliberately has no authentication API.
+
+--- a/js/gdm/util.js
++++ b/js/gdm/util.js
+@@ -18,11 +18,8 @@
+ const FprintDeviceInfo = Gio.DBusInterfaceInfo.new_for_xml(
+     loadInterfaceXML('net.reactivated.Fprint.Device'));
+ 
+-Gio._promisify(Gdm.Client.prototype, 'open_reauthentication_channel');
+-Gio._promisify(Gdm.Client.prototype, 'get_user_verifier');
+-Gio._promisify(Gdm.UserVerifierProxy.prototype,
+-    'call_begin_verification_for_user');
+-Gio._promisify(Gdm.UserVerifierProxy.prototype, 'call_begin_verification');
++// GDM authentication is unavailable in this Android-managed session.
++// Do not initialize GI async wrappers for the unsupported GDM interfaces.
+ 
+ export const PASSWORD_SERVICE_NAME = 'gdm-password';
+ export const FINGERPRINT_SERVICE_NAME = 'gdm-fingerprint';

@@ -1,0 +1,22 @@
+{
+  "repository": "https://github.com/mozilla-firefox/firefox",
+  "commit": "28b7a7bffb5f82828143d9ad63839ad263b598be",
+  "files": [
+    {
+      "path": "toolkit/xre/gfxtest/gfxtest.cpp",
+      "sha256": "d7a43bcc7960964de5b1065d9106be244185393edcf1c83250afe45a91183999"
+    },
+    {
+      "path": "toolkit/xre/gfxtest/glxtest.cpp",
+      "sha256": "007464b61d87cf20429714e76e2b534fa3c63e66ece97a0cda8020b93bc4be00"
+    },
+    {
+      "path": "toolkit/xre/gfxtest/vaapitest.cpp",
+      "sha256": "15ae5f31dfbb094a6f675e1a8a40afe86f8b6e59ebd0a0d072d578b5b3d9d4a1"
+    },
+    {
+      "path": "widget/gtk/GfxInfoUtils.h",
+      "sha256": "f6ed0cebe5a1987d0b4dba45264dd29aa4b285a1923867f5ab49b640943c2f81"
+    }
+  ]
+}

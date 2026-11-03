@@ -1,0 +1,52 @@
+Use the supported AST API after Python 3.14 removed ast.Str and ast.Index.
+
+--- a/python/mozbuild/mozbuild/frontend/reader.py
++++ b/python/mozbuild/mozbuild/frontend/reader.py
+@@ -470,7 +470,7 @@
+             return c(
+                 ast.Subscript(
+                     value=c(ast.Name(id=self._global_name, ctx=ast.Load())),
+-                    slice=c(ast.Index(value=c(ast.Str(s=node.id)))),
++                    slice=c(ast.Constant(value=node.id)),
+                     ctx=node.ctx,
+                 )
+             )
+@@ -1027,16 +1027,12 @@
+ 
+             key = None
+             if isinstance(target, ast.Subscript):
+-                # We need to branch to deal with python version differences.
+-                if isinstance(target.slice, ast.Constant):
+-                    # Python >= 3.9
+-                    assert isinstance(target.slice.value, str)
+-                    key = target.slice.value
+-                else:
+-                    # Others
+-                    assert isinstance(target.slice, ast.Index)
+-                    assert isinstance(target.slice.value, ast.Str)
+-                    key = target.slice.value.s
++                literal = target.slice
++                if not isinstance(literal, ast.Constant):
++                    literal = literal.value
++                assert isinstance(literal, ast.Constant)
++                assert isinstance(literal.value, str)
++                key = literal.value
+ 
+             return name, key
+ 
+@@ -1044,11 +1040,11 @@
+             value = node.value
+             if isinstance(value, ast.List):
+                 for v in value.elts:
+-                    assert isinstance(v, ast.Str)
+-                    yield v.s
++                    assert isinstance(v, ast.Constant) and isinstance(v.value, str)
++                    yield v.value
+             else:
+-                assert isinstance(value, ast.Str)
+-                yield value.s
++                assert isinstance(value, ast.Constant) and isinstance(value.value, str)
++                yield value.value
+ 
+         assignments = []
+ 

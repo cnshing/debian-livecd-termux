@@ -1,0 +1,8 @@
+[org/gnome/shell/extensions/arcmenu]
+menu-layout='Redmond'
+searchbar-default-top-location='Bottom'
+avatar-style='Square'
+show-bookmarks=true
+show-external-devices=true
+search-provider-open-windows=true
+search-provider-recent-files=true

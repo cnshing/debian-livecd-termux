@@ -1,0 +1,11 @@
+{
+  "provenance": "Readable XML from the pre-port managed profile, originally distributed by Gass-OS/GNOME-Termux at 42a890c7603609d1c6a7e6edf9cd05c084923d8f. These are data source files, not generated schemas or binaries.",
+  "files": {
+    "org.gnome.shell.extensions.appindicator.gschema.xml": "1986949337951c3b2a5123df4b7f3a13c5c503ded4ada5ff720d9c127c531168",
+    "org.gnome.shell.extensions.dash-to-panel.gschema.xml": "cfd35ca77ceee107a6d37bd9b12c9657470bdca0f2f8b75bd810689334305c5c",
+    "org.gnome.shell.extensions.ding.gschema.xml": "99fc0f84785c3e56f7de1ad491d9bbd74450bb0c4638380aad21af7a73780849",
+    "org.gnome.shell.extensions.noannoyance-fork.gschema.xml": "0ccde8ff3d5e2343b9b491e9eb071c941922e81d0b787451937d1c1305fa7208",
+    "org.gnome.shell.extensions.tiling-assistant.gschema.xml": "bcb907b5fe4b80888ec1ba9e2f95465572b4bfad4405e42e4f60cece5e8f95fe",
+    "org.gnome.shell.extensions.user-theme.gschema.xml": "224a7de0718538307714807bd41e2d7f5b05d389c530423a42691d1ede6f8937"
+  }
+}

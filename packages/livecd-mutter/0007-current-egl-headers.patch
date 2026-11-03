@@ -1,0 +1,43 @@
+Current Mesa supplies extension types through Khronos eglext.h, and no longer
+installs eglmesaext.h. Remove the obsolete includes.
+
+--- a/cogl/cogl/cogl-context.h
++++ b/cogl/cogl/cogl-context.h
+@@ -43,7 +43,6 @@
+ #ifdef HAVE_EGL
+ #include <EGL/egl.h>
+ #include <EGL/eglext.h>
+-#include <EGL/eglmesaext.h>
+ #endif
+ 
+ #include <glib-object.h>
+--- a/src/backends/meta-egl.h
++++ b/src/backends/meta-egl.h
+@@ -25,7 +25,6 @@
+ 
+ #include <EGL/egl.h>
+ #include <EGL/eglext.h>
+-#include <EGL/eglmesaext.h>
+ #include <glib-object.h>
+ 
+ #define META_EGL_ERROR meta_egl_error_quark ()
+--- a/src/backends/meta-egl.c
++++ b/src/backends/meta-egl.c
+@@ -25,7 +25,6 @@
+ 
+ #include <EGL/egl.h>
+ #include <EGL/eglext.h>
+-#include <EGL/eglmesaext.h>
+ #include <gio/gio.h>
+ #include <glib.h>
+ #include <glib-object.h>
+--- a/src/backends/meta-egl-ext.h
++++ b/src/backends/meta-egl-ext.h
+@@ -28,7 +28,6 @@
+ 
+ #include <EGL/egl.h>
+ #include <EGL/eglext.h>
+-#include <EGL/eglmesaext.h>
+ 
+ /*
+  * This is a little different to the tests shipped with EGL implementations,

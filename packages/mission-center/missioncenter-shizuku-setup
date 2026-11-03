@@ -1,0 +1,3 @@
+#!/data/data/com.termux/files/usr/bin/bash
+# Compatibility name for existing installations.
+exec "${PREFIX:-/data/data/com.termux/files/usr}/bin/livecd-resources-setup" "$@"

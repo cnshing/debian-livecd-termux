@@ -1,0 +1,641 @@
+Termux:VA encoding for native Termux programs, on top of the pinned fork:
+- per-picture key frames: an IDR or VP9 key frame the client asks for is sent
+  to the daemon as ENC_UNIT_FORCE_KEY, and a changed target bitrate as
+  ENC_UNIT_SET_BITRATE (daemon-patches/0001-livecd-encoder.patch);
+- encoders are advertised only when the daemon lists a hardware component in
+  "<socket>.encoders";
+- where /dev/kgsl-3d0 is usable and nothing is configured, the bridge applies
+  its KGSL settings itself, so a program that finds the GPU as a render node
+  needs no TERMUX_VA_* variables;
+- the visible picture is encoded: H.264 frame cropping and the HEVC
+  conformance window crop the 16-aligned surfaces clients code, or 640x360
+  comes out as 640x368;
+- TERMUX_VA_DECODE=0 hides the decoders and leaves the encoders;
+- per-call and per-surface traces are kept behind DMD_VA_LOG.
+
+--- a/src/gallium/frontends/va/buffer.c
++++ b/src/gallium/frontends/va/buffer.c
+@@ -54,7 +54,7 @@
+    vlVaDriver *drv;
+    vlVaBuffer *buf;
+ 
+-   fprintf(stderr, "tva-va: create buffer context=%u type=%d size=%u elements=%u\n",
++   if (getenv("DMD_VA_LOG")) fprintf(stderr, "tva-va: create buffer context=%u type=%d size=%u elements=%u\n",
+            context, type, size, num_elements);
+ 
+    if (!ctx)
+--- a/src/gallium/frontends/va/config.c
++++ b/src/gallium/frontends/va/config.c
+@@ -59,7 +59,7 @@
+    if (!ctx)
+       return VA_STATUS_ERROR_INVALID_CONTEXT;
+ 
+-   fprintf(stderr, "tva-va: query profiles\n");
++   if (getenv("DMD_VA_LOG")) fprintf(stderr, "tva-va: query profiles\n");
+ 
+    *num_profiles = 0;
+ 
+@@ -91,7 +91,7 @@
+    if (!ctx)
+       return VA_STATUS_ERROR_INVALID_CONTEXT;
+ 
+-   fprintf(stderr, "tva-va: query entrypoints profile=%d\n", profile);
++   if (getenv("DMD_VA_LOG")) fprintf(stderr, "tva-va: query entrypoints profile=%d\n", profile);
+ 
+    *num_entrypoints = 0;
+ 
+@@ -647,7 +647,7 @@
+    if (!ctx)
+       return VA_STATUS_ERROR_INVALID_CONTEXT;
+ 
+-   fprintf(stderr, "tva-va: create config profile=%d entrypoint=%d attrs=%d\n",
++   if (getenv("DMD_VA_LOG")) fprintf(stderr, "tva-va: create config profile=%d entrypoint=%d attrs=%d\n",
+            profile, entrypoint, num_attribs);
+ 
+    drv = VL_VA_DRIVER(ctx);
+@@ -827,7 +827,7 @@
+    vlVaDriver *drv;
+    vlVaConfig *config;
+ 
+-   fprintf(stderr, "tva-va: query config attrs config=%u list=%p count=%d\n",
++   if (getenv("DMD_VA_LOG")) fprintf(stderr, "tva-va: query config attrs config=%u list=%p count=%d\n",
+            config_id, (void *)attrib_list, num_attribs ? *num_attribs : 0);
+ 
+    if (!ctx)
+@@ -867,7 +867,7 @@
+                                                              config->profile,
+                                                              config->entrypoint);
+ 
+-   fprintf(stderr, "tva-va: query config attrs success profile=%d entrypoint=%d rt=%#x count=%d\n",
++   if (getenv("DMD_VA_LOG")) fprintf(stderr, "tva-va: query config attrs success profile=%d entrypoint=%d rt=%#x count=%d\n",
+            *profile, *entrypoint, attrib_list[0].value, *num_attribs);
+ 
+    return VA_STATUS_SUCCESS;
+--- a/src/gallium/frontends/va/context.c
++++ b/src/gallium/frontends/va/context.c
+@@ -135,7 +135,7 @@
+    if (!ctx)
+       return VA_STATUS_ERROR_INVALID_CONTEXT;
+ 
+-   fprintf(stderr, "tva-va: driver init display_type=%lu\n",
++   if (getenv("DMD_VA_LOG")) fprintf(stderr, "tva-va: driver init display_type=%lu\n",
+            (unsigned long)ctx->display_type);
+ 
+    drv = CALLOC(1, sizeof(vlVaDriver));
+@@ -222,7 +222,7 @@
+    if (!drv->vscreen)
+       goto error_screen;
+ 
+-   fprintf(stderr, "tva-va: driver screen ready\n");
++   if (getenv("DMD_VA_LOG")) fprintf(stderr, "tva-va: driver screen ready\n");
+ 
+    struct pipe_screen *raw_pscreen = drv->vscreen->pscreen;
+ 
+@@ -319,7 +319,7 @@
+    if (!ctx)
+       return VA_STATUS_ERROR_INVALID_CONTEXT;
+ 
+-   fprintf(stderr, "tva-va: create context config=%u size=%dx%d targets=%d\n",
++   if (getenv("DMD_VA_LOG")) fprintf(stderr, "tva-va: create context config=%u size=%dx%d targets=%d\n",
+            config_id, picture_width, picture_height, num_render_targets);
+ 
+    drv = VL_VA_DRIVER(ctx);
+@@ -329,7 +329,7 @@
+ 
+    if (!config)
+    {
+-      fprintf(stderr, "tva-va: create context invalid config\n");
++      if (getenv("DMD_VA_LOG")) fprintf(stderr, "tva-va: create context invalid config\n");
+       return VA_STATUS_ERROR_INVALID_CONFIG;
+    }
+ 
+@@ -489,7 +489,7 @@
+       pipe_reference_init(&context->decoder->reference, 1);
+    }
+ 
+-   fprintf(stderr, "tva-va: create context success id=%u decoder=%p\n",
++   if (getenv("DMD_VA_LOG")) fprintf(stderr, "tva-va: create context success id=%u decoder=%p\n",
+            *context_id, (void *)context->decoder);
+    return VA_STATUS_SUCCESS;
+ }
+@@ -503,7 +503,7 @@
+    if (!ctx)
+       return VA_STATUS_ERROR_INVALID_CONTEXT;
+ 
+-   fprintf(stderr, "tva-va: destroy context id=%u\n", context_id);
++   if (getenv("DMD_VA_LOG")) fprintf(stderr, "tva-va: destroy context id=%u\n", context_id);
+ 
+    if (context_id == 0)
+       return VA_STATUS_ERROR_INVALID_CONTEXT;
+--- a/src/gallium/frontends/va/encode.c
++++ b/src/gallium/frontends/va/encode.c
+@@ -466,6 +466,8 @@
+          return VA_STATUS_ERROR_INVALID_PARAMETER;
+       context->desc.vp9enc.width = vp9->frame_width_dst;
+       context->desc.vp9enc.height = vp9->frame_height_dst;
++      context->desc.vp9enc.key_frame = !vp9->pic_flags.bits.frame_type ||
++                                       vp9->ref_flags.bits.force_kf;
+       vlVaBuffer *coded_buf = handle_table_get(drv->htab, vp9->coded_buf);
+       if (!coded_buf)
+          return VA_STATUS_ERROR_INVALID_BUFFER;
+--- a/src/gallium/frontends/va/picture.c
++++ b/src/gallium/frontends/va/picture.c
+@@ -54,7 +54,7 @@
+    if (!drv)
+       return VA_STATUS_ERROR_INVALID_CONTEXT;
+ 
+-   fprintf(stderr, "tva-va: begin picture context=%u target=%u\n",
++   if (getenv("DMD_VA_LOG")) fprintf(stderr, "tva-va: begin picture context=%u target=%u\n",
+            context_id, render_target);
+ 
+    mtx_lock(&drv->mutex);
+@@ -143,7 +143,7 @@
+    if (!drv)
+       return VA_STATUS_ERROR_INVALID_CONTEXT;
+ 
+-   fprintf(stderr, "tva-va: render picture context=%u buffers=%d\n",
++   if (getenv("DMD_VA_LOG")) fprintf(stderr, "tva-va: render picture context=%u buffers=%d\n",
+            context_id, num_buffers);
+ 
+    mtx_lock(&drv->mutex);
+--- a/src/gallium/frontends/va/surface.c
++++ b/src/gallium/frontends/va/surface.c
+@@ -411,7 +411,7 @@
+    struct pipe_screen *pscreen;
+    int i;
+ 
+-   fprintf(stderr, "tva-va: query surface attrs config=%u list=%p count=%u\n",
++   if (getenv("DMD_VA_LOG")) fprintf(stderr, "tva-va: query surface attrs config=%u list=%p count=%u\n",
+            config_id, (void *)attrib_list, num_attribs ? *num_attribs : 0);
+ 
+    if (config_id == VA_INVALID_ID)
+@@ -422,7 +422,7 @@
+ 
+    if (!attrib_list) {
+       *num_attribs = VL_VA_MAX_IMAGE_FORMATS + VASurfaceAttribCount;
+-      fprintf(stderr, "tva-va: query surface attrs count=%u\n", *num_attribs);
++      if (getenv("DMD_VA_LOG")) fprintf(stderr, "tva-va: query surface attrs count=%u\n", *num_attribs);
+       return VA_STATUS_SUCCESS;
+    }
+ 
+@@ -605,7 +605,7 @@
+    if (i > *num_attribs) {
+       *num_attribs = i;
+       FREE(attribs);
+-      fprintf(stderr, "tva-va: query surface attrs too small need=%d\n", i);
++      if (getenv("DMD_VA_LOG")) fprintf(stderr, "tva-va: query surface attrs too small need=%d\n", i);
+       return VA_STATUS_ERROR_MAX_NUM_EXCEEDED;
+    }
+ 
+@@ -613,7 +613,7 @@
+    memcpy(attrib_list, attribs, i * sizeof(VASurfaceAttrib));
+    FREE(attribs);
+ 
+-   fprintf(stderr, "tva-va: query surface attrs success count=%d\n", i);
++   if (getenv("DMD_VA_LOG")) fprintf(stderr, "tva-va: query surface attrs success count=%d\n", i);
+ 
+    return VA_STATUS_SUCCESS;
+ }
+@@ -821,14 +821,14 @@
+               desc ? desc->num_layers : 0);
+       if (desc) {
+          for (unsigned i = 0; i < desc->num_objects; i++)
+-            fprintf(stderr, "tva-va: import prime object[%u] fd=%d size=%u mod=%#llx\n",
++            if (getenv("DMD_VA_LOG")) fprintf(stderr, "tva-va: import prime object[%u] fd=%d size=%u mod=%#llx\n",
+                     i, desc->objects[i].fd, desc->objects[i].size,
+                     (unsigned long long)desc->objects[i].drm_format_modifier);
+          for (unsigned i = 0; i < desc->num_layers; i++) {
+-            fprintf(stderr, "tva-va: import prime layer[%u] fmt=%#x planes=%u\n",
++            if (getenv("DMD_VA_LOG")) fprintf(stderr, "tva-va: import prime layer[%u] fmt=%#x planes=%u\n",
+                     i, desc->layers[i].drm_format, desc->layers[i].num_planes);
+             for (unsigned j = 0; j < desc->layers[i].num_planes; j++)
+-               fprintf(stderr, "tva-va: import prime layer[%u].plane[%u] obj=%u "
++               if (getenv("DMD_VA_LOG")) fprintf(stderr, "tva-va: import prime layer[%u].plane[%u] obj=%u "
+                        "pitch=%u offset=%u\n", i, j,
+                        desc->layers[i].object_index[j],
+                        desc->layers[i].pitch[j], desc->layers[i].offset[j]);
+@@ -1005,7 +1005,7 @@
+    struct pipe_surface *surfaces;
+    unsigned i;
+ 
+-   fprintf(stderr, "tva-va: allocate surface=%p format=%d size=%ux%u modifiers=%u\n",
++   if (getenv("DMD_VA_LOG")) fprintf(stderr, "tva-va: allocate surface=%p format=%d size=%ux%u modifiers=%u\n",
+            (void *)surface,
+            surface ? surface->templat.buffer_format : -1,
+            surface ? surface->templat.width : 0,
+@@ -1024,11 +1024,11 @@
+    }
+    if (!surface->buffer)
+    {
+-      fprintf(stderr, "tva-va: surface allocation failed\n");
++      if (getenv("DMD_VA_LOG")) fprintf(stderr, "tva-va: surface allocation failed\n");
+       return VA_STATUS_ERROR_ALLOCATION_FAILED;
+    }
+ 
+-   fprintf(stderr, "tva-va: surface allocation ready buffer=%p\n",
++   if (getenv("DMD_VA_LOG")) fprintf(stderr, "tva-va: surface allocation ready buffer=%p\n",
+            (void *)surface->buffer);
+ 
+    /* The termux-va bridge fills every plane before exporting a decoded
+@@ -1076,7 +1076,7 @@
+    if (surface->buffer)
+       return surface->buffer;
+    vlVaHandleSurfaceAllocate(drv, surface, NULL, 0);
+-   fprintf(stderr, "tva-va: get surface buffer=%p\n", (void *)surface->buffer);
++   if (getenv("DMD_VA_LOG")) fprintf(stderr, "tva-va: get surface buffer=%p\n", (void *)surface->buffer);
+    return surface->buffer;
+ }
+ 
+@@ -1172,7 +1172,7 @@
+    if (!ctx)
+       return VA_STATUS_ERROR_INVALID_CONTEXT;
+ 
+-   fprintf(stderr, "tva-va: create surfaces format=%#x size=%ux%u count=%u attrs=%u\n",
++   if (getenv("DMD_VA_LOG")) fprintf(stderr, "tva-va: create surfaces format=%#x size=%ux%u count=%u attrs=%u\n",
+            format, width, height, num_surfaces, num_attribs);
+ 
+    if (!(width && height))
+--- a/src/gallium/frontends/va/tva_bridge.c
++++ b/src/gallium/frontends/va/tva_bridge.c
+@@ -189,6 +189,9 @@
+ static bool
+ tva_profile_supported(enum pipe_video_profile profile)
+ {
++    const char *decode = os_get_option("TERMUX_VA_DECODE");
++    if (decode && (!strcmp(decode, "0") || !strcmp(decode, "false") || !strcmp(decode, "off")))
++        return false;
+     switch (profile) {
+     case PIPE_VIDEO_PROFILE_MPEG4_AVC_CONSTRAINED_BASELINE:
+     case PIPE_VIDEO_PROFILE_MPEG4_AVC_MAIN:
+@@ -208,13 +211,18 @@
+ static bool
+ tva_encode_profile_supported(enum pipe_video_profile profile)
+ {
++    /* Advertise only encoders the daemon backs with hardware, as a native
++     * driver does.  A software MediaCodec encoder (Snapdragon 855 has no
++     * VP9 encoder) is slower than the application's own. */
+     switch (profile) {
+     case PIPE_VIDEO_PROFILE_MPEG4_AVC_CONSTRAINED_BASELINE:
+     case PIPE_VIDEO_PROFILE_MPEG4_AVC_MAIN:
+     case PIPE_VIDEO_PROFILE_MPEG4_AVC_HIGH:
++        return tva_encoder_available("video/avc");
+     case PIPE_VIDEO_PROFILE_HEVC_MAIN:
++        return tva_encoder_available("video/hevc");
+     case PIPE_VIDEO_PROFILE_VP9_PROFILE0:
+-        return true;
++        return tva_encoder_available("video/x-vnd.on2.vp9");
+     default:
+         return false;
+     }
+@@ -515,6 +523,12 @@
+     uint32_t encode_height;
+     uint8_t *encode_packet;
+     size_t encode_packet_cap;
++    /* The client asked for this picture to be a sync frame. */
++    bool encode_key;
++    /* Top-left of the visible picture inside the coded surface. */
++    unsigned encode_x, encode_y;
++    /* Target bitrate the daemon is using. */
++    uint32_t encode_sent_bitrate;
+ 
+     struct pipe_context *pipe;    /* real context, for resource writes */
+ 
+@@ -2755,9 +2769,10 @@
+ 
+     unsigned width = c->encode_width ? c->encode_width : source->width;
+     unsigned height = c->encode_height ? c->encode_height : source->height;
++    unsigned x = c->encode_x, y0 = c->encode_y;
+     unsigned uv_height = (height + 1) / 2;
+-    if (!width || !height || width > source->width || height > source->height ||
+-        height > SIZE_MAX / width)
++    if (!width || !height || x + width > source->width || y0 + height > source->height ||
++        (x | y0) & 1 || height > SIZE_MAX / width)
+         return -1;
+     size_t y_size = (size_t)width * height;
+     size_t uv_size = (size_t)width * uv_height;
+@@ -2788,14 +2803,14 @@
+         return -1;
+     }
+     unsigned y_row = width;
+-    if (transfer->stride < y_row) {
++    if (transfer->stride < x + y_row) {
+         c->pipe->texture_unmap(c->pipe, transfer);
+         free(packed);
+         return -1;
+     }
+     for (unsigned y = 0; y < height; y++)
+         memcpy(packed + (size_t)y * y_row,
+-               src + (size_t)y * transfer->stride, y_row);
++               src + (size_t)(y0 + y) * transfer->stride + x, y_row);
+     c->pipe->texture_unmap(c->pipe, transfer);
+ 
+     memset(&box, 0, sizeof(box));
+@@ -2805,15 +2820,16 @@
+     transfer = NULL;
+     src = c->pipe->texture_map(c->pipe, res[1], 0, PIPE_MAP_READ,
+                                &box, &transfer);
+-    if (!src || !transfer || transfer->stride < width) {
++    if (!src || !transfer || transfer->stride < x + width) {
+         if (transfer)
+             c->pipe->texture_unmap(c->pipe, transfer);
+         free(packed);
+         return -1;
+     }
++    /* Interleaved CbCr: one byte per luma column, half the rows. */
+     for (unsigned y = 0; y < uv_height; y++)
+         memcpy(packed + y_size + (size_t)y * width,
+-               src + (size_t)y * transfer->stride, width);
++               src + (size_t)(y0 / 2 + y) * transfer->stride + x, width);
+     c->pipe->texture_unmap(c->pipe, transfer);
+ 
+     *out = packed;
+@@ -2938,6 +2954,7 @@
+                      err.msg[0] ? err.msg : "unknown error");
+         return -1;
+     }
++    c->encode_sent_bitrate = cfg.bitrate;
+     TVA_TRACE("encoder session ready codec=%d %ux%u bitrate=%u",
+               cfg.codec, cfg.width, cfg.height, cfg.bitrate);
+     return 0;
+@@ -2990,7 +3007,14 @@
+     if (tva_encoder_ensure_session(c, source) < 0 ||
+         tva_encode_copy_source(c, source, &raw, &raw_len) < 0)
+         goto fail;
+-    if (tva_session_send_raw_frame(c->sess, raw, raw_len) != TVA_OK)
++    /* Rate changes arrive per picture, as WebRTC adapts to the network. */
++    if (c->encode_bitrate && c->encode_bitrate != c->encode_sent_bitrate) {
++        if (tva_session_set_bitrate(c->sess, c->encode_bitrate) != TVA_OK)
++            goto fail;
++        c->encode_sent_bitrate = c->encode_bitrate;
++    }
++    if (tva_session_send_raw_frame(c->sess, raw, raw_len,
++                                   c->encode_key ? ENC_UNIT_FORCE_KEY : 0) != TVA_OK)
+         goto fail;
+     if (!c->encode_packet) {
+         c->encode_packet_cap = TVA_MAX_UNIT_BYTES;
+@@ -3001,6 +3025,8 @@
+                                    c->encode_packet_cap, &encoded_len,
+                                    &flags, &pts) != TVA_OK)
+         goto fail;
++    if (c->encode_key && !(flags & 1))
++        TVA_TRACE("encoder returned a non-key frame for a requested key frame");
+     if (tva_encode_write_destination(c, destination, c->encode_packet,
+                                      encoded_len) < 0)
+         goto fail;
+@@ -3017,6 +3043,22 @@
+ }
+ 
+ static void
++tva_encode_set_crop(struct tva_codec *c, unsigned left, unsigned right,
++                    unsigned top, unsigned bottom)
++{
++    unsigned x = 2 * left, y = 2 * top;
++    unsigned w = 2 * (left + right), h = 2 * (top + bottom);
++    if (!w && !h)
++        return;
++    if (w >= c->base.width || h >= c->base.height)
++        return;
++    c->encode_x = x;
++    c->encode_y = y;
++    c->encode_width = c->base.width - w;
++    c->encode_height = c->base.height - h;
++}
++
++static void
+ tva_codec_begin_frame(struct pipe_video_codec *codec,
+                       struct pipe_video_buffer *target,
+                       struct pipe_picture_desc *picture)
+@@ -3057,6 +3099,37 @@
+             c->encode_width = vp9->width;
+             c->encode_height = vp9->height;
+         }
++        switch (u_reduce_video_profile(c->base.profile)) {
++        case PIPE_VIDEO_FORMAT_MPEG4_AVC: {
++            const struct pipe_h264_enc_picture_desc *h264 =
++                (const struct pipe_h264_enc_picture_desc *)picture;
++            c->encode_key = h264->picture_type == PIPE_H2645_ENC_PICTURE_TYPE_IDR;
++            /* 4:2:0 crop offsets count pairs of samples. */
++            if (h264->seq.enc_frame_cropping_flag)
++                tva_encode_set_crop(c, h264->seq.enc_frame_crop_left_offset,
++                                    h264->seq.enc_frame_crop_right_offset,
++                                    h264->seq.enc_frame_crop_top_offset,
++                                    h264->seq.enc_frame_crop_bottom_offset);
++            break;
++        }
++        case PIPE_VIDEO_FORMAT_HEVC: {
++            const struct pipe_h265_enc_picture_desc *h265 =
++                (const struct pipe_h265_enc_picture_desc *)picture;
++            c->encode_key = h265->picture_type == PIPE_H2645_ENC_PICTURE_TYPE_IDR;
++            if (h265->seq.conformance_window_flag)
++                tva_encode_set_crop(c, h265->seq.conf_win_left_offset,
++                                    h265->seq.conf_win_right_offset,
++                                    h265->seq.conf_win_top_offset,
++                                    h265->seq.conf_win_bottom_offset);
++            break;
++        }
++        case PIPE_VIDEO_FORMAT_VP9:
++            c->encode_key = ((const struct vlVaVP9EncPictureDesc *)picture)->key_frame;
++            break;
++        default:
++            c->encode_key = false;
++            break;
++        }
+         uint32_t bitrate = tva_encode_picture_bitrate(c, picture);
+         if (bitrate)
+             c->encode_bitrate = bitrate;
+@@ -4844,7 +4917,7 @@
+ tva_pipe_create_video_buffer(struct pipe_context *context,
+                              const struct pipe_video_buffer *templat)
+ {
+-    fprintf(stderr, "tva: create video buffer format=%d size=%ux%u bind=%#x\n",
++    if (getenv("DMD_VA_LOG")) fprintf(stderr, "tva: create video buffer format=%d size=%ux%u bind=%#x\n",
+             templat ? templat->buffer_format : -1,
+             templat ? templat->width : 0, templat ? templat->height : 0,
+             templat ? templat->bind : 0);
+@@ -4854,7 +4927,7 @@
+             tva_create_contiguous_video_buffer(context, templat);
+         if (buffer)
+         {
+-            fprintf(stderr, "tva: contiguous video buffer ready\n");
++            if (getenv("DMD_VA_LOG")) fprintf(stderr, "tva: contiguous video buffer ready\n");
+             return buffer;
+         }
+         fprintf(stderr, "tva: contiguous video buffer failed\n");
+@@ -4876,7 +4949,7 @@
+         bridge_templ.bind |= PIPE_BIND_SHARED | PIPE_BIND_LINEAR;
+     struct pipe_video_buffer *buffer =
+         vl_video_buffer_create(context, &bridge_templ);
+-    fprintf(stderr, "tva: separate video buffer %s\n", buffer ? "ready" : "failed");
++    if (getenv("DMD_VA_LOG")) fprintf(stderr, "tva: separate video buffer %s\n", buffer ? "ready" : "failed");
+     return buffer;
+ }
+ 
+@@ -4895,7 +4968,7 @@
+ tva_pipe_create_video_codec(struct pipe_context *context,
+                             const struct pipe_video_codec *templat)
+ {
+-    fprintf(stderr, "tva: create codec profile=%d entrypoint=%d size=%ux%u\n",
++    if (getenv("DMD_VA_LOG")) fprintf(stderr, "tva: create codec profile=%d entrypoint=%d size=%ux%u\n",
+             templat ? templat->profile : -1,
+             templat ? templat->entrypoint : -1,
+             templat ? templat->width : 0, templat ? templat->height : 0);
+@@ -5115,6 +5188,21 @@
+         backend = "auto";
+ 
+ #if defined(__linux__)
++    /* A native Termux program finds KGSL as a DRM render node, through the
++     * desktop's render-node preload, and sets none of the TERMUX_VA_*
++     * variables.  Where KGSL is present, apply the settings the bridge needs
++     * on it, as the upstream container recipe sets them, without overriding
++     * an explicit choice.  Like the FD_* settings below, this happens before
++     * the screen exists, so the drivers in this library read them. */
++    if (!strcmp(backend, "auto") && access("/dev/kgsl-3d0", R_OK | W_OK) == 0) {
++        setenv("TERMUX_VA_BRIDGE", "1", 0);
++        setenv("TERMUX_VA_GPU_BACKEND", "kgsl", 0);
++        setenv("TERMUX_VA_CONTIGUOUS_DMABUF", "1", 0);
++        backend = "kgsl";
++    }
++#endif
++
++#if defined(__linux__)
+     /* An X11 VA display in a PRoot container does not carry a DRM fd.  Open
+      * KGSL here so the bridge can still create a GPU screen without a DRM
+      * render node; the loader override below selects the KGSL alias. */
+--- a/src/gallium/frontends/va/tva_client.c
++++ b/src/gallium/frontends/va/tva_client.c
+@@ -68,6 +68,7 @@
+ #include <sys/un.h>
+ 
+ #include "util/os_misc.h"
++#include "util/u_call_once.h"
+ 
+ struct tva_session {
+     int fd;                 /* daemon connection, non-blocking */
+@@ -744,7 +745,7 @@
+     char defep[300];
+     const char *path = cfg->sock_path ? cfg->sock_path
+                                       : tva_default_endpoint(defep, sizeof(defep));
+-    fprintf(stderr, "tva-client: opening %s codec=%d %dx%d shm=%d\n",
++    if (getenv("DMD_VA_LOG")) fprintf(stderr, "tva-client: opening %s codec=%d %dx%d shm=%d\n",
+             path ? path : "(null)", cfg->codec, cfg->width, cfg->height,
+             cfg->want_shm);
+     if (unix_connect(s, path, cto, err) < 0) {
+@@ -877,8 +878,54 @@
+     return TVA_OK;
+ }
+ 
++int tva_session_set_bitrate(struct tva_session *s, uint32_t bitrate)
++{
++    if (!s)
++        return TVA_ERR_INVAL;
++    if (s->fd < 0 || s->tx_broken)
++        return sess_err(s, TVA_ERR_STATE, "session has no usable uplink", 0);
++    uint32_t unit[2] = { htonl(ENC_UNIT_SET_BITRATE | 4u), htonl(bitrate) };
++    int r = send_exact(s, unit, sizeof(unit), s->io_timeout_ms);
++    if (r != TVA_OK)
++        s->tx_broken = 1;
++    return r;
++}
++
++static char tva_encoders[1024];
++
++static void tva_read_encoders(void)
++{
++    char endpoint[512], path[600];
++    snprintf(path, sizeof(path), "%s.encoders",
++             tva_default_endpoint(endpoint, sizeof(endpoint)));
++    FILE *f = fopen(path, "re");
++    if (!f) {
++        snprintf(tva_encoders, sizeof(tva_encoders), "*");
++        return;
++    }
++    size_t n = fread(tva_encoders, 1, sizeof(tva_encoders) - 1, f);
++    tva_encoders[n] = '\0';
++    fclose(f);
++}
++
++bool tva_encoder_available(const char *mime)
++{
++    static util_once_flag once = UTIL_ONCE_FLAG_INIT;
++    util_call_once(&once, tva_read_encoders);
++    if (!strcmp(tva_encoders, "*"))
++        return true;
++    /* One "<mime> <component>" line per hardware encoder. */
++    size_t len = strlen(mime);
++    for (const char *line = tva_encoders; line && *line;
++         line = strchr(line, '\n') ? strchr(line, '\n') + 1 : NULL) {
++        if (!strncmp(line, mime, len) && line[len] == ' ')
++            return true;
++    }
++    return false;
++}
++
+ int tva_session_send_raw_frame(struct tva_session *s, const void *data,
+-                               size_t len)
++                               size_t len, uint32_t flags)
+ {
+     if (!s)
+         return TVA_ERR_INVAL;
+@@ -893,7 +940,7 @@
+         return sess_err(s, TVA_ERR_STATE,
+                         "uplink corrupted (earlier send interrupted); rebuild the session", 0);
+ 
+-    uint32_t be = htonl((uint32_t)len);
++    uint32_t be = htonl((uint32_t)len | (flags & ENC_UNIT_FORCE_KEY));
+     int r = send_exact(s, &be, 4, s->io_timeout_ms);
+     if (r != TVA_OK) {
+         s->tx_broken = 1;
+--- a/src/gallium/frontends/va/tva_client.h
++++ b/src/gallium/frontends/va/tva_client.h
+@@ -43,6 +43,7 @@
+ #ifndef TVA_CLIENT_H
+ #define TVA_CLIENT_H
+ 
++#include <stdbool.h>
+ #include <stddef.h>
+ #include <stdint.h>
+ 
+@@ -233,7 +234,13 @@
+ /* Encoder input uses the same length-prefixed uplink framing, but contains a
+  * packed NV12 frame rather than codec Annex-B data. */
+ int tva_session_send_raw_frame(struct tva_session *s, const void *data,
+-                               size_t len);
++                               size_t len, uint32_t flags);
++int tva_session_set_bitrate(struct tva_session *s, uint32_t bitrate);
++
++/* Whether the daemon lists a hardware encoder for this MIME type in the
++ * "<socket>.encoders" file it writes at start-up.  Without the file (an
++ * older daemon), every encoder is assumed available. */
++bool tva_encoder_available(const char *mime);
+ 
+ /* Receive one encoded access unit from an encoder session.  The output is
+  * copied into caller-provided storage because the decoder receive buffer is
+--- a/src/gallium/frontends/va/tva_protocol.h
++++ b/src/gallium/frontends/va/tva_protocol.h
+@@ -153,6 +153,16 @@
+  * unchanged; both endpoints must be updated for raw frames over 8 MiB. */
+ #define MAX_ENCODE_FRAME (16 * 1024 * 1024)
+ 
++/* Encoder uplink controls in the high bits of the length word, which a raw
++ * frame (at most MAX_ENCODE_FRAME) never sets.  VA-API clients choose the
++ * picture types, and WebRTC changes its target rate and asks for key frames
++ * at any time, so these follow each picture:
++ *   FORCE_KEY    this frame must be coded as a sync frame (IDR / key frame);
++ *   SET_BITRATE  a 4-byte big-endian target bitrate follows instead of a
++ *                frame, and no packet is returned for it. */
++#define ENC_UNIT_FORCE_KEY   0x80000000u
++#define ENC_UNIT_SET_BITRATE 0x40000000u
++
+ /* Max concurrent decode sessions the daemon accepts (hardware supports 16). */
+ #define MAX_CLIENTS 8
+ 
+--- a/src/gallium/frontends/va/va_private.h
++++ b/src/gallium/frontends/va/va_private.h
+@@ -388,6 +388,7 @@
+    uint32_t width;
+    uint32_t height;
+    enum pipe_h2645_enc_rate_control_method rate_ctrl_method;
++   bool key_frame;
+ };
+ 
+ typedef struct vlVaContext {

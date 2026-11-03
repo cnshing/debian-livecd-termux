@@ -1,0 +1,1 @@
+../../../src/native/component.py

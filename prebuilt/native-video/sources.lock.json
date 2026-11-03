@@ -1,0 +1,15 @@
+{
+  "format": 1,
+  "libva": {
+    "version": "2.22.0",
+    "url": "https://codeload.github.com/intel/libva/tar.gz/refs/tags/2.22.0",
+    "sha256": "467c418c2640a178c6baad5be2e00d569842123763b80507721ab87eb7af8735"
+  },
+  "mesa": {
+    "commit": "eb3e7fd4f009cab04b1482aad4843c0bde28a786",
+    "url": "https://codeload.github.com/lfdevs/mesa-for-android-container/tar.gz/eb3e7fd4f009cab04b1482aad4843c0bde28a786",
+    "sha256": "123af0b3b2f7c83273a51f28367a64054201d524cbfa52f99ba76696e619927a"
+  },
+  "termux_port_patches_commit": "538685c906074926fd19650e38c6dad91379eb0f",
+  "build_python": ["meson==1.10.0", "mako==1.3.10", "packaging==25.0", "pyyaml==6.0.3"]
+}

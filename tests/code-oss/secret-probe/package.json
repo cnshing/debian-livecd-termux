@@ -1,0 +1,2 @@
+{"name":"secret-probe","publisher":"livecd-test","version":"0.0.1","engines":{"vscode":"^1.90.0"},"main":"./extension.js","activationEvents":["onStartupFinished"],
+ "contributes":{"commands":[{"command":"secretProbe.store","title":"Secret Probe: Store"},{"command":"secretProbe.read","title":"Secret Probe: Read"}]}}

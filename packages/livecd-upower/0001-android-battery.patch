@@ -1,0 +1,574 @@
+diff -ruN a/src/dummy/meson.build b/src/dummy/meson.build
+--- a/src/dummy/meson.build
++++ b/src/dummy/meson.build
+@@ -1,6 +1,8 @@
+ upshared += { 'dummy': static_library('upshared',
+     sources: [
+         'up-backend.c',
++        'up-device-android-battery.c',
++        'up-device-android-battery.h',
+         'up-native.c',
+     ],
+     c_args: [ '-DG_LOG_DOMAIN="UPower-Dummy"' ],
+diff -ruN a/src/dummy/up-backend.c b/src/dummy/up-backend.c
+--- a/src/dummy/up-backend.c
++++ b/src/dummy/up-backend.c
+@@ -30,6 +30,7 @@
+ #include "up-backend.h"
+ #include "up-daemon.h"
+ #include "up-device.h"
++#include "up-device-android-battery.h"
+ 
+ static void	up_backend_class_init	(UpBackendClass	*klass);
+ static void	up_backend_init	(UpBackend		*backend);
+@@ -38,13 +39,9 @@
+ struct UpBackendPrivate
+ {
+ 	UpDaemon		*daemon;
+-#ifdef EGG_TEST
+ 	UpDevice		*device;
+-#endif
+ 	UpDeviceList		*device_list; /* unused */
+-#ifdef EGG_TEST
+ 	GObject			*native;
+-#endif
+ };
+ 
+ enum {
+@@ -117,10 +114,13 @@
+ 	backend->priv->daemon = g_object_ref (daemon);
+ 	backend->priv->device_list = up_daemon_get_device_list (daemon);
+ 
+-#ifdef EGG_TEST
+-	/* small delay until first device is added */
+-	g_timeout_add_seconds (1, (GSourceFunc) up_backend_add_cb, backend);
+-#endif
++	backend->priv->native = g_object_new (G_TYPE_OBJECT, NULL);
++	backend->priv->device = g_initable_new (UP_TYPE_DEVICE_ANDROID_BATTERY, NULL, NULL,
++						"daemon", daemon,
++						"native", backend->priv->native,
++						NULL);
++	if (backend->priv->device != NULL)
++		g_signal_emit (backend, signals[SIGNAL_DEVICE_ADDED], 0, backend->priv->device);
+ 
+ 	return TRUE;
+ }
+diff -ruN a/src/dummy/up-device-android-battery.c b/src/dummy/up-device-android-battery.c
+--- a/src/dummy/up-device-android-battery.c
++++ b/src/dummy/up-device-android-battery.c
+@@ -0,0 +1,472 @@
++/* -*- Mode: C; tab-width: 8; indent-tabs-mode: t; c-basic-offset: 8 -*-
++ *
++ * Licensed under the GNU General Public License Version 2
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ */
++
++/*
++ * Android's battery as an ordinary UPower device.
++ *
++ * The Linux backend wakes on kernel uevents, but Android denies that socket to
++ * apps and to shell alike. Android's own battery event log can be followed by
++ * shell, so a small helper started once through Shizuku does that and reports
++ * back over loopback, with no timer. Only when Shizuku is unavailable does this
++ * poll, at the interval the Linux backend uses. Clients that want live numbers
++ * between events ask with Refresh().
++ */
++
++#include "config.h"
++
++#include <math.h>
++#include <signal.h>
++#include <stdlib.h>
++#include <string.h>
++#include <unistd.h>
++
++#include <gio/gio.h>
++
++#include "up-constants.h"
++#include "up-device-android-battery.h"
++
++#define BATTERY_DIRECTORY "/sys/class/power_supply/battery"
++#define HEALTH_KEY "mSavedBatteryAsoc:"
++#define HELPER_RETRY_SECONDS 300
++/* Android does not publish a cell's nominal voltage, so energy in Wh is an
++ * estimate from the charge in Ah, using the usual figure for phone cells. */
++#define NOMINAL_VOLTAGE 3.85
++
++/* Keeps running after the client exits, and ends with the daemon: its socket
++ * closing ends nc, which takes logcat with it. */
++#define HELPER_COMMAND \
++	"setsid sh -c '(echo %s; dumpsys battery | grep " HEALTH_KEY "; " \
++	"exec logcat -b events -T 1 -s battery_level battery_status) | " \
++	"{ nc 127.0.0.1 %u; pkill -P $$ logcat; }' >/dev/null 2>&1 </dev/null &"
++
++struct _UpDeviceAndroidBattery
++{
++	UpDeviceBattery		 parent_instance;
++
++	const char		*directory;
++	gdouble			 health; /* percent, 0 when unknown */
++
++	char			*token;
++	guint16			 port;
++	GSocketService		*service;
++	GSocketConnection	*connection;
++	GDataInputStream	*lines;
++	GSubprocess		*rish;
++	gboolean		 helper_live;
++	guint			 retry_id;
++};
++
++G_DEFINE_TYPE (UpDeviceAndroidBattery, up_device_android_battery, UP_TYPE_DEVICE_BATTERY)
++
++typedef struct {
++	gdouble			 percentage;
++	gdouble			 voltage; /* V */
++	gdouble			 current; /* A, in either direction */
++	gdouble			 temperature; /* degrees C */
++	gdouble			 charge_full; /* Ah */
++	gdouble			 charge_design; /* Ah */
++	gint			 cycles;
++	UpDeviceState		 state;
++	UpDeviceTechnology	 technology;
++} Reading;
++
++static UpDeviceState
++parse_state (const char *status)
++{
++	if (g_ascii_strcasecmp (status, "Charging") == 0)
++		return UP_DEVICE_STATE_CHARGING;
++	if (g_ascii_strcasecmp (status, "Discharging") == 0)
++		return UP_DEVICE_STATE_DISCHARGING;
++	if (g_ascii_strcasecmp (status, "Full") == 0)
++		return UP_DEVICE_STATE_FULLY_CHARGED;
++	/* Plugged in but held back. Spelled differently by sysfs and Termux:API. */
++	if (g_ascii_strcasecmp (status, "Not charging") == 0 ||
++	    g_ascii_strcasecmp (status, "NOT_CHARGING") == 0)
++		return UP_DEVICE_STATE_PENDING_CHARGE;
++	return UP_DEVICE_STATE_UNKNOWN;
++}
++
++static gboolean
++read_number (const char *directory, const char *name, gdouble *value)
++{
++	g_autofree char *path = g_build_filename (directory, name, NULL);
++	g_autofree char *text = NULL;
++
++	if (!g_file_get_contents (path, &text, NULL, NULL))
++		return FALSE;
++	*value = g_ascii_strtod (text, NULL);
++	return TRUE;
++}
++
++static gboolean
++read_sysfs (const char *directory, Reading *reading)
++{
++	g_autofree char *path = g_build_filename (directory, "uevent", NULL);
++	g_autofree char *text = NULL;
++	g_auto(GStrv) lines = NULL;
++	gboolean has_capacity = FALSE;
++	gdouble number;
++
++	/* One read returns everything, which is why this does not open each file. */
++	if (!g_file_get_contents (path, &text, NULL, NULL))
++		return FALSE;
++
++	lines = g_strsplit (text, "\n", -1);
++	for (char **line = lines; *line != NULL; line++) {
++		char *value = strchr (*line, '=');
++
++		if (value == NULL)
++			continue;
++		*value++ = '\0';
++		number = g_ascii_strtod (value, NULL);
++
++		if (g_str_equal (*line, "POWER_SUPPLY_CAPACITY")) {
++			reading->percentage = number;
++			has_capacity = TRUE;
++		} else if (g_str_equal (*line, "POWER_SUPPLY_STATUS")) {
++			reading->state = parse_state (value);
++		} else if (g_str_equal (*line, "POWER_SUPPLY_VOLTAGE_NOW")) {
++			reading->voltage = number / 1000000.0;
++		} else if (g_str_equal (*line, "POWER_SUPPLY_CURRENT_NOW")) {
++			reading->current = number / 1000000.0;
++		} else if (g_str_equal (*line, "POWER_SUPPLY_TEMP")) {
++			reading->temperature = number / 10.0;
++		} else if (g_str_equal (*line, "POWER_SUPPLY_CHARGE_FULL")) {
++			reading->charge_full = number / 1000000.0;
++		} else if (g_str_equal (*line, "POWER_SUPPLY_CHARGE_FULL_DESIGN")) {
++			reading->charge_design = number / 1000000.0;
++		} else if (g_str_equal (*line, "POWER_SUPPLY_CYCLE_COUNT")) {
++			reading->cycles = number;
++		} else if (g_str_equal (*line, "POWER_SUPPLY_TECHNOLOGY")) {
++			if (g_str_equal (value, "Li-ion"))
++				reading->technology = UP_DEVICE_TECHNOLOGY_LITHIUM_ION;
++			else if (g_str_equal (value, "Li-poly"))
++				reading->technology = UP_DEVICE_TECHNOLOGY_LITHIUM_POLYMER;
++		}
++	}
++
++	/* Samsung's current_now is in mA, against the kernel's ABI, and its cycle
++	 * count has its own name. Both of these are absent from uevent. */
++	if (read_number (directory, "batt_current_ua_now", &number))
++		reading->current = number / 1000000.0;
++	if (reading->cycles <= 0 && read_number (directory, "battery_cycle", &number))
++		reading->cycles = number;
++
++	return has_capacity;
++}
++
++static const char *
++json_value (const char *json, const char *key)
++{
++	g_autofree char *quoted = g_strdup_printf ("\"%s\"", key);
++	const char *value = strstr (json, quoted);
++
++	if (value == NULL || (value = strchr (value, ':')) == NULL)
++		return NULL;
++	for (value++; *value == ' '; value++);
++	return value;
++}
++
++static gdouble
++json_number (const char *json, const char *key)
++{
++	const char *value = json_value (json, key);
++
++	return value != NULL ? g_ascii_strtod (value, NULL) : 0.0;
++}
++
++/* For phones that do not let an app read the battery's sysfs directory. */
++static gboolean
++read_termux_api (Reading *reading)
++{
++	g_autofree char *output = NULL;
++	const char *status;
++
++	/* This blocks the main loop, so it is bounded: the command can hang when
++	 * the Termux:API app is missing or stopped. */
++	if (!g_spawn_command_line_sync ("@TERMUX_PREFIX@/bin/timeout 5 @TERMUX_PREFIX@/bin/termux-battery-status",
++					&output, NULL, NULL, NULL) ||
++	    strstr (output, "\"percentage\"") == NULL)
++		return FALSE;
++
++	reading->percentage = json_number (output, "percentage");
++	reading->voltage = json_number (output, "voltage") / 1000.0;
++	reading->current = json_number (output, "current") / 1000000.0;
++	reading->temperature = json_number (output, "temperature");
++	status = json_value (output, "status");
++	if (status != NULL && *status == '"') {
++		g_autofree char *name = g_strndup (status + 1, strcspn (status + 1, "\""));
++
++		reading->state = parse_state (name);
++	}
++	return TRUE;
++}
++
++static gboolean
++up_device_android_battery_refresh (UpDevice *device, UpRefreshReason reason)
++{
++	UpDeviceAndroidBattery *self = UP_DEVICE_ANDROID_BATTERY (device);
++	UpDeviceBattery *battery = UP_DEVICE_BATTERY (device);
++	Reading reading = { .state = UP_DEVICE_STATE_UNKNOWN };
++	UpBatteryInfo info = { .present = FALSE };
++	UpBatteryValues values = { .units = UP_BATTERY_UNIT_ENERGY };
++	gdouble design;
++	gdouble full;
++
++	if (!read_sysfs (self->directory, &reading) && !read_termux_api (&reading)) {
++		up_device_battery_update_info (battery, &info);
++		return FALSE;
++	}
++
++	design = reading.charge_design * NOMINAL_VOLTAGE;
++	full = self->health > 0.0 ? design * self->health / 100.0 : reading.charge_full * NOMINAL_VOLTAGE;
++
++	info.present = TRUE;
++	info.units = UP_BATTERY_UNIT_ENERGY;
++	info.vendor = "Android";
++	info.model = "Battery";
++	info.technology = reading.technology;
++	info.charge_cycles = reading.cycles;
++	info.voltage_design = NOMINAL_VOLTAGE;
++	info.energy.full = full;
++	info.energy.design = design;
++	up_device_battery_update_info (battery, &info);
++
++	/* Drivers can repeat the design capacity as "full" without measuring
++	 * anything, which would read as a perfectly healthy battery. */
++	if (self->health <= 0.0 && (full < 0.01 || full >= design))
++		g_object_set (self, "capacity", (gdouble) 0.0, NULL);
++
++	values.state = reading.state;
++	values.percentage = CLAMP (reading.percentage, 0.0, 100.0);
++	values.voltage = reading.voltage;
++	values.temperature = reading.temperature;
++	/* The sign of the current varies by vendor, and the state already gives
++	 * the direction. A full battery's small current is noise, which UPower
++	 * would otherwise turn into a time to empty. */
++	if (reading.state == UP_DEVICE_STATE_CHARGING || reading.state == UP_DEVICE_STATE_DISCHARGING)
++		values.energy.rate = fabs (reading.current * reading.voltage);
++	up_device_battery_report (battery, &values, reason);
++
++	/* The report sets its own interval, so this has to follow it. */
++	g_object_set (self, "poll-timeout", self->helper_live ? 0 : UP_DAEMON_SHORT_TIMEOUT, NULL);
++	return TRUE;
++}
++
++static void helper_read_line (UpDeviceAndroidBattery *self);
++
++static void
++helper_refresh (UpDeviceAndroidBattery *self)
++{
++	up_device_refresh_internal (UP_DEVICE (self), UP_REFRESH_EVENT);
++}
++
++static void
++helper_rish_exited (GObject *source, GAsyncResult *result, gpointer user_data)
++{
++	g_autoptr(UpDeviceAndroidBattery) self = user_data;
++
++	g_subprocess_wait_finish (G_SUBPROCESS (source), result, NULL);
++	g_clear_object (&self->rish);
++}
++
++/* The client is a whole Java VM, and does not leave once the helper has started. */
++static void
++helper_stop_client (UpDeviceAndroidBattery *self)
++{
++	const char *pid = self->rish != NULL ? g_subprocess_get_identifier (self->rish) : NULL;
++
++	if (pid != NULL)
++		kill (-atoi (pid), SIGKILL);
++}
++
++static void
++helper_child_setup (gpointer user_data)
++{
++	setpgid (0, 0);
++}
++
++static void
++helper_spawn (UpDeviceAndroidBattery *self)
++{
++	g_autoptr(GSubprocessLauncher) launcher = NULL;
++	g_autofree char *rish = g_strdup (g_getenv ("MC_RISH"));
++	g_autofree char *command = NULL;
++
++	/* Still waiting for the user to authorize Termux in Shizuku. */
++	if (self->rish != NULL)
++		return;
++
++	if (rish == NULL)
++		rish = g_build_filename (g_get_home_dir (), ".local/lib/shizuku/rish", NULL);
++	if (!g_file_test (rish, G_FILE_TEST_EXISTS))
++		return;
++
++	launcher = g_subprocess_launcher_new (G_SUBPROCESS_FLAGS_STDOUT_SILENCE | G_SUBPROCESS_FLAGS_STDERR_SILENCE);
++	g_subprocess_launcher_set_stdin_file_path (launcher, "/dev/null");
++	g_subprocess_launcher_setenv (launcher, "RISH_APPLICATION_ID", "com.termux", TRUE);
++	g_subprocess_launcher_setenv (launcher, "RISH_PRESERVE_ENV", "0", TRUE);
++	g_subprocess_launcher_set_child_setup (launcher, helper_child_setup, NULL, NULL);
++	command = g_strdup_printf (HELPER_COMMAND, self->token, self->port);
++	self->rish = g_subprocess_launcher_spawn (launcher, NULL, "/system/bin/sh", rish, "-c", command, NULL);
++	if (self->rish != NULL)
++		g_subprocess_wait_async (self->rish, NULL, helper_rish_exited, g_object_ref (self));
++}
++
++static gboolean
++helper_retry (gpointer user_data)
++{
++	helper_spawn (UP_DEVICE_ANDROID_BATTERY (user_data));
++	return G_SOURCE_CONTINUE;
++}
++
++static void
++helper_lost (UpDeviceAndroidBattery *self)
++{
++	gboolean was_live = self->helper_live;
++
++	g_clear_object (&self->lines);
++	g_clear_object (&self->connection);
++	self->helper_live = FALSE;
++
++	/* The refresh turns polling back on. */
++	if (was_live)
++		helper_refresh (self);
++	if (self->retry_id == 0)
++		self->retry_id = g_timeout_add_seconds (HELPER_RETRY_SECONDS, helper_retry, self);
++}
++
++static void
++helper_line_ready (GObject *source, GAsyncResult *result, gpointer user_data)
++{
++	g_autoptr(UpDeviceAndroidBattery) self = user_data;
++	g_autofree char *line = g_data_input_stream_read_line_finish (G_DATA_INPUT_STREAM (source), result, NULL, NULL);
++	const char *health;
++
++	if (line == NULL) {
++		helper_lost (self);
++		return;
++	}
++
++	if (!self->helper_live) {
++		/* Any app can reach this port. It must not be able to stop the poll. */
++		if (g_strcmp0 (line, self->token) != 0) {
++			helper_lost (self);
++			return;
++		}
++		self->helper_live = TRUE;
++		g_clear_handle_id (&self->retry_id, g_source_remove);
++		helper_stop_client (self);
++		helper_refresh (self);
++	} else if ((health = strstr (line, HEALTH_KEY)) != NULL) {
++		self->health = g_ascii_strtod (health + strlen (HEALTH_KEY), NULL);
++		helper_refresh (self);
++	} else if (strstr (line, "battery_") != NULL) {
++		helper_refresh (self);
++	}
++
++	helper_read_line (self);
++}
++
++static void
++helper_read_line (UpDeviceAndroidBattery *self)
++{
++	g_data_input_stream_read_line_async (self->lines, G_PRIORITY_DEFAULT, NULL,
++					     helper_line_ready, g_object_ref (self));
++}
++
++static gboolean
++helper_incoming (GSocketService *service, GSocketConnection *connection, GObject *source, gpointer user_data)
++{
++	UpDeviceAndroidBattery *self = UP_DEVICE_ANDROID_BATTERY (user_data);
++
++	/* A connection that is not kept is closed on return. */
++	if (self->connection != NULL)
++		return TRUE;
++
++	self->connection = g_object_ref (connection);
++	self->lines = g_data_input_stream_new (g_io_stream_get_input_stream (G_IO_STREAM (connection)));
++	helper_read_line (self);
++	return TRUE;
++}
++
++static gboolean
++up_device_android_battery_coldplug (UpDevice *device)
++{
++	UpDeviceAndroidBattery *self = UP_DEVICE_ANDROID_BATTERY (device);
++	g_autoptr(GInetAddress) loopback = g_inet_address_new_loopback (G_SOCKET_FAMILY_IPV4);
++	g_autoptr(GSocketAddress) requested = g_inet_socket_address_new (loopback, 0);
++	g_autoptr(GSocketAddress) effective = NULL;
++
++	self->service = g_socket_service_new ();
++	if (!g_socket_listener_add_address (G_SOCKET_LISTENER (self->service), requested,
++					    G_SOCKET_TYPE_STREAM, G_SOCKET_PROTOCOL_TCP,
++					    NULL, &effective, NULL)) {
++		g_warning ("Cannot listen for the battery helper, so polling instead");
++		return TRUE;
++	}
++
++	self->port = g_inet_socket_address_get_port (G_INET_SOCKET_ADDRESS (effective));
++	g_signal_connect (self->service, "incoming", G_CALLBACK (helper_incoming), self);
++	g_socket_service_start (self->service);
++	self->retry_id = g_timeout_add_seconds (HELPER_RETRY_SECONDS, helper_retry, self);
++	helper_spawn (self);
++	return TRUE;
++}
++
++/* UPower only answers Refresh() in its debug mode. */
++static gboolean
++handle_refresh (UpExportedDevice *skeleton, GDBusMethodInvocation *invocation, gpointer user_data)
++{
++	up_device_refresh_internal (UP_DEVICE (skeleton), UP_REFRESH_POLL);
++	up_exported_device_complete_refresh (skeleton, invocation);
++	return TRUE;
++}
++
++static void
++up_device_android_battery_init (UpDeviceAndroidBattery *self)
++{
++	const char *directory = g_getenv ("UP_ANDROID_BATTERY_DIR");
++
++	self->directory = directory != NULL ? directory : BATTERY_DIRECTORY;
++	self->token = g_uuid_string_random ();
++	g_signal_connect (self, "handle-refresh", G_CALLBACK (handle_refresh), NULL);
++}
++
++static void
++up_device_android_battery_finalize (GObject *object)
++{
++	UpDeviceAndroidBattery *self = UP_DEVICE_ANDROID_BATTERY (object);
++
++	g_clear_handle_id (&self->retry_id, g_source_remove);
++	g_clear_object (&self->lines);
++	g_clear_object (&self->connection);
++	g_clear_object (&self->service);
++	g_clear_object (&self->rish);
++	g_free (self->token);
++
++	G_OBJECT_CLASS (up_device_android_battery_parent_class)->finalize (object);
++}
++
++static void
++up_device_android_battery_class_init (UpDeviceAndroidBatteryClass *klass)
++{
++	GObjectClass *object_class = G_OBJECT_CLASS (klass);
++	UpDeviceClass *device_class = UP_DEVICE_CLASS (klass);
++
++	object_class->finalize = up_device_android_battery_finalize;
++	device_class->coldplug = up_device_android_battery_coldplug;
++	device_class->refresh = up_device_android_battery_refresh;
++}
+diff -ruN a/src/dummy/up-device-android-battery.h b/src/dummy/up-device-android-battery.h
+--- a/src/dummy/up-device-android-battery.h
++++ b/src/dummy/up-device-android-battery.h
+@@ -0,0 +1,29 @@
++/* -*- Mode: C; tab-width: 8; indent-tabs-mode: t; c-basic-offset: 8 -*-
++ *
++ * Licensed under the GNU General Public License Version 2
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ */
++
++#ifndef __UP_DEVICE_ANDROID_BATTERY_H__
++#define __UP_DEVICE_ANDROID_BATTERY_H__
++
++#include "up-device-battery.h"
++
++G_BEGIN_DECLS
++
++#define UP_TYPE_DEVICE_ANDROID_BATTERY (up_device_android_battery_get_type ())
++
++G_DECLARE_FINAL_TYPE (UpDeviceAndroidBattery, up_device_android_battery, UP, DEVICE_ANDROID_BATTERY, UpDeviceBattery)
++
++G_END_DECLS
++
++#endif /* __UP_DEVICE_ANDROID_BATTERY_H__ */
+diff -ruN a/src/dummy/up-native.c b/src/dummy/up-native.c
+--- a/src/dummy/up-native.c
++++ b/src/dummy/up-native.c
+@@ -35,5 +35,5 @@
+ const gchar *
+ up_native_get_native_path (GObject *object)
+ {
+-	return "/sys/dummy";
++	return "/android/BAT0";
+ }

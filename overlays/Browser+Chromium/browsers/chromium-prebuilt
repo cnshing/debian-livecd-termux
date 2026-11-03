@@ -1,0 +1,10 @@
+#!/data/data/com.termux/files/usr/bin/bash
+set -eu
+prefix=/data/data/com.termux/files/usr
+case ${0##*/} in
+    chromium-vaapi) browser=chromium;;
+    ungoogled-chromium) browser=ungoogled-chromium;;
+    *) echo 'Unknown Chromium launcher name' >&2; exit 2;;
+esac
+exec "$prefix/bin/python" "$HOME/.local/lib/livecd-native/acceleration.py" run \
+    --abi glibc --profile "$browser" -- "$browser" "$@"

@@ -883,35 +883,6 @@
     <signal name="active-workspace-changed" return="void" when="last">
     </signal>
   </class>
-  <class name="MetaWaylandClient" get-type="meta_wayland_client_get_type" parents="GObject">
-    <signal name="client-destroyed" return="void" when="last">
-    </signal>
-  </class>
-  <class name="MetaWaylandCompositor" get-type="meta_wayland_compositor_get_type" parents="GObject">
-    <signal name="prepare-shutdown" return="void" when="last">
-    </signal>
-  </class>
-  <class name="MetaWaylandSurface" get-type="meta_wayland_surface_get_type" parents="GObject">
-    <property name="scanout-candidate" type="MetaCrtc" flags="225"/>
-    <property name="window" type="MetaWindow" flags="225"/>
-    <property name="main-monitor" type="MetaLogicalMonitor" flags="1073742051"/>
-    <signal name="configure" return="void" when="last">
-    </signal>
-    <signal name="destroy" return="void" when="last">
-    </signal>
-    <signal name="unmapped" return="void" when="last">
-    </signal>
-    <signal name="shortcuts-inhibited" return="void" when="last">
-    </signal>
-    <signal name="shortcuts-restored" return="void" when="last">
-    </signal>
-    <signal name="geometry-changed" return="void" when="last">
-    </signal>
-    <signal name="pre-state-applied" return="void" when="last">
-    </signal>
-    <signal name="actor-changed" return="void" when="last">
-    </signal>
-  </class>
   <class name="MetaX11Display" get-type="meta_x11_display_get_type" parents="GObject">
   </class>
 </dump>

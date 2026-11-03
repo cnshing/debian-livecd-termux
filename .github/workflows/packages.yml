@@ -149,8 +149,9 @@ jobs:
     # Builder dependencies, one entry of each kind per job. Host tools differ between jobs, such as the
     # Python that Chromium's build compiles for itself, and a shared entry would hold only what the
     # first job to save it set up. A job starts only from its own earlier entries, so one job's
-    # downloads never pile into another's. The container image is not cached: at 2.5 GB compressed it
-    # would take a quarter of the repository's 10 GB allowance, and every job must still load it.
+    # downloads never pile into another's. Not cached, as too large for the repository's 10 GB allowance
+    # for what they save: the 2.5 GB compressed container image, which every job must still load, and
+    # Chromium's 1.9 GB source, which downloads in seconds.
     - name: Restore the host tools
       id: tools
       uses: actions/cache/restore@v6
@@ -164,6 +165,7 @@ jobs:
         path: |
           ~/.termux-build/_cache-aarch64
           ~/.termux-build/*/cache
+          !~/.termux-build/chromium/cache/chromium-*-linux.tar.xz
         key: termux-downloads-${{ env.TERMUX_PACKAGES_COMMIT }}-${{ matrix.name }}-${{ matrix.hash }}
         restore-keys: termux-downloads-${{ env.TERMUX_PACKAGES_COMMIT }}-${{ matrix.name }}-
 
@@ -218,6 +220,7 @@ jobs:
         path: |
           ~/.termux-build/_cache-aarch64
           ~/.termux-build/*/cache
+          !~/.termux-build/chromium/cache/chromium-*-linux.tar.xz
         key: ${{ steps.deps.outputs.cache-primary-key }}
 
     - uses: actions/upload-artifact@v7

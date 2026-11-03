@@ -19,8 +19,16 @@ _lsp_make() {
 		SO_FLAGS="$LDFLAGS -shared -fPIC -Wl,-z,relro,-z,now -Wl,--gc-sections -liconv -landroid-spawn"
 }
 
+# A cross build first builds lsp's resource tools for the build machine, and they link cairo and
+# libsndfile. They need the build machine's own copies, which HOST_PACKAGES in tools/recipes.py
+# installs, and its own pkg-config rather than Termux's.
 termux_step_configure() {
-	make config ARCHITECTURE="$TERMUX_ARCH" FEATURES="lv2 crosscompile" PREFIX="$TERMUX_PREFIX"
+	local host_pkg_config=
+	if [ "$TERMUX_ON_DEVICE_BUILD" = false ]; then
+		host_pkg_config="env -u PKG_CONFIG_LIBDIR -u PKG_CONFIG_PATH /usr/bin/pkg-config"
+	fi
+	make config ARCHITECTURE="$TERMUX_ARCH" FEATURES="lv2 crosscompile" PREFIX="$TERMUX_PREFIX" \
+		${host_pkg_config:+HOST_PKG_CONFIG="$host_pkg_config"}
 }
 
 termux_step_make() {

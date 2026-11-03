@@ -6,6 +6,7 @@
   recipes.py check-patches [NAME...]   Apply each recipe's patches to its pinned source.
   recipes.py prepare CHECKOUT         Stage recipes in the pinned Termux checkout.
   recipes.py order NAME...            Print packages and local dependencies in build order.
+  recipes.py host-packages NAME...    Print the build-machine packages a cross build of NAME needs.
   recipes.py config                   Print the builder revision and image for CI.
 """
 import argparse
@@ -33,6 +34,9 @@ TIMEOUT, SEPARATE_TIMEOUT = 350, 360
 # rather than compiling the pinned builder's older one. These recipes still need the builder's exact
 # versions: Chromium's host tools must match its source, and a newer release would break the build.
 EXACT_DEPENDENCIES = {'chromium'}
+# Build-machine libraries that a recipe's own tools link when it is cross-compiled. They are installed
+# in the builder container before the build, since termux-packages refuses sudo inside a recipe.
+HOST_PACKAGES = {'lsp-plugins-lv2': ['libcairo2-dev', 'libsndfile1-dev']}
 # What termux-packages fills in when it applies a patch; the values only matter for applying.
 PLACEHOLDERS = {'@TERMUX_PREFIX@': '/data/data/com.termux/files/usr', '@TERMUX_HOME@': '/data/data/com.termux/files/home'}
 READ = '''set +u
@@ -124,8 +128,13 @@ def plan(names):
         include.append({'name': '_'.join(sorted(group[name])), 'packages': ' '.join(ordered),
                         'hash': directory_hash(ordered), 'large': bool(group[name] & LARGE),
                         'timeout': SEPARATE_TIMEOUT if separate else TIMEOUT,
-                        'exact': bool(group[name] & EXACT_DEPENDENCIES)})
+                        'exact': bool(group[name] & EXACT_DEPENDENCIES),
+                        'host_packages': ' '.join(host_packages(ordered))})
     return {'include': include}
+
+
+def host_packages(names):
+    return sorted({package for name in names for package in HOST_PACKAGES.get(name, [])})
 
 
 def changed(base):
@@ -260,6 +269,7 @@ def main():
     commands.add_parser('check-patches').add_argument('names', nargs='*')
     commands.add_parser('prepare').add_argument('checkout')
     commands.add_parser('order').add_argument('names', nargs='+')
+    commands.add_parser('host-packages').add_argument('names', nargs='+')
     commands.add_parser('config')
     installer = commands.add_parser('install-output')
     installer.add_argument('directory')
@@ -273,6 +283,8 @@ def main():
         prepare_builder(args.checkout)
     elif args.command == 'order':
         print(' '.join(build_order(args.names)))
+    elif args.command == 'host-packages':
+        print(' '.join(host_packages(build_order(args.names))))
     elif args.command == 'config':
         config = json.loads(BUILD_CONFIG.read_text())
         print('revision=' + config['revision'])

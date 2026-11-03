@@ -167,6 +167,12 @@ Node.js and Electron included. CI therefore passes `-w`, which downloads the rep
 version. Chromium is the exception, listed in `EXACT_DEPENDENCIES`, because its host tools must match its
 source exactly.
 
+**Build-machine libraries.** A few recipes build tools that run during the build itself, and when
+cross-compiling those tools need the PC's own libraries, not Termux's. termux-packages refuses `sudo`
+inside a recipe, so `HOST_PACKAGES` in `tools/recipes.py` lists them and CI and `tools/build-packages.sh`
+install them in the builder container first. lsp-plugins-lv2's resource tools, for example, link cairo
+and libsndfile.
+
 **Caching.** Builder dependencies are kept with `actions/cache`, even when a build fails. The toolchain and
 host tools share one entry. Downloaded dependency packages and source archives have one entry per job, and
 a new job can start from another job's. All of them are tied to the pinned builder revision. The

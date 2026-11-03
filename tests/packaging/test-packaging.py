@@ -52,6 +52,9 @@ class Packaging(unittest.TestCase):
         self.assertEqual(jobs['libva_livecd-gst-va']['packages'], 'libva livecd-gst-va')
         self.assertEqual(jobs['libva_livecd-gst-va']['timeout'], 350)
         self.assertFalse(jobs['libva_livecd-gst-va']['exact'])
+        self.assertEqual(jobs['easyeffects_livecd-audio_lsp-plugins-lv2']['host_packages'],
+                         'libcairo2-dev libsndfile1-dev')
+        self.assertEqual(jobs['chromium']['host_packages'], '')
         built = [package for job in jobs.values() for package in job['packages'].split()]
         self.assertEqual(sorted(set(built)), recipes.all_names())
         alone = recipes.plan(['chromium'])['include']

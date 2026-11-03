@@ -171,6 +171,14 @@ jobs:
     - name: Start the builder container
       working-directory: termux-packages
       run: ./scripts/run-docker.sh true
+    - name: Install the build-machine libraries that recipes' own tools link
+      if: matrix.host_packages != ''
+      working-directory: termux-packages
+      env:
+        HOST_PACKAGES: ${{ matrix.host_packages }}
+      run: |
+        ./scripts/run-docker.sh sudo apt-get update -qq
+        ./scripts/run-docker.sh sudo env DEBIAN_FRONTEND=noninteractive apt-get install -yqq --no-install-recommends $HOST_PACKAGES
     - name: Free disk space
       if: matrix.large
       working-directory: termux-packages

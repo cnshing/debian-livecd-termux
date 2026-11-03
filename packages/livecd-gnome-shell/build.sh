@@ -30,6 +30,9 @@ TERMUX_PKG_EXTRA_CONFIGURE_ARGS="
 termux_step_pre_configure() {
 	source "$TERMUX_PKG_BUILDER_DIR/gnome.sh"
 	livecd_gnome_setup
+	# Gvc's introspection program links -lgvc, and graphviz, pulled in by a dependency, installs
+	# its own unrelated libgvc.so in the prefix. Search the bundled Gvc's build directory first.
+	LDFLAGS="-L$TERMUX_PKG_BUILDDIR/subprojects/gvc $LDFLAGS"
 }
 
 termux_step_post_make_install() {

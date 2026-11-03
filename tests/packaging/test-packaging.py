@@ -44,6 +44,17 @@ class Packaging(unittest.TestCase):
         self.assertNotIn('livecd-gi-paths', order)
         self.assertNotIn('mutter-x11-frames', order)
 
+    def test_chromium_builds_alone_with_its_dependencies_and_longest_timeout(self):
+        jobs = {job['name']: job for job in recipes.plan(recipes.all_names())['include']}
+        self.assertEqual(jobs['chromium']['packages'], 'libva chromium')
+        self.assertEqual(jobs['chromium']['timeout'], 360)
+        self.assertEqual(jobs['libva_livecd-gst-va']['packages'], 'libva livecd-gst-va')
+        self.assertEqual(jobs['libva_livecd-gst-va']['timeout'], 350)
+        built = [package for job in jobs.values() for package in job['packages'].split()]
+        self.assertEqual(sorted(set(built)), recipes.all_names())
+        alone = recipes.plan(['chromium'])['include']
+        self.assertEqual([job['name'] for job in alone], ['chromium'])
+
     def test_session_preload_uses_package_files_and_preserves_termux_exec(self):
         with tempfile.TemporaryDirectory() as temporary:
             prefix = Path(temporary)

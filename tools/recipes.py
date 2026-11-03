@@ -24,6 +24,11 @@ BUILD_CONFIG = Path(__file__).with_name('termux-build.json')
 CACHE = Path(os.environ.get('LIVECD_RECIPE_CACHE', str(Path.home() / '.cache/livecd-recipes')))
 # Groups that need more disk than a runner has free by default, so CI clears some first.
 LARGE = {'chromium', 'code-oss', 'easyeffects', 'livecd-mixtapes', 'livecd-mozjs-128', 'lsp-plugins-lv2', 'mission-center', 'nautilus', 'serein'}
+# Recipes that take most of a job's time on their own. Each gets a job of its own, holding only the
+# recipes it needs, so nothing that shares a dependency with it adds to its build time.
+SEPARATE = {'chromium'}
+# Minutes. GitHub stops any job on its own runners at 360; others stop sooner so the caches still save.
+TIMEOUT, SEPARATE_TIMEOUT = 350, 360
 # What termux-packages fills in when it applies a patch; the values only matter for applying.
 PLACEHOLDERS = {'@TERMUX_PREFIX@': '/data/data/com.termux/files/usr', '@TERMUX_HOME@': '/data/data/com.termux/files/home'}
 READ = '''set +u
@@ -84,14 +89,13 @@ def plan(names):
     group = {name: {name} for name in selected}
     for name in sorted(selected):
         for dependency in needs[name]:
+            if SEPARATE & {name, dependency}:
+                continue
             merged = group[name] | group[dependency]
             for member in merged:
                 group[member] = merged
-    include, seen = [], set()
-    for name in sorted(selected):
-        if name in seen:
-            continue
-        seen |= group[name]
+
+    def closure(members):
         ordered = []
 
         def visit(package):
@@ -99,10 +103,23 @@ def plan(names):
                 for dependency in sorted(needs[package]):
                     visit(dependency)
                 ordered.append(package)
-        for member in sorted(group[name]):
+        for member in sorted(members):
             visit(member)
+        return ordered
+    # A group that only supplies a separate recipe is already built in that recipe's job.
+    covered = set().union(*(closure({name}) for name in selected & SEPARATE))
+    include, seen = [], set()
+    for name in sorted(selected):
+        if name in seen:
+            continue
+        seen |= group[name]
+        separate = bool(group[name] & SEPARATE)
+        if not separate and group[name] <= covered:
+            continue
+        ordered = closure(group[name])
         include.append({'name': '_'.join(sorted(group[name])), 'packages': ' '.join(ordered),
-                        'hash': directory_hash(group[name]), 'large': bool(group[name] & LARGE)})
+                        'hash': directory_hash(ordered), 'large': bool(group[name] & LARGE),
+                        'timeout': SEPARATE_TIMEOUT if separate else TIMEOUT})
     return {'include': include}
 
 

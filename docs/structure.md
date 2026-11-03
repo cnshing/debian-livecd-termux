@@ -153,7 +153,9 @@ other run is available as a workflow artifact, and `install.sh --repo-tarball` c
 
 **Parallel jobs.** Each group of recipes that depend on each other is one job, and groups run at the same time,
 up to 20. A job always includes the recipes from this repository that its target needs, so
-`packages=nautilus` also builds `gnome-autoar`. To see the plan without running anything:
+`packages=nautilus` also builds `gnome-autoar`. Chromium is the exception: it alone takes most of a job's six
+hours, so it always gets a job of its own, with only `libva`, and the full 360 minutes. Recipes that share
+`libva` with it build in another job. To see the plan without running anything:
 
 ```sh
 python3 tools/recipes.py plan --all
@@ -179,7 +181,7 @@ Check [its documentation](https://docs.github.com/en/actions/reference/limits) f
 |---|---|
 | Standard runner | 4 CPUs, 16 GB RAM, 14 GB SSD |
 | Concurrent jobs | 20 on the Free plan |
-| One job | 6 hours; this workflow stops at just under that |
+| One job | 6 hours, however high `timeout-minutes` is set; this workflow stops at 350 minutes so the caches still save, and Chromium's job at 360 |
 | Cache | 10 GB per repository; a job that restores nothing downloads everything again |
 
 Anyone can read this repository, its releases and its run status without logging in. Starting a build from the

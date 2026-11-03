@@ -33,6 +33,8 @@ termux_step_post_get_source() {
 
 termux_step_pre_configure() {
 	termux_setup_rust
+	# magpie's nng-c-sys crate builds with CMake.
+	termux_setup_cmake
 	termux_setup_meson
 	termux_setup_bpc
 	termux_setup_glib_cross_pkg_config_wrapper

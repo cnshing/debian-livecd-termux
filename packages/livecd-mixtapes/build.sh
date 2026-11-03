@@ -33,13 +33,15 @@ termux_step_make() {
 	termux_setup_cmake
 	# build.rs runs glib-compile-resources, which has to run on the build machine.
 	export PATH="$TERMUX_PREFIX/opt/glib/cross/bin:$PATH"
-	cargo build --jobs "$TERMUX_PKG_MAKE_PROCESSES" --target "$CARGO_TARGET_NAME" --release --locked
+	# Keep compiled crates in the package cache, which CI saves, so unchanged ones are not rebuilt.
+	cargo build --jobs "$TERMUX_PKG_MAKE_PROCESSES" --target "$CARGO_TARGET_NAME" --release --locked \
+		--target-dir "$TERMUX_PKG_CACHEDIR/cargo-target"
 }
 
 termux_step_make_install() {
 	local stage
 	stage=$(mktemp -d)
-	install -Dm755 "target/$CARGO_TARGET_NAME/release/mixtapes" "$TERMUX_PREFIX/bin/mixtapes"
+	install -Dm755 "$TERMUX_PKG_CACHEDIR/cargo-target/$CARGO_TARGET_NAME/release/mixtapes" "$TERMUX_PREFIX/bin/mixtapes"
 	install -Dm755 "$TERMUX_PKG_BUILDER_DIR/rustypipe-botguard" "$TERMUX_PREFIX/lib/mixtapes/bin/rustypipe-botguard"
 	tar -xJf vendor/rustypipe-botguard/rustypipe-botguard-v0.1.2-aarch64-unknown-linux-gnu.tar.xz -C "$stage"
 	install -Dm755 "$stage/rustypipe-botguard" "$TERMUX_PREFIX/lib/mixtapes/rustypipe-botguard.bin"

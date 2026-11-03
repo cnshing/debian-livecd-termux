@@ -33,6 +33,9 @@ _setup_nodejs_24() {
 		tar -xf "$NODEJS_TAR_FILE" -C "$NODEJS_FOLDER" --strip-components=1
 	fi
 	export PATH="$NODEJS_FOLDER/bin:$PATH"
+	# Keep npm's downloads in the package cache, which CI saves, and use them without asking the
+	# registry again whether they are current. package-lock.json still pins every version.
+	export npm_config_cache=$TERMUX_PKG_CACHEDIR/npm npm_config_prefer_offline=true
 }
 
 termux_step_post_get_source() {

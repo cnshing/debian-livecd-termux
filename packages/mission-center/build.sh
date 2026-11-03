@@ -43,18 +43,21 @@ termux_step_configure() {
 	python3 "$TERMUX_PKG_BUILDER_DIR/prepare.py" "$TERMUX_PKG_SRCDIR" "$TERMUX_PKG_BUILDDIR/resources-build" "$TERMUX_PREFIX"
 }
 
+# Compiled crates live in the package cache, which CI saves, so unchanged ones are not rebuilt.
 termux_step_make() {
-	local target_args=()
+	local target_args=() cache=$TERMUX_PKG_CACHEDIR/cargo-target
 	if test -n "${CARGO_TARGET_NAME:-}"; then target_args=(--target "$CARGO_TARGET_NAME"); fi
-	cargo build --manifest-path subprojects/magpie/Cargo.toml --release --locked "${target_args[@]}" --jobs "$TERMUX_PKG_MAKE_PROCESSES"
-	BUILD_ROOT="$TERMUX_PKG_BUILDDIR/resources-build" cargo build --release --locked "${target_args[@]}" --jobs "$TERMUX_PKG_MAKE_PROCESSES"
+	cargo build --manifest-path subprojects/magpie/Cargo.toml --release --locked "${target_args[@]}" --jobs "$TERMUX_PKG_MAKE_PROCESSES" \
+		--target-dir "$cache/magpie"
+	BUILD_ROOT="$TERMUX_PKG_BUILDDIR/resources-build" cargo build --release --locked "${target_args[@]}" --jobs "$TERMUX_PKG_MAKE_PROCESSES" \
+		--target-dir "$cache/missioncenter"
 }
 
 termux_step_make_install() {
-	local target_dir=target
-	if test -n "${CARGO_TARGET_NAME:-}"; then target_dir+=/$CARGO_TARGET_NAME; fi
-	install -Dm755 "$target_dir/release/missioncenter" "$TERMUX_PREFIX/bin/missioncenter"
-	install -Dm755 "subprojects/magpie/$target_dir/release/magpie" "$TERMUX_PREFIX/bin/missioncenter-magpie"
+	local cache=$TERMUX_PKG_CACHEDIR/cargo-target triple=
+	if test -n "${CARGO_TARGET_NAME:-}"; then triple=/$CARGO_TARGET_NAME; fi
+	install -Dm755 "$cache/missioncenter$triple/release/missioncenter" "$TERMUX_PREFIX/bin/missioncenter"
+	install -Dm755 "$cache/magpie$triple/release/magpie" "$TERMUX_PREFIX/bin/missioncenter-magpie"
 	install -Dm755 "$TERMUX_PKG_BUILDER_DIR/missioncenter-shizuku-setup" "$TERMUX_PREFIX/bin/missioncenter-shizuku-setup"
 	install -Dm644 "$TERMUX_PKG_BUILDDIR/resources-build/resources/missioncenter.gresource" "$TERMUX_PREFIX/share/missioncenter/missioncenter.gresource"
 	install -Dm644 "$TERMUX_PKG_BUILDDIR/resources-build/hwdb/hw.db" "$TERMUX_PREFIX/share/missioncenter/hw.db"

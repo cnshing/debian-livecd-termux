@@ -27,6 +27,17 @@ termux_step_configure() {
 	export CARGO_PROFILE_RELEASE_LTO=thin
 	export CARGO_PROFILE_RELEASE_CODEGEN_UNITS=16
 	export CARGO_PROFILE_RELEASE_DEBUG=0
+	# Keep compiled crates in the package cache, which CI saves, so unchanged ones are not rebuilt.
+	# prepare.py edits vendored crates, and Cargo does not notice changes to those, so any change to
+	# this recipe starts the cache over.
+	export CARGO_TARGET_DIR=$TERMUX_PKG_CACHEDIR/cargo-target
+	local recipe
+	recipe=$(cd "$TERMUX_PKG_BUILDER_DIR" && find . -type f -print0 | sort -z | xargs -0 sha256sum | sha256sum)
+	if test "$(cat "$CARGO_TARGET_DIR/recipe.sha256" 2>/dev/null)" != "$recipe"; then
+		rm -rf "$CARGO_TARGET_DIR"
+		mkdir -p "$CARGO_TARGET_DIR"
+		echo "$recipe" > "$CARGO_TARGET_DIR/recipe.sha256"
+	fi
 	if test "$TERMUX_ON_DEVICE_BUILD" = true; then
 		# LLD 21 on the Android 11 rig intermittently aborts in its parallel
 		# allocator. Limit linker threads for native host tools as well as Serein.
@@ -56,7 +67,7 @@ termux_step_make() {
 }
 
 termux_step_make_install() {
-	install -Dm755 "target/$CARGO_TARGET_NAME/release/serein" "$TERMUX_PREFIX/bin/serein"
+	install -Dm755 "$CARGO_TARGET_DIR/$CARGO_TARGET_NAME/release/serein" "$TERMUX_PREFIX/bin/serein"
 	install -Dm644 packaging/linux/serein.desktop "$TERMUX_PREFIX/share/applications/serein.desktop"
 	install -Dm644 assets/brand/serein.svg "$TERMUX_PREFIX/share/icons/hicolor/scalable/apps/serein.svg"
 	install -Dm644 THIRD_PARTY_NOTICES.md "$TERMUX_PREFIX/share/doc/serein/THIRD_PARTY_NOTICES.md"

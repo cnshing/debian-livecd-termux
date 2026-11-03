@@ -6,7 +6,7 @@ TERMUX_PKG_MAINTAINER="@cnshing"
 TERMUX_PKG_VERSION="1.2.35"
 TERMUX_PKG_SRCURL="https://github.com/lsp-plugins/lsp-plugins/releases/download/${TERMUX_PKG_VERSION}/lsp-plugins-src-${TERMUX_PKG_VERSION}.tar.gz"
 TERMUX_PKG_SHA256=2c95ec7bb219d561ea3db36051b6c732133bcd76426fb836b1dd850dc4b5bb6c
-TERMUX_PKG_DEPENDS="cairo, libandroid-spawn, libc++, libiconv, libsndfile"
+TERMUX_PKG_DEPENDS="libandroid-spawn, libc++, libcairo, libiconv, libsndfile"
 TERMUX_PKG_BUILD_DEPENDS="ladspa-sdk, lv2"
 TERMUX_PKG_BUILD_IN_SRC=true
 

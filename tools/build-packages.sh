@@ -70,16 +70,21 @@ if $continue_build; then build_flags+=(-c); fi
 if $native; then
     ./build-package.sh "${build_flags[@]}" "${packages[@]}"
 else
-    # Recipes may not use sudo, so the builder container gets their build-machine libraries first,
-    # in the same command because the Podman container does not outlive it.
+    # Recipes may not use sudo, so the builder container gets their build-machine libraries first.
     host_packages=$("$python" "$repo/tools/recipes.py" host-packages "${packages[@]}")
-    build=(bash -c 'test -z "$1" || { sudo apt-get update -qq &&
-        sudo env DEBIAN_FRONTEND=noninteractive apt-get install -yqq --no-install-recommends $1; } &&
-        shift && exec ./build-package.sh "$@"' - "$host_packages" "${build_flags[@]}" -a aarch64 "${packages[@]}")
     if test "$engine" = podman; then
-        "$repo/tools/run-podman.sh" "$builder" "${build[@]}"
+        # The Podman container does not outlive one command, so install and build in the same one.
+        "$repo/tools/run-podman.sh" "$builder" bash -c 'test -z "$1" || { sudo apt-get update -qq &&
+            sudo env DEBIAN_FRONTEND=noninteractive apt-get install -yqq --no-install-recommends $1; } &&
+            shift && exec ./build-package.sh "$@"' - "$host_packages" "${build_flags[@]}" -a aarch64 "${packages[@]}"
     else
-        ./scripts/run-docker.sh "${build[@]}"
+        if test -n "$host_packages"; then
+            # As root, since the image's sudo cannot switch users in some Docker setups.
+            TERMUX_DOCKER_EXEC_EXTRA_ARGS='--user root' ./scripts/run-docker.sh apt-get update -qq
+            TERMUX_DOCKER_EXEC_EXTRA_ARGS='--user root' ./scripts/run-docker.sh \
+                env DEBIAN_FRONTEND=noninteractive apt-get install -yqq --no-install-recommends $host_packages
+        fi
+        ./scripts/run-docker.sh ./build-package.sh "${build_flags[@]}" -a aarch64 "${packages[@]}"
     fi
 fi
 if $install_packages; then

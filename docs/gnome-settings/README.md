@@ -273,8 +273,9 @@ and restarting the real listener from the switch while the SSH session running
 the test stayed connected. With the extracted CI runtime,
 `test-screen-time.py --panels-ui` opened and closed all thirteen compiled panels
 with fatal GLib criticals. The About, System Details, Date & Time, Secure Shell
-and File History & Trash pages were inspected in screenshots. These pages have
-not yet been built by GitHub Actions.
+and File History & Trash pages were inspected in screenshots. GitHub Actions passed
+the single [Settings build set](https://github.com/cnshing/debian-livecd-termux/actions/runs/41812177976),
+including the wallpaper catalog test, at source revision `3aa8686`.
 
 Earlier device validation: the package builds/installs on arm64 Android 11, and all eleven
 compiled panels open and close with fatal GLib criticals enabled. Resolution

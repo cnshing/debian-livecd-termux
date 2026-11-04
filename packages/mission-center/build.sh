@@ -33,8 +33,19 @@ termux_step_post_get_source() {
 
 termux_step_pre_configure() {
 	termux_setup_rust
-	# magpie's nng-c-sys crate builds with CMake.
+	# magpie's nng-c-sys crate builds with CMake, which the cmake crate configures for Android
+	# without the toolchain and API level that Termux's own CMake step passes. Give CMake those
+	# through a toolchain file, which the cmake crate does accept.
 	termux_setup_cmake
+	if test "$TERMUX_ON_DEVICE_BUILD" = false; then
+		local toolchain=$TERMUX_PKG_TMPDIR/android.cmake
+		cat > "$toolchain" <<-EOF
+			set(CMAKE_SYSTEM_NAME Android)
+			set(CMAKE_SYSTEM_VERSION $TERMUX_PKG_API_LEVEL)
+			set(CMAKE_ANDROID_STANDALONE_TOOLCHAIN $TERMUX_STANDALONE_TOOLCHAIN)
+		EOF
+		export "CMAKE_TOOLCHAIN_FILE_${CARGO_TARGET_NAME//-/_}=$toolchain"
+	fi
 	termux_setup_meson
 	termux_setup_bpc
 	termux_setup_glib_cross_pkg_config_wrapper

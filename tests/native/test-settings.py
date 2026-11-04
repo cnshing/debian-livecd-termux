@@ -13,8 +13,8 @@ sys.path.insert(0, str(Path.home() / '.local/lib/livecd-native'))
 from desktop import session_environment
 
 PANELS = {'applications', 'background', 'display', 'keyboard', 'mouse',
-          'multitasking', 'notifications', 'search', 'sound', 'universal-access',
-          'wellbeing'}
+          'multitasking', 'notifications', 'privacy', 'search', 'sound', 'system',
+          'universal-access', 'wellbeing'}
 
 
 def resolution_test():

@@ -134,9 +134,24 @@ if ! test -f "$HOME/.local/lib/livecd/config.json"; then
     chmod 600 "$HOME/.local/lib/livecd/config.json"
 fi
 python "$repo/src/apply-overlays.py" --default "$@"
+# Qualcomm GPUs get Mesa's Turnip driver, and the desktop then renders through Zink.
+# `livecd start --renderer software` remains available, and a saved choice is kept.
+if test -e /dev/kgsl-3d0 && python "$repo/prebuilt/turnip/gpu-setup.py" > "$state/gpu-setup.json"; then
+    python - "$HOME/.local/lib/livecd/config.json" <<'EOF'
+import json, sys
+path = sys.argv[1]
+with open(path) as file:
+    config = json.load(file)
+config.setdefault('native_renderer', 'zink')
+with open(path, 'w') as file:
+    json.dump(config, file)
+EOF
+else
+    echo 'No supported GPU driver was set up; the desktop renders in software.'
+fi
 ln -sf "$repo/src/livecd-pkg" "$PREFIX/bin/livecd-pkg"
 python "$base/audit.py" > "$state/elf-audit.json"
 dpkg-query -W > "$state/host-packages.tsv"
-printf '\nNative GNOME installed. Start: ~/.local/bin/livecd-native start\n'
-printf 'Validate: ~/.local/bin/livecd-native validate; stop: ~/.local/bin/livecd-native stop\n'
+printf '\nNative GNOME installed. Start: livecd start\n'
+printf 'Validate: livecd validate; stop: livecd stop\n'
 printf 'Optional applications: livecd-pkg list\n'

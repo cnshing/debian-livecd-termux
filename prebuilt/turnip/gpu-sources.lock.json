@@ -12,10 +12,10 @@
     },
     {
       "package": "vulkan-tools",
-      "version": "1.4.366",
-      "file": "vulkan-tools_1.4.366_aarch64.deb",
-      "url": "https://packages.termux.dev/apt/termux-main/pool/main/v/vulkan-tools/vulkan-tools_1.4.366_aarch64.deb",
-      "sha256": "f98b5943a07f3f8066dfc4ed19e7a8ccbc78a58d7df7794269e6afa2b69e3074"
+      "version": "1.4.367",
+      "file": "vulkan-tools_1.4.367_aarch64.deb",
+      "url": "https://packages.termux.dev/apt/termux-main/pool/main/v/vulkan-tools/vulkan-tools_1.4.367_aarch64.deb",
+      "sha256": "e66e30fa37b2364a1edcb6ba3d8aa1d8a6fa8219f6b3e35deb3cbb044dc3e372"
     }
   ]
 }

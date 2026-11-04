@@ -22,7 +22,9 @@ def main():
     common.mkdir(parents=True, exist_ok=True)
     with (common / 'session.lock').open('a') as lock:
         try:
-            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            # install.sh already holds the lock when it runs this.
+            if not os.environ.get('LIVECD_SETUP_LOCKED'):
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
             raise RuntimeError('Stop the managed desktop before installing the GPU profile')
         dependencies = ['libandroid-shmem', 'libc++', 'libdrm', 'libx11', 'libxcb',

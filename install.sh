@@ -36,11 +36,16 @@ if ! test -f "$shizuku/rish_shizuku.dex"; then
     install -m 400 "$exported/rish_shizuku.dex" "$shizuku/rish_shizuku.dex"
 fi
 rish() { RISH_APPLICATION_ID=com.termux RISH_PRESERVE_ENV=0 timeout 30 "$shizuku/rish" -c "$*" </dev/null; }
-# Shizuku+ may print a waiting notice before the answer.
-case $(rish id 2>/dev/null) in
-    *uid=2000\(shell\)*) ;;
-    *) echo 'Shizuku did not answer. Start Shizuku and allow Termux under its authorized apps, then run this again.' >&2; exit 2;;
-esac
+# Shizuku+ may print a waiting notice before the answer, and its first calls after a pause
+# can return nothing.
+for attempt in $(seq 10); do
+    case $(rish id 2>/dev/null || true) in *uid=2000\(shell\)*) break;; esac
+    if test "$attempt" = 10; then
+        echo 'Shizuku did not answer. Start Shizuku and allow Termux under its authorized apps, then run this again.' >&2
+        exit 2
+    fi
+    sleep 2
+done
 # Termux:API shares Termux's user ID, so its microphone permission covers the desktop's processes.
 rish pm grant com.termux.api android.permission.RECORD_AUDIO
 # Android otherwise stops a backgrounded desktop to save battery.

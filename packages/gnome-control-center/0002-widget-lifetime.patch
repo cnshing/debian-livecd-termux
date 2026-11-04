@@ -1,0 +1,79 @@
+Register template types and stop deferred UI work after window disposal.
+
+--- a/panels/common/cc-split-row.c
++++ b/panels/common/cc-split-row.c
+@@ -243,6 +243,8 @@
+   GObjectClass *object_class = G_OBJECT_CLASS (klass);
+   GtkWidgetClass *widget_class = GTK_WIDGET_CLASS (klass);
+ 
++  g_type_ensure (CC_TYPE_MASK_PAINTABLE);
++
+   object_class->dispose = cc_split_row_dispose;
+   object_class->get_property = cc_split_row_get_property;
+   object_class->set_property = cc_split_row_set_property;
+--- a/panels/universal-access/cc-ua-seeing-page.c
++++ b/panels/universal-access/cc-ua-seeing-page.c
+@@ -39,6 +39,7 @@
+ #include <glib/gi18n-lib.h>
+ 
+ #include "cc-list-row.h"
++#include "cc-list-row-info-button.h"
+ #include "cc-cursor-size-page.h"
+ #include "cc-ua-macros.h"
+ #include "cc-ua-seeing-page.h"
+@@ -166,6 +167,8 @@
+ {
+   GObjectClass *object_class = G_OBJECT_CLASS (klass);
+   GtkWidgetClass *widget_class = GTK_WIDGET_CLASS (klass);
++
++  g_type_ensure (CC_TYPE_LIST_ROW_INFO_BUTTON);
+ 
+   object_class->dispose = cc_ua_seeing_page_dispose;
+ 
+--- a/shell/cc-panel-list.c
++++ b/shell/cc-panel-list.c
+@@ -918,6 +918,9 @@
+   g_return_if_fail (GTK_IS_LIST_BOX_ROW (row));
+ 
+   scrolled_window = gtk_widget_get_ancestor (row, GTK_TYPE_SCROLLED_WINDOW);
++  /* The window may have closed before this idle scroll runs. */
++  if (!scrolled_window)
++    return;
+   adj = gtk_scrolled_window_get_vadjustment (GTK_SCROLLED_WINDOW (scrolled_window));
+   if (!adj)
+     return;
+--- a/shell/cc-window.c
++++ b/shell/cc-window.c
+@@ -70,6 +70,7 @@
+ 
+   CcPanel *active_panel;
+   GSettings *settings;
++  guint load_panel_id;
+ 
+   CcPanelListView previous_list_view;
+ };
+@@ -633,6 +634,7 @@
+ {
+   g_autofree char *id = NULL;
+ 
++  self->load_panel_id = 0;
+   id = g_settings_get_string (self->settings, "last-panel");
+   if (cc_panel_list_get_current_panel (self->panel_list))
+     return;
+@@ -661,7 +663,7 @@
+    * or the first visible panel. We do that in an idle handler so we
+    * have a chance to skip it when another panel has been explicitly
+    * activated from commandline parameter or from DBus method */
+-  g_idle_add_once ((GSourceOnceFunc) maybe_load_last_panel, self);
++  self->load_panel_id = g_idle_add_once ((GSourceOnceFunc) maybe_load_last_panel, self);
+ 
+   G_OBJECT_CLASS (cc_window_parent_class)->constructed (object);
+ }
+@@ -671,6 +673,7 @@
+ {
+   CcWindow *self = CC_WINDOW (object);
+ 
++  g_clear_handle_id (&self->load_panel_id, g_source_remove);
+   g_clear_pointer (&self->current_panel_id, g_free);
+   g_clear_object (&self->store);
+   g_clear_object (&self->active_panel);

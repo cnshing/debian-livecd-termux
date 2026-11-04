@@ -6,6 +6,7 @@ from pathlib import Path
 import select
 import subprocess
 import sys
+import tempfile
 import time
 
 sys.path.insert(0, str(Path.home() / '.local/lib/livecd-native'))
@@ -126,6 +127,64 @@ def panels_test():
     print('PASS: package exposes its declared panel inventory and excludes device power/networking/users')
 
 
+def panels_ui_test():
+    from gi.repository import Gio, GLib
+    bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
+    names = bus.call_sync('org.freedesktop.DBus', '/org/freedesktop/DBus',
+                          'org.freedesktop.DBus', 'ListNames', None, None,
+                          Gio.DBusCallFlags.NONE, 5000, None).unpack()[0]
+    assert 'org.gnome.Settings' not in names, 'Close Settings before the optional panel UI test'
+    settings = Gio.Settings.new('org.gnome.Settings')
+    original = {key: settings.get_user_value(key) for key in ('last-panel', 'window-state')}
+    try:
+        for panel in sorted(PANELS):
+            with tempfile.TemporaryFile(mode='w+') as log:
+                child = subprocess.Popen(['gnome-control-center', panel],
+                                         env={**os.environ, 'G_DEBUG': 'fatal-criticals'},
+                                         stdout=log, stderr=log)
+                try:
+                    deadline = time.monotonic() + 15
+                    while time.monotonic() < deadline:
+                        context = GLib.MainContext.default()
+                        while context.pending():
+                            context.iteration(False)
+                        if child.poll() is not None:
+                            break
+                        if settings.get_string('last-panel') == panel:
+                            # Allow asynchronous template/service initialization.
+                            time.sleep(1)
+                            assert child.poll() is None
+                            break
+                        time.sleep(0.1)
+                    assert settings.get_string('last-panel') == panel
+                    assert child.poll() is None
+                    subprocess.run(['gapplication', 'action', 'org.gnome.Settings', 'quit'],
+                                   check=True, timeout=10)
+                    child.wait(timeout=10)
+                    log.seek(0)
+                    output = log.read()
+                    assert child.returncode == 0, (child.returncode, output)
+                    assert 'CRITICAL' not in output and 'ERROR' not in output, output
+                    print(f'PASS: {panel} opens with fatal GLib criticals enabled')
+                except BaseException:
+                    log.seek(0)
+                    print(f'{panel}: exit={child.poll()}, selected={settings.get_string("last-panel")}',
+                          file=sys.stderr)
+                    print(log.read(), file=sys.stderr, flush=True)
+                    raise
+                finally:
+                    if child.poll() is None:
+                        child.terminate()
+                        child.wait(timeout=10)
+    finally:
+        for key, value in original.items():
+            if value is None:
+                settings.reset(key)
+            else:
+                settings.set_value(key, value)
+        Gio.Settings.sync()
+
+
 def main():
     if '--session' not in sys.argv:
         subprocess.run([sys.executable, __file__, '--session', *sys.argv[1:]],
@@ -135,6 +194,8 @@ def main():
     notification_test()
     if '--resolution' in sys.argv:
         resolution_test()
+    if '--panels-ui' in sys.argv:
+        panels_ui_test()
 
 
 if __name__ == '__main__':

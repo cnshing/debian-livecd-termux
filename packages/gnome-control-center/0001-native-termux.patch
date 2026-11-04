@@ -85,17 +85,6 @@ Native GNOME session build: X11 input discovery and a first panel inventory.
  
  # IBus support
  enable_ibus = get_option('ibus')
---- a/panels/common/cc-split-row.c
-+++ b/panels/common/cc-split-row.c
-@@ -243,6 +243,8 @@
-   GObjectClass *object_class = G_OBJECT_CLASS (klass);
-   GtkWidgetClass *widget_class = GTK_WIDGET_CLASS (klass);
- 
-+  g_type_ensure (CC_TYPE_MASK_PAINTABLE);
-+
-   object_class->dispose = cc_split_row_dispose;
-   object_class->get_property = cc_split_row_get_property;
-   object_class->set_property = cc_split_row_set_property;
 --- a/panels/common/gsd-device-manager.c
 +++ b/panels/common/gsd-device-manager.c
 @@ -22,7 +22,7 @@

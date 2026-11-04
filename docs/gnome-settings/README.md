@@ -94,15 +94,21 @@ In the running native session:
 python tests/native/test-settings.py
 # Also exercises real resolution changes, keep/cancel and the 20-second rollback:
 python tests/native/test-settings.py --resolution
+# Close Settings first; this opens/closes every compiled panel with fatal criticals:
+python tests/native/test-settings.py --panels-ui
 ```
 
 The notification test checks the owning service, notification submission and
-preference access. It does not prove visible banner suppression or every
-per-application policy; those require UI acceptance. The resolution test restores
+preference access. Manual UI acceptance also confirmed a visible banner with banners enabled and
+suppression with Do Not Disturb enabled. Per-application and lock-screen policies
+still require further UI acceptance. The resolution test restores
 the original preferences in a `finally` block.
 
 Device validation so far: the package builds/installs on arm64 Android 11; all ten
-panel entry points launch; resolution changes to 1280×720, confirmation, cancel,
+compiled panels open and close with fatal GLib criticals enabled; resolution changes to 1280×720, confirmation, cancel,
 parent-pipe loss and timeout restore passed without restarting GNOME. The GUI
-chooser and confirmation were visually inspected. Broader panel functionality
+chooser, confirmation and automatic dismissal after rollback were visually
+inspected. Existing appearance lifecycle/accent tests passed. The port also fixes
+missing template type registrations and deferred sidebar/window work after
+disposal, discovered by the panel smoke test. Broader panel functionality
 remains unfinished.

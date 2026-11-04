@@ -36,8 +36,9 @@ if ! test -f "$shizuku/rish_shizuku.dex"; then
     install -m 400 "$exported/rish_shizuku.dex" "$shizuku/rish_shizuku.dex"
 fi
 rish() { RISH_APPLICATION_ID=com.termux RISH_PRESERVE_ENV=0 timeout 30 "$shizuku/rish" -c "$*" </dev/null; }
+# Shizuku+ may print a waiting notice before the answer.
 case $(rish id 2>/dev/null) in
-    uid=2000*) ;;
+    *uid=2000\(shell\)*) ;;
     *) echo 'Shizuku did not answer. Start Shizuku and allow Termux under its authorized apps, then run this again.' >&2; exit 2;;
 esac
 # Termux:API shares Termux's user ID, so its microphone permission covers the desktop's processes.

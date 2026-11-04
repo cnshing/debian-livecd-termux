@@ -5,7 +5,8 @@
 #                             or: gh workflow run packages.yml -f packages="nautilus easyeffects"
 #   Every package:            leave packages empty.
 #   Build again anyway:       add rebuild: true, or -f rebuild=true.
-#   Publish a release:        push a tag such as v1, or set release: v1 with packages left empty.
+#   Draft a release:          push a tag such as v1, or set release: v1 with packages left empty.
+#                             A new release starts as a draft; publish it by hand.
 #   Pushes and pull requests publish nothing.
 #
 # Each dependent set of recipes gets its own job, so unrelated packages build concurrently. A job
@@ -73,6 +74,8 @@ jobs:
       run: python3 tests/packaging/test-network-discovery.py
     - name: Test Android storage mount discovery
       run: python3 tests/native/test-storage-mounts.py
+    - name: Test desktop integration startup
+      run: python3 tests/native/test-integrations.py
     - name: Test GNOME wallpaper registration
       run: python3 tests/packaging/test-settings-backgrounds.py
     - name: Read the shared builder pin
@@ -310,12 +313,12 @@ jobs:
           ${{ env.REPO_TARBALL }}
           ${{ env.REPO_TARBALL }}.sha256
         retention-days: 30
-    - name: Publish the release
+    - name: Attach the packages to the release draft
       if: needs.plan.outputs.release != ''
       env:
         GH_TOKEN: ${{ github.token }}
         TAG: ${{ needs.plan.outputs.release }}
       run: |
         gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 ||
-          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --generate-notes
+          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --generate-notes --draft
         gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" --clobber "$REPO_TARBALL" "$REPO_TARBALL.sha256"

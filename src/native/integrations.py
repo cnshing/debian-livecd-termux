@@ -95,7 +95,7 @@ class Integrations:
                         self.report('bluetooth', 'reused')
                     else:
                         self.cleanup.append(('bluetooth', self.stop_bluetooth))
-                        self.command('livecd-mic-bluetooth', 'on', '--default', timeout=55)
+                        self.bluetooth_on()
                         self.report('bluetooth', 'started')
                     self.report('microphone', 'bluetooth')
                     return
@@ -107,6 +107,16 @@ class Integrations:
                 self.report('microphone', 'started')
         except (OSError, ValueError, KeyError, RuntimeError, subprocess.SubprocessError) as error:
             self.report('microphone', 'unavailable', str(error))
+
+    def bluetooth_on(self):
+        # Android can still be tearing down a previous session's call audio, which makes
+        # OpenSL refuse a new engine (error 12) for a few seconds.
+        for attempt in range(3):
+            try:
+                return self.command('livecd-mic-bluetooth', 'on', '--default', timeout=55)
+            except RuntimeError:
+                if attempt == 2 or self.stopping.wait(5):
+                    raise
 
     def stop_bluetooth(self):
         if self.owns(self.bluetooth_state().get('controller_pid')):

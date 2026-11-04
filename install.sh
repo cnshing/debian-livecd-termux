@@ -101,12 +101,18 @@ printf 'deb [trusted=yes] file://%s livecd main\n' "$repo/repo" > "$PREFIX/etc/a
 # Our builds carry the Android patches, so a same-named package from Termux's mirrors must not
 # replace them, even at a newer version. Packages only on those mirrors are unaffected.
 printf 'Package: *\nPin: release n=livecd\nPin-Priority: 1001\n' > "$PREFIX/etc/apt/preferences.d/livecd"
-apt-get install -y x11-repo
+# Keep existing configuration files rather than stop at dpkg's question.
+apt=(apt-get -y -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold)
+"${apt[@]}" install x11-repo
 apt-get update
+# Termux supports only whole upgrades: new packages link against libraries, such as libc++,
+# that are newer than a fresh bootstrap's. This also finishes an earlier interrupted run.
+"${apt[@]}" --fix-broken full-upgrade
+dpkg --configure -a
 # An on-device UPower build holds upower, which would stop livecd-upower replacing it.
 if dpkg -s upower >/dev/null 2>&1; then apt-mark unhold upower; fi
 mapfile -t packages < "$repo/src/native/packages.txt"
-apt-get install -y --no-install-recommends "${packages[@]}"
+"${apt[@]}" install --no-install-recommends "${packages[@]}"
 # Runtime code is owned by livecd-desktop. Setup only connects per-user paths.
 python "$PREFIX/libexec/livecd-native/runtime.py"
 if ! test -f "$HOME/.local/lib/livecd/config.json"; then

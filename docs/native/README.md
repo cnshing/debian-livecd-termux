@@ -314,10 +314,14 @@ checks their actual Turnip mappings and KGSL descriptors, and exercises a minute
 of rendering and overview transitions. See [GPU verification](GPU-VERIFICATION.md)
 for accepted results and remaining limits.
 
-LAN hostname lookups follow Android's DNS configuration. If an IP works but a
-hostname fails, see the [LAN hostname investigation](LAN-HOSTNAMES.md) for the
-verified Private DNS issue on the Note10+ rig and the separate glibc resolver
-configuration.
+LAN hostname lookups follow Android's DNS configuration. The
+[LAN hostname investigation](LAN-HOSTNAMES.md) records working LAN DNS with
+Private DNS off, the phone's separate `.local` resolution failure, the stock GVfs
+backend limitations, and the separate glibc resolver configuration. The
+[project network packages](../network/README.md) add verified SMB access and
+DNS-SD discovery on this rig.
+[Shared storage and microSD checks](STORAGE.md) describe the ADB permission
+grants and verified native desktop read/write access on this rig.
 
 ## Reproduce validation
 

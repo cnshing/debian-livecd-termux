@@ -1,0 +1,93 @@
+# Native file sharing and discovery
+
+The `gvfs` recipe enables SMB and DNS-SD using Samba's client library and the
+`livecd-avahi` recipe. SFTP, FTP, WebDAV and local/trash backends stay enabled.
+FUSE and UDisks2 stay disabled. Remote resources are GIO locations, not ordinary
+filesystem mounts for shell programs.
+
+Build only this package set with the existing Packages workflow:
+
+```sh
+gh workflow run packages.yml --ref YOUR_BRANCH -f packages=gvfs -f rebuild=true
+```
+
+The planner produces one build job containing `livecd-avahi gvfs`; unrelated
+recipes are not built. Main-repository dependencies, including Samba, come from
+Termux's package repository. A successful Actions build establishes cross-build
+and packaging compatibility, not Android runtime or remote-share behavior.
+
+The File Manager overlay starts `livecd-network-discovery` through the native
+session's autostart directory. It uses the existing private system D-Bus and
+inherits the session ownership tag, so normal desktop cleanup stops it. Its
+configuration disables publishing host services. To start it in an already
+running session after installation:
+
+```sh
+livecd-native exec -- livecd-network-discovery
+```
+
+Open `smb://HOST/SHARE` using Nautilus's Ctrl+L. For advertised services, open
+Network or `dns-sd://local/`. Configure credentials through Nautilus; do not put
+passwords in URIs, shell arguments or committed fixtures.
+
+## Upstream limitations
+
+The original [Termux GVfs PR](https://github.com/termux/termux-packages/pull/13972)
+shipped with SMB and DNS-SD disabled, without documenting a specific reason.
+DNS-SD needs Avahi: its daemon was later moved to the root repository because
+Android can reject its route-netlink interface monitor. See
+[the maintainer discussion](https://github.com/termux/termux-packages/issues/17061)
+and [the move](https://github.com/termux/termux-packages/pull/17079).
+
+This project carries Termux's Android memory-header, daemon identity/path and
+configure-path patches from builder revision
+`538685c906074926fd19650e38c6dad91379eb0f`. It builds only the discovery components
+needed here, with a separate package name conflicting with the upstream Avahi
+package. This does not remove newer Android netlink restrictions. Rootless
+operation must be validated on each device; a failed discovery daemon must not
+be treated as evidence that direct SMB access is unavailable.
+
+The optional WSD backend is disabled because it requires an external `wsdd`
+helper. mDNS/DNS-SD discovery and unicast LAN DNS are separate mechanisms. This
+package does not rewrite DNS settings or install a global `.local` resolver.
+
+## Verification
+
+The Actions-built `gvfs` and `livecd-avahi` packages were installed on an
+Android 11 Galaxy Note10+ and checked inside the native desktop with
+`tests/native/test-network-shares.py` against one LAN SMB server:
+
+| Check | Result |
+|---|---|
+| SMB and DNS-SD backends registered with GIO | Pass |
+| `avahi-daemon` running rootless on the private system bus | Pass |
+| Direct `smb://HOST/SHARE` mount and directory listing | Pass |
+| Server's `_smb._tcp` service listed in `dns-sd://local/` and Network | Pass |
+| Discovered entry opens and lists the same server's shares | Pass |
+| Desktop stop removes its daemon; restart starts a new owned daemon | Pass |
+
+Discovered SMB entries point to the server's address rather than its `.local`
+name, which Android's resolver cannot look up. The first listing of
+`dns-sd://local/` starts the backend and can return empty; entries appear a few
+seconds later as Avahi reports them. Nautilus updates in place, and the test
+polls for up to 20 seconds. The acceptance check matches discovery results to
+the server supplied in `SMB_TEST_URI`, opens its advertised target, and verifies
+its Network entry. It passed again after a desktop stop/start cycle.
+
+```sh
+SMB_TEST_URI='smb://HOST/SHARE' livecd-native exec -- python tests/native/test-network-shares.py
+```
+
+The checks mounted and enumerated directories without modifying remote files.
+Authenticated accounts, remote writes, other server implementations, and newer
+Android versions were not tested. Ordinary `.local` lookups still follow
+Android's resolver; discovery works by using the address Avahi supplies.
+
+GitHub Actions built only the `livecd-avahi gvfs` set and checked its packaged
+Android executables, dynamic dependencies and GVfs mount definitions. Host tests
+cover the one-job plan and private-session startup boundary. Local device
+results are retained under `temp/` and are excluded from Git.
+
+Host, share, user and volume names belong in local environment variables or
+ignored evidence, not source or reports. A test against one server cannot
+establish compatibility with every SMB server or Android release.

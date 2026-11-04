@@ -34,9 +34,15 @@ class WallpaperCatalog(unittest.TestCase):
             module.register_backgrounds()
             self.assertEqual(first, catalog.read_bytes())
             self.assertEqual(other.read_text(), '<wallpapers/>')
-            items = ET.parse(catalog).getroot().findall('wallpaper')
+            default, *items = ET.parse(catalog).getroot().findall('wallpaper')
             images = {p.resolve() for p in SOURCE.rglob('*') if p.suffix in ('.avif', '.jpg')}
             self.assertEqual(len(images), 52, 'Keep the full pinned upstream collection')
+            # The profile's dconf defaults: a light/dark pair Appearance can select again.
+            self.assertEqual(default.findtext('name'), 'LiveCD default')
+            self.assertEqual(Path(default.findtext('filename')),
+                             (SOURCE / 'fakurian/unsplash-7Ra7YDFR4Pw.avif').resolve())
+            self.assertEqual(Path(default.findtext('filename-dark')),
+                             (SOURCE / 'heberdavisphotography/unsplash-ewW6dPCL_Vw.avif').resolve())
             self.assertEqual({Path(item.findtext('filename')) for item in items}, images)
             self.assertEqual(len(items), len(images))
             for item in items:

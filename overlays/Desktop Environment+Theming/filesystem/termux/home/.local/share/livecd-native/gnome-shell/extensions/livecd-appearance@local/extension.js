@@ -27,7 +27,13 @@ export default class Appearance extends Extension {
         this.settings.set_string('gtk-theme', theme);
         this.shellTheme.set_string('name', theme);
         // Upstream assets use uppercase suffixes, unlike the liveCD's PPA.
-        const icons = `Colloid${accent === 'yellow' ? '-Yellow' : ''}-${dark ? 'Dark' : 'Light'}`;
+        const iconColor = {blue: '', teal: '-Teal', green: '-Green', yellow: '-Yellow', orange: '-Orange',
+            red: '-Red', pink: '-Pink', purple: '-Purple', slate: '-Grey'}[accent] ?? '';
+        const scheme = dark ? 'Dark' : 'Light';
+        let icons = `Colloid${iconColor}-${scheme}`;
+        // Installs from before every color was included have only the default and yellow.
+        if (!GLib.file_test(GLib.build_filenamev([GLib.get_user_data_dir(), 'icons', icons]), GLib.FileTest.IS_DIR))
+            icons = `Colloid-${scheme}`;
         this.settings.set_string('icon-theme', icons);
         const ownedDir = GLib.build_filenamev([GLib.get_user_config_dir(), 'livecd']);
         GLib.mkdir_with_parents(ownedDir, 0o700);

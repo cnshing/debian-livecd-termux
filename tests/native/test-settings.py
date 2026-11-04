@@ -229,18 +229,21 @@ def backgrounds_test():
     import xml.etree.ElementTree as ET
     import gi
     gi.require_version('GdkPixbuf', '2.0')
-    from gi.repository import GdkPixbuf
+    from gi.repository import GdkPixbuf, Gio
     data = Path(os.environ['XDG_DATA_HOME'])
     catalog = data / 'gnome-background-properties/livecd.xml'
     assert catalog.is_file(), 'Apply the Desktop Environment+Theming overlay to register wallpapers'
-    items = ET.parse(catalog).getroot().findall('wallpaper')
+    default, *items = ET.parse(catalog).getroot().findall('wallpaper')
     assert len(items) == 52, f'Expected the complete upstream collection, found {len(items)}'
-    for item in items:
-        filename = item.findtext('filename')
+    background = Gio.Settings.new('org.gnome.desktop.background')
+    for key, tag in (('picture-uri', 'filename'), ('picture-uri-dark', 'filename-dark')):
+        expected = background.get_default_value(key).get_string()
+        assert Gio.File.new_for_path(default.findtext(tag)).get_uri() == expected, (key, expected)
+    for filename in [default.findtext('filename-dark')] + [item.findtext('filename') for item in [default, *items]]:
         assert Path(filename).is_file(), filename
         preview = GdkPixbuf.Pixbuf.new_from_file_at_scale(filename, 160, 100, True)
         assert preview.get_width() > 0 and preview.get_height() > 0, filename
-    print('PASS: all 52 registered LiveCD wallpapers decode for Appearance previews')
+    print('PASS: all 52 registered LiveCD wallpapers and the default light/dark pair decode for Appearance')
 
 
 def main():

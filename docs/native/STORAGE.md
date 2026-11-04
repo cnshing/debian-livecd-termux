@@ -28,40 +28,38 @@ the helper's prompt before rebuilding that directory.
   and writable with the granted permissions. Android mounts the card; Nautilus
   does not need to mount it.
 
-## Automatic Files sidebar entries
+## Files sidebar mounts
 
-The File Manager overlay starts `storage-bookmarks.py --watch` with the native
-desktop. It checks Android's mount table and directory access every three
-seconds and maintains **Internal storage**, **SD card**, and **USB drive**
-bookmarks in Files. Unidentified removable devices use **Removable storage**;
-multiple devices of the same kind receive distinct labels. Cards point to the
-whole readable volume, not just Termux's app directory.
+The File Manager overlay installs `livecd-storage`. GVfs activates its volume
+monitor on the native desktop's session bus when an application asks GIO for
+mounts. It exposes **Internal storage**, **SD card**, and accessible **USB drive**
+locations as `GMount` objects whose roots are Android's existing directories.
+These are device/mount entries in Files, not bookmarks. There is no second kernel
+mount, bind mount, symlink redirection or filesystem content copying.
 
-Entries appear when a readable volume is present and disappear after removal
-or loss of access. Android must already have mounted the volume and granted
-Termux access. The helper does not request permissions or mount devices itself.
-USB behavior depends on Android exposing an accessible mount path.
+The monitor scans on activation, explicit mount-list requests and kernel mount
+notifications from `/proc/self/mountinfo`. Its main loop waits for priority/error
+readiness on that descriptor; it has no periodic rescan timer. Ordinary file
+readability is deliberately excluded to prevent a busy loop. Notifications
+produce GIO mount-added, mount-changed and mount-removed signals.
 
-Custom bookmarks are preserved. Existing bookmarks to the same location are
-reused without duplication. Only exact entries recorded as helper-owned are
-removed; renaming a generated bookmark makes it a custom bookmark. Updates use
-GIO's file version check to retry concurrent edits made in Files. The helper
-writes only when entries change.
+Only mounted, readable storage is exposed. Private runtime views are deduplicated;
+unknown hardware uses **Removable storage**, and multiple devices get distinct
+labels. Android must already grant Termux access. The provider does not grant
+permissions, mount devices or advertise unmount/eject actions. Use Android's
+storage controls for removal. Plain `.local` or network-drive resolution is
+unaffected.
 
-Bookmarks live in the native profile's `gtk-3.0/bookmarks`, with ownership data
-under its XDG state directory. A single watcher runs per desktop session and
-inherits its process ownership tag for cleanup. Android remains responsible for
-ejecting/unmounting storage; the bookmarks do not provide an eject control.
+Setup removes the old bookmark helper and only the exact bookmark entries it
+recorded as its own. Custom bookmarks, including renamed generated entries,
+remain intact. Migration runs during stopped setup so the retired watcher cannot
+write entries back. The new provider requires no autostart entry: D-Bus activates
+it on demand, and desktop session cleanup owns its process.
 
-The helper and its autostart entry install through the File Manager overlay;
-no GVfs rebuild is needed. To refresh an installed profile immediately:
-
-```sh
-livecd-native exec -- python "$HOME/.local/lib/livecd-native/storage-bookmarks.py"
-```
-
-This returns without starting a second helper when the watcher is already active.
-You can also open a storage path directly with Nautilus's Ctrl+L.
+The provider follows GVfs 1.62's remote volume monitor protocol. Its platform
+independent recipe installs the service and monitor registration; GVfs continues
+to handle network mounts alongside it. Tests must verify the protocol against
+actual GIO proxy mount objects when changing GVfs versions.
 
 ## Verification
 
@@ -80,11 +78,13 @@ USB mass-storage devices and behavior after reboot or card removal were not
 tested. These results do not establish Unix executable, symlink or permission
 semantics on shared storage.
 
-The automatic sidebar entries were also verified visually in the running Files
-application. `tests/native/test-storage-bookmarks.py` passed 17 checks on both
-the host and phone, including GIO file persistence, concurrent edits, ownership,
-URI escaping, access restrictions, duplicate mount views, device labels, and
-simulated removal/reinsertion. Physical card removal and USB insertion were not
-performed. Local UI captures are under `temp/storage-sidebar/`.
+The mount provider is checked with `tests/native/test-storage-mounts.py`.
+The isolated integration test uses a disposable D-Bus session, the real GVfs
+proxy module and fixture directories. It checks native-root `GMount` objects,
+readable directories, mount-added/changed/removed signals, no periodic rescans,
+no bookmark writes and no unsupported eject actions. Scanner and migration tests
+cover storage access, duplicate views, device labels, escaped paths and custom
+bookmark preservation. Physical card/USB hotplug has not been performed.
+Local UI/device captures are under `temp/storage-mounts/`.
 
 For network shares, see [LAN hostname resolution](LAN-HOSTNAMES.md).

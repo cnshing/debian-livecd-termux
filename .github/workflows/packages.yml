@@ -69,10 +69,12 @@ jobs:
       run: python3 tests/mic/test-bluetooth.py
     - name: Test packaging and profile integration
       run: python3 tests/packaging/test-packaging.py
+    - name: Test GNOME wallpaper registration
+      run: python3 tests/packaging/test-settings-backgrounds.py
     - name: Test network discovery integration
       run: python3 tests/packaging/test-network-discovery.py
-    - name: Test automatic storage bookmarks
-      run: python3 tests/native/test-storage-bookmarks.py
+    - name: Test Android storage mount discovery
+      run: python3 tests/native/test-storage-mounts.py
     - name: Read the shared builder pin
       id: config
       run: python3 tools/recipes.py config >> "$GITHUB_OUTPUT"
@@ -232,6 +234,10 @@ jobs:
       env:
         PACKAGES_OUTPUT: termux-packages/output
       run: python3 tests/packaging/check-network-artifacts.py "$PACKAGES_OUTPUT"
+
+    - name: Check the Android storage provider artifact
+      if: steps.build.outcome == 'success' && contains(format(' {0} ', matrix.packages), ' livecd-storage ')
+      run: python3 tests/packaging/check-storage-artifact.py termux-packages/output
 
     # Saved only after a successful build. An entry can never be replaced, so one saved by a job that
     # failed early would hold only what it restored, and later runs would keep restoring that.

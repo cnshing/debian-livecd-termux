@@ -14,7 +14,7 @@ termux_step_post_get_source() {
 
 termux_step_make_install() {
 	local file
-	for file in monitor.py storage.py protocol.xml; do
+	for file in monitor.py storage.py migrate.py protocol.xml; do
 		install -Dm644 "$TERMUX_PKG_BUILDER_DIR/$file" "$TERMUX_PREFIX/libexec/livecd-storage/$file"
 	done
 	install -Dm644 "$TERMUX_PKG_BUILDER_DIR/livecd-storage.monitor" \

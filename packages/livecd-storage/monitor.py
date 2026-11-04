@@ -74,6 +74,7 @@ class StorageMonitor:
         if method == 'IsSupported':
             invocation.return_value(GLib.Variant('(b)', (bool(os.environ.get('LIVECD_NATIVE_SESSION')),)))
         elif method == 'List':
+            self.refresh()
             invocation.return_value(GLib.Variant(LIST_TYPE, ([], [], list(self.mounts.values()))))
         elif method == 'CancelOperation':
             invocation.return_value(GLib.Variant('(b)', (False,)))

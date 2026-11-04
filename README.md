@@ -46,6 +46,8 @@ Build packages with `bash tools/build-packages.sh PACKAGE`, or add `--install` i
 Read [docs/structure.md](docs/structure.md) for how these fit together, how to build one package and
 how to add a new one.
 
+[Loupe](docs/loupe/README.md) is the default image viewer, selected by the Image Viewer overlay.
+
 The optional [Serein client package](docs/serein/README.md) carries forward the earlier
 microphone probe work into a full native Termux desktop build.
 

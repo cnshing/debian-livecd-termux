@@ -63,7 +63,6 @@ def main():
                         ('org.gnome.desktop.session', 'idle-delay')]:
         check('read_only_' + key, not Gio.Settings.new(schema).is_writable(key))
     commands = ['ghostty', 'nautilus', 'code-oss', 'io.elementary.code', 'firefox', 'libreoffice', 'mpv', 'missioncenter']
-    import shutil
     for name in commands:
         path = shutil.which(name)
         check('application_' + name, path is not None and str(path).startswith((str(PREFIX), str(ROOT), str(Path.home() / '.local/lib/livecd-native/bin'))), path)

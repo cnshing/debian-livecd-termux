@@ -6,6 +6,26 @@
 A port of [debian-livecd](https://github.com/cnshing/debian-livecd)'s GNOME desktop to native
 Termux on Android, without PRoot. Tested on an arm64 Note10+ running Android 11.
 
+## Requirements by feature
+
+Start with native Termux and the Termux:X11 Android app. The validated setup uses
+arm64 Android 11 with the standard `com.termux` prefix; other devices and Android
+versions need their own validation. Follow the linked guides for the features you want:
+
+| Feature set | Requirements and setup |
+| --- | --- |
+| GNOME desktop and native applications | [Native desktop setup](docs/native/README.md#install-and-run), including the separately installed Termux:X11 APK. |
+| Phone microphone | [Microphone setup](docs/mic/README.md#set-up): matching-source Termux:API Android app, microphone permission and the Microphone overlay. |
+| Bluetooth headset microphone and call audio | [Bluetooth setup](docs/mic/README.md#android-managed-bluetooth-audio-devices): microphone setup, running Shizuku with Termux authorized, exported `rish`, and a headset connected in Android with **Calls** enabled. See the [device and Android-version limits](docs/mic/BLUETOOTH.md#android-permission-boundary). |
+| Whole-device CPU, processes and supported sensors | [Resource access setup](docs/resources/README.md#build-and-use): Shizuku, Termux authorization, exported `rish` and `livecd-resources`. |
+| EasyEffects and AutoEq | [Audio effects setup](docs/audio/README.md#build-and-install): Audio Effects overlay and a running Termux PulseAudio server; see [application routing](docs/audio/README.md#run). |
+| GSConnect phone/desktop sync | [GSConnect setup](docs/gsconnect/README.md#build-and-install) and [runtime requirements](docs/gsconnect/README.md#run): Phone Sync overlay, an X display and a compatible peer reachable on the LAN. |
+| GPU rendering and hardware video | [Acceleration guide](docs/native/ACCELERATION.md): compatible device drivers, application backends and codec support; requirements and verified results vary by application. |
+| Battery status and health | [Battery backend requirements](docs/battery/README.md#where-the-numbers-come-from): readable Android battery data, with Termux:API as a fallback; Shizuku enables event updates and supported health readings. |
+
+Installed optional integrations can follow the desktop's lifetime; see
+[session integration settings](docs/native/README.md#session-integrations).
+
 ## Install
 
 Get this repository onto the phone, then run this in native Termux:

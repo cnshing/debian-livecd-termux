@@ -33,16 +33,18 @@ termux_step_post_get_source() {
 
 termux_step_pre_configure() {
 	termux_setup_rust
-	# magpie's nng-c-sys crate builds with CMake, which the cmake crate configures for Android
-	# without the toolchain and API level that Termux's own CMake step passes. Give CMake those
-	# through a toolchain file, which the cmake crate does accept.
+	# magpie's nng-c-sys crate builds with CMake through the cmake crate, whose Android setup cannot
+	# link with Termux's toolchain (no crtbegin_dynamic.o). Describe a plain cross build instead, with
+	# Termux's compilers, which already target Android, in a toolchain file the cmake crate passes on.
+	# nng treats Linux like Android, except that it also enables abstract socket names, which Android has.
 	termux_setup_cmake
 	if test "$TERMUX_ON_DEVICE_BUILD" = false; then
-		local toolchain=$TERMUX_PKG_TMPDIR/android.cmake
+		local toolchain=$TERMUX_PKG_TMPDIR/cross.cmake
 		cat > "$toolchain" <<-EOF
-			set(CMAKE_SYSTEM_NAME Android)
-			set(CMAKE_SYSTEM_VERSION $TERMUX_PKG_API_LEVEL)
-			set(CMAKE_ANDROID_STANDALONE_TOOLCHAIN $TERMUX_STANDALONE_TOOLCHAIN)
+			set(CMAKE_SYSTEM_NAME Linux)
+			set(CMAKE_SYSTEM_PROCESSOR $TERMUX_ARCH)
+			set(CMAKE_C_COMPILER $(command -v "$CC"))
+			set(CMAKE_CXX_COMPILER $(command -v "$CXX"))
 		EOF
 		export "CMAKE_TOOLCHAIN_FILE_${CARGO_TARGET_NAME//-/_}=$toolchain"
 	fi

@@ -24,7 +24,7 @@ if ! test -r /sdcard/Android; then
 fi
 shizuku=$HOME/.local/lib/shizuku
 if ! test -f "$shizuku/rish_shizuku.dex"; then
-    exported=$(find /sdcard -maxdepth 3 -name rish_shizuku.dex -printf '%h\n' 2>/dev/null | head -n 1)
+    exported=$(find /sdcard/ -maxdepth 3 -name rish_shizuku.dex -printf '%h\n' 2>/dev/null | head -n 1)
     if test -z "$exported" || ! test -f "$exported/rish"; then
         echo 'In Shizuku, choose "Use Shizuku in terminal apps", export the files to shared storage, then run this again.' >&2
         exit 2

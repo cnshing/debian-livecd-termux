@@ -1,2 +1,4 @@
 # Delayed screenshots, alongside the Shell's built-in capture UI.
 - gnome-screenshot
+# GNOME Settings, as in upstream's GNOME task.
+- gnome-control-center

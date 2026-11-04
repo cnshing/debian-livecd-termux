@@ -11,3 +11,6 @@ helper=$prefix/libexec/livecd-resources/stat-reader
 directory=/data/local/tmp/livecd-resources-$(id -u)
 export RISH_APPLICATION_ID=com.termux RISH_PRESERVE_ENV=0
 base64 "$helper" | /system/bin/sh "$rish" -c "set -e; umask 077; mkdir -p $directory; test ! -L $directory; test \"\$(stat -c %u $directory)\" = \"\$(id -u)\"; chmod 700 $directory; rm -f $directory/reader.new; base64 -d > $directory/reader.new; chmod 700 $directory/reader.new; mv $directory/reader.new $directory/stat-reader-v1; echo 'Shared resource reader installed.'"
+# A running broker keeps the session and environment it started with. One started earlier, for
+# example by setup's preload probe, could stay unable to read, so the next client starts a new one.
+pkill -f "^$prefix/libexec/livecd-resources/broker" || true

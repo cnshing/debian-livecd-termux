@@ -7,23 +7,33 @@ Android settings for notifications or device power.
 
 ## Current implementation and remaining scope
 
-The package currently builds Appearance, Displays, Notifications, Apps, Sound,
-Multitasking, Search, Mouse & Touchpad, Keyboard, Accessibility and Wellbeing. This inventory
-is an initial implementation, **not completion of the requested broader Settings
-port**. Opening a panel is not evidence that every switch has an effective backend.
+The package builds Appearance, Displays, Notifications, Apps, Sound,
+Multitasking, Search, Mouse & Touchpad, Keyboard, Accessibility, Wellbeing,
+Privacy & Security and System. Opening a panel is not evidence that every switch
+has an effective backend; the sections below say what each one controls.
 
 The agreed exclusions are Network/Wi-Fi/mobile networking, Bluetooth, Users,
 Power and Night Light. The existing Shell battery indicator and UPower backend
 remain independent of the excluded Power page.
 
-Other upstream panels still need porting: Color, Online Accounts, Printers,
-Privacy & Security, Sharing, System (apart from the excluded Users page) and
-Wacom. They are not compiled in this build. Their missing Linux
-services and libraries must be handled before those panels can be considered
-functional. In particular, shipping a panel must not be taken to mean Android
-system time, system services or hardware devices can be administered from Termux.
-The package is not yet added to the default desktop overlay while this scope is
-incomplete.
+These upstream panels and pages are also left out, because nothing on an
+unrooted phone would act on them:
+
+| Panel or page | Reason |
+| --- | --- |
+| Color | Termux:X11 gives its one virtual output a 256-entry RandR gamma table but no `rrCrtcSetGamma` handler, so gamma ramps are stored and never applied. It publishes no EDID. External monitors are composited by Android's SurfaceFlinger, whose color transforms an app cannot set. |
+| Wacom | The S Pen arrives as the **Lorie pen** and **Lorie eraser** X devices. Mutter's X11 tablet settings write only the `xf86-input-wacom` properties (`Wacom Tablet Area`, `Wacom Rotation`, `Wacom Pressurecurve`, `Wacom Pressure Threshold`). The Lorie devices have none of them, so every Wacom control would be a no-op. |
+| Region & Language (System) | Termux packages ship no GTK or Settings translations, and Bionic's `setlocale()` rejects locales such as `fr_FR.UTF-8`, so neither the language nor the formats could change. |
+| Remote Desktop (System) | GNOME Remote Desktop is not packaged. |
+| Sharing | GNOME User Share and Rygel are not packaged, and Avahi runs with publishing disabled, so its device name would not reach the network. |
+| Screen Lock, Location, Cameras (Privacy) | Android owns locking; the native profile locks the GNOME lock and idle keys. No GNOME component here reads the location or camera switches. |
+| Diagnostics, Thunderbolt, Device Security (Privacy) | ABRT, bolt and fwupd do not exist on Android. |
+
+Online Accounts and Printers are skipped for now. They would need packages this
+repository does not have: GNOME Online Accounts and `librest`, and GTK print
+backends for CUPS.
+
+The package is not yet added to the default desktop overlay.
 
 ## Displays
 
@@ -95,6 +105,62 @@ The existing `livecd-appearance@local` extension handles WhiteSur/Colloid change
 and the XSettings bridge forwards GTK theme/font/icon/cursor preferences to X11
 applications. Arbitrary theme selection is not a stock Appearance feature.
 
+Every accent selects a matching WhiteSur theme and Colloid icon theme, as in the
+Debian LiveCD's accent extensions. Slate uses WhiteSur's and Colloid's grey;
+WhiteSur has no teal, so teal uses its default accent. The theme hook installs
+all Colloid colors, about 28 MB each beyond the shared base. Earlier installs had
+only the default (blue) and yellow, so every other accent fell back to blue
+icons. The next overlay application adds the missing colors; until then, the
+extension keeps the default icons for an accent whose theme is absent.
+
+## System
+
+System contains About, Date & Time and Secure Shell. Users, Region & Language
+and Remote Desktop are left out (see above). Software Updates stays hidden
+because GNOME Software is not installed.
+
+**About** reads Android rather than systemd's hostnamed, UDisks and DMI. It
+shows the manufacturer and model as the device name, `Android` with the release
+from `ro.build.version.release`, the SoC from `/sys/devices/soc0` with the
+number of configured CPUs, libgtop's memory total and the size of the data
+partition holding the Termux home. The device name is read-only: Android's own
+device name is not readable by apps, and nothing here would use a new one. In
+System Details, the firmware version is the bootloader (`ro.bootloader`) and the
+OS build is `ro.build.display.id`.
+
+**Date & Time** shows Android's date, time and time zone read-only, marked
+**Set in Android settings**. Without timedated there are no automatic time or
+time zone switches. Termux has no `zone.tab`, so the time zone is shown from
+GLib's local zone, for example **PST (Los Angeles)**. Time format, the top bar
+clock's week day, date and seconds, and calendar week numbers are ordinary
+GNOME settings and do change the Shell clock.
+
+**Secure Shell** controls Termux's OpenSSH listener instead of a systemd unit.
+The switch reflects whether the process in `$PREFIX/var/run/sshd.pid` is
+`sshd`; turning it on runs `sshd`, and turning it off sends that listener
+SIGTERM. OpenSSH 10 runs each connection as a separate `sshd-session` process,
+so established sessions survive, as with systemd's unit. Nothing restarts the
+listener when Termux or the desktop restarts. The login command is
+`ssh -p PORT ADDRESS`, using `Port` from `sshd_config` (Termux's default is 8022)
+and the Wi-Fi IPv4 address, else another non-cellular one. Sign in with the
+password set by `passwd` or an authorized key. A custom `PidFile` in
+`sshd_config` is not followed.
+
+## Privacy & Security
+
+Privacy & Security contains File History & Trash. File History and its duration
+write `org.gnome.desktop.privacy`; GTK reads them only through XSettings, so the
+desktop's XSettings bridge (`src/native/xsettings.py`) now forwards them as
+`Gtk/RecentFilesEnabled` and `Gtk/RecentFilesMaxAge`, as GNOME's own XSettings
+daemon does. The running desktop picks up the bridge change when it restarts.
+**Clear History** empties GTK's recent files list.
+
+Upstream empties the trash, deletes temporary files and purges both on a
+schedule through Settings Daemon's housekeeping service, which is not running.
+**Empty Trash** therefore runs `gio trash --empty` directly. Automatic purging
+and temporary file deletion are left out; Termux's temporary directory also
+holds the running desktop's sockets.
+
 ## Wallpaper collection and microphone devices
 
 The Theming overlay includes all 52 wallpapers and their attribution file from
@@ -105,7 +171,13 @@ Android's unavailable `/usr/share/backgrounds`. Its registration hook generates
 absolute filenames. GNOME Appearance reads catalogs in `XDG_DATA_HOME`; merely
 copying images into a backgrounds directory does not register them. The hook
 refreshes its own catalog and preserves other wallpaper catalogs. Reopen Settings
-after adding a catalog. Device checks verified all 52 Appearance entries and AVIF/
+after adding a catalog.
+
+Choosing a single image in Appearance sets it for both the light and dark styles,
+as upstream GNOME does. The catalog therefore starts with **LiveCD default**, the
+profile's light/dark pair (`fakurian/unsplash-7Ra7YDFR4Pw.avif` and
+`heberdavisphotography/unsplash-ewW6dPCL_Vw.avif`), so that pair can be chosen
+again. The hook reads the pair from the profile's dconf defaults. Device checks verified all 52 Appearance entries and AVIF/
 JPEG preview decoding.
 
 Sound uses PulseAudio's existing source notifications, including cardless OpenSL
@@ -172,6 +244,10 @@ python tests/native/test-settings.py --panels-ui
 python tests/native/test-settings.py --backgrounds-only
 # Run a separate software-rendered Shell with temporary settings/history:
 python tests/native/test-screen-time.py --panels-ui
+# Check About, Date & Time, Secure Shell and File History & Trash on a private display:
+python tests/native/test-system-panels.py
+# Also turn Termux's real sshd off and on with the switch (open sessions survive):
+python tests/native/test-system-panels.py --sshd
 # Unit checks for idle/resume and watch cleanup, in the GNOME 48 GJS environment:
 gjs -m tests/native/test-session-activity.js
 ```
@@ -183,7 +259,24 @@ Shell's break manager to report it. Lock-screen notification policies still need
 validation. The resolution test restores the original preferences in a `finally`
 block.
 
-Device validation: the package builds/installs on arm64 Android 11, and all eleven
+`test-system-panels.py` runs Settings on its own Xvfb display, session bus and
+AT-SPI bus, with temporary configuration and data directories, so its switches
+and its trash do not touch the desktop's. It compares About with Android's
+properties, `/sys/devices/soc0` and `statvfs()`, and checks that Date & Time is
+read-only, its clock switches write GSettings, Privacy hides the unsupported
+pages, Empty Trash empties a trashed test file, the XSettings bridge changes
+GTK's recent-file settings, and the SSH login command and switch match `sshd`.
+
+The System and Privacy panels were validated on the arm64 Android 11 phone
+with a local build: `test-system-panels.py --sshd` passed, including stopping
+and restarting the real listener from the switch while the SSH session running
+the test stayed connected. With the extracted CI runtime,
+`test-screen-time.py --panels-ui` opened and closed all thirteen compiled panels
+with fatal GLib criticals. The About, System Details, Date & Time, Secure Shell
+and File History & Trash pages were inspected in screenshots. These pages have
+not yet been built by GitHub Actions.
+
+Earlier device validation: the package builds/installs on arm64 Android 11, and all eleven
 compiled panels open and close with fatal GLib criticals enabled. Resolution
 changes to 1280×720, confirmation, cancel, parent-pipe loss and timeout restore
 passed without restarting GNOME. The GUI chooser, confirmation and automatic

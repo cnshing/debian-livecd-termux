@@ -225,6 +225,12 @@ jobs:
         test "$EXACT" != true || unbound=
         ./scripts/run-docker.sh ./build-package.sh -I -C $unbound -a aarch64 $PACKAGES
 
+    - name: Check native network package artifacts
+      if: steps.build.outcome == 'success' && contains(format(' {0} ', matrix.packages), ' gvfs ')
+      env:
+        PACKAGES_OUTPUT: termux-packages/output
+      run: python3 tests/packaging/check-network-artifacts.py "$PACKAGES_OUTPUT"
+
     # Saved only after a successful build. An entry can never be replaced, so one saved by a job that
     # failed early would hold only what it restored, and later runs would keep restoring that.
     - name: Make the caches readable

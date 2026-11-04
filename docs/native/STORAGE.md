@@ -28,9 +28,40 @@ the helper's prompt before rebuilding that directory.
   and writable with the granted permissions. Android mounts the card; Nautilus
   does not need to mount it.
 
-Open these locations using Nautilus's Ctrl+L. The standard Termux links do not
-establish GNOME removable-volume detection, automatic sidebar entries or eject
-support: the upstream GVfs build disables UDisks2.
+## Automatic Files sidebar entries
+
+The File Manager overlay starts `storage-bookmarks.py --watch` with the native
+desktop. It checks Android's mount table and directory access every three
+seconds and maintains **Internal storage**, **SD card**, and **USB drive**
+bookmarks in Files. Unidentified removable devices use **Removable storage**;
+multiple devices of the same kind receive distinct labels. Cards point to the
+whole readable volume, not just Termux's app directory.
+
+Entries appear when a readable volume is present and disappear after removal
+or loss of access. Android must already have mounted the volume and granted
+Termux access. The helper does not request permissions or mount devices itself.
+USB behavior depends on Android exposing an accessible mount path.
+
+Custom bookmarks are preserved. Existing bookmarks to the same location are
+reused without duplication. Only exact entries recorded as helper-owned are
+removed; renaming a generated bookmark makes it a custom bookmark. Updates use
+GIO's file version check to retry concurrent edits made in Files. The helper
+writes only when entries change.
+
+Bookmarks live in the native profile's `gtk-3.0/bookmarks`, with ownership data
+under its XDG state directory. A single watcher runs per desktop session and
+inherits its process ownership tag for cleanup. Android remains responsible for
+ejecting/unmounting storage; the bookmarks do not provide an eject control.
+
+The helper and its autostart entry install through the File Manager overlay;
+no GVfs rebuild is needed. To refresh an installed profile immediately:
+
+```sh
+livecd-native exec -- python "$HOME/.local/lib/livecd-native/storage-bookmarks.py"
+```
+
+This returns without starting a second helper when the watcher is already active.
+You can also open a storage path directly with Nautilus's Ctrl+L.
 
 ## Verification
 
@@ -48,5 +79,12 @@ storage links remain in place. Local evidence is `temp/storage-dns/results.json`
 USB mass-storage devices and behavior after reboot or card removal were not
 tested. These results do not establish Unix executable, symlink or permission
 semantics on shared storage.
+
+The automatic sidebar entries were also verified visually in the running Files
+application. `tests/native/test-storage-bookmarks.py` passed 17 checks on both
+the host and phone, including GIO file persistence, concurrent edits, ownership,
+URI escaping, access restrictions, duplicate mount views, device labels, and
+simulated removal/reinsertion. Physical card removal and USB insertion were not
+performed. Local UI captures are under `temp/storage-sidebar/`.
 
 For network shares, see [LAN hostname resolution](LAN-HOSTNAMES.md).

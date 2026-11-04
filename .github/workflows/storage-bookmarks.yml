@@ -1,0 +1,37 @@
+name: Storage bookmarks
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+    - .github/workflows/storage-bookmarks.yml
+    - overlays/File Manager/filesystem/termux/home/.local/lib/livecd-native/storage-bookmarks.py
+    - overlays/File Manager/filesystem/termux/home/.local/lib/livecd-native/autostart/livecd-storage-bookmarks.desktop.overlay.tmpl
+    - tests/native/test-storage-bookmarks.py
+  pull_request:
+    paths:
+    - .github/workflows/storage-bookmarks.yml
+    - overlays/File Manager/filesystem/termux/home/.local/lib/livecd-native/storage-bookmarks.py
+    - overlays/File Manager/filesystem/termux/home/.local/lib/livecd-native/autostart/livecd-storage-bookmarks.desktop.overlay.tmpl
+    - tests/native/test-storage-bookmarks.py
+
+permissions:
+  contents: read
+
+jobs:
+  storage-bookmarks:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    steps:
+    - uses: actions/checkout@v7
+    - name: Install GIO and desktop entry validation tools
+      run: |
+        sudo apt-get update -qq
+        sudo apt-get install --yes --no-install-recommends python3-gi gir1.2-glib-2.0 desktop-file-utils
+    - name: Check discovery, user bookmarks and GIO persistence
+      run: /usr/bin/python3 tests/native/test-storage-bookmarks.py
+    - name: Validate the autostart entry
+      run: |
+        template='overlays/File Manager/filesystem/termux/home/.local/lib/livecd-native/autostart/livecd-storage-bookmarks.desktop.overlay.tmpl'
+        sed 's|@TERMUX_HOME@|/home/example|g' "$template" > "$RUNNER_TEMP/livecd-storage-bookmarks.desktop"
+        desktop-file-validate "$RUNNER_TEMP/livecd-storage-bookmarks.desktop"

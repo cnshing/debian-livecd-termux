@@ -139,8 +139,8 @@ through their existing commands after GNOME is ready:
 
 The packages, Android microphone permission and Shizuku authorization must already
 be installed/configured. Connect the headset in Android with **Calls** enabled
-before startup. Bluetooth is tried once per desktop start; reconnecting later uses
-the existing manual commands. An already enabled microphone is preserved.
+before startup. Bluetooth is tried up to three times, five seconds apart, while Android
+releases a previous session's call audio; reconnecting later uses the existing manual commands. An already enabled microphone is preserved.
 GSConnect starts listening on the LAN, using its existing pairing settings.
 EasyEffects keeps its existing behavior: use `livecd-audio exec -- APPLICATION`
 to send an application through the graph. Starting it does not redirect all applications.

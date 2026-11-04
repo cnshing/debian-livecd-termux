@@ -2,12 +2,30 @@
 """Install the pinned WhiteSur and Colloid themes in the native data directory."""
 from pathlib import Path
 import os
+import re
 import subprocess
 import tarfile
 import tempfile
 
 from desktop import DATA, environment
 from prepare import CACHE, fetch
+
+
+def drop_colored_symbolic_aliases(icons):
+    """Colloid also names a few full-color icons -symbolic. GTK paints a symbolic icon in one color, which
+    turns those into solid squares, as with elementary Code's menu button, so leave the name to Colloid's
+    real symbolic icon. Runs on every install, as it also repairs themes installed before it existed."""
+    removed = False
+    for link in icons.glob('Colloid*/*/*/*-symbolic.svg'):
+        if not link.is_symlink() or link.parent.name == 'symbolic':
+            continue
+        twin = link.parent.parent / 'symbolic' / link.name
+        if twin.exists() and re.search(r'<image|<rect[^>]*fill="#', link.resolve().read_text()):
+            link.unlink()
+            removed = True
+    if removed:
+        for theme in sorted(icons.glob('Colloid*/index.theme')):
+            subprocess.run(['gtk-update-icon-cache', '--quiet', '--force', str(theme.parent)], check=True)
 
 
 def main():
@@ -42,6 +60,7 @@ def main():
                 with path.open('a') as output:
                     output.write(custom.read_text())
         marker.touch()
+    drop_colored_symbolic_aliases(DATA / 'icons')
 
 
 if __name__ == '__main__':

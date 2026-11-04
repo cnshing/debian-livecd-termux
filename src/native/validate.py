@@ -61,7 +61,7 @@ def main():
                         ('org.gnome.desktop.screensaver', 'lock-enabled'),
                         ('org.gnome.desktop.session', 'idle-delay')]:
         check('read_only_' + key, not Gio.Settings.new(schema).is_writable(key))
-    commands = ['ghostty', 'nautilus', 'code-oss', 'firefox', 'libreoffice', 'mpv', 'missioncenter']
+    commands = ['ghostty', 'nautilus', 'code-oss', 'io.elementary.code', 'firefox', 'libreoffice', 'mpv', 'missioncenter']
     import shutil
     for name in commands:
         path = shutil.which(name)

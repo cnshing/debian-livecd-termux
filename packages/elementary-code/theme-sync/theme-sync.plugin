@@ -1,0 +1,7 @@
+[Plugin]
+Module=theme_sync
+Loader=python
+IAge=2
+Name=GTK Theme Colors
+Description=Matches the editor colors to the GTK theme when Code starts
+Website=https://github.com/cnshing/debian-livecd

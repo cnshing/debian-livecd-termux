@@ -58,19 +58,24 @@ Wellbeing edits `org.gnome.desktop.break-reminders` and
 break manager uses Mutter's idle monitor, and it reports the schedule state on
 `org.gnome.Shell.ScreenTime`.
 
-Screen time does not work yet. Shell's time-limits manager needs logind's user
-`State` and `IdleHint`. This session has no `org.freedesktop.login1`, so Shell
-falls back to its dummy login manager. That manager's `getCurrentUserProxy()`
-never resolves, and Shell's screen-time state machine stops after recording the
-session start:
+Screen-time accounting requires `livecd-gnome-shell` and
+`livecd-gnome-runtime` **48.8-1 or later**. Earlier builds wait indefinitely for
+logind's user proxy, count idle time as active and never apply daily limits.
 
-- The Screen Time chart counts every hour since Shell started, idle time included.
-- Shell never sends the notifications that apply **Screen Time Limit** and its
-  grayscale option, so they have no effect.
+The native Shell adapter supplies only session activity to the time-limits
+manager. It watches Mutter's input idle monitor: after 60 seconds without input,
+usage becomes inactive; new input resumes accounting. The threshold is separate
+from screen blanking, so the native profile's locked `idle-delay=0` does not
+prevent idle time from being excluded. The adapter is event driven and cached
+for the Shell lifetime; it grants no user, authentication or power privileges.
 
-The fix belongs in `livecd-gnome-shell`, not in this package: a dummy user whose
-`IdleHint` follows the session idle delay. Until then, these Screen Time
-controls must not be described as working.
+A private software-rendered Xvfb/Shell test verified daily-limit notification,
+grayscale on reaching the limit, removing those effects, and active/idle history
+transitions. This measures **GNOME desktop activity**, not Android application
+usage. Android background/suspend behavior is not a source of lifecycle events
+for this adapter. Old history is retained; previously overcounted usage is not
+retroactively corrected. Disabling screen-time recording clears its saved
+history through the existing GNOME controls.
 
 ## Notifications and appearance
 
@@ -107,7 +112,8 @@ The planner produces exactly one build set, `gnome-control-center`. Runtime
 `upower` dependencies can be satisfied by the existing Android-backed package;
 the Settings package does not require replacing or unholding the phone's UPower.
 The packaged GNOME runtime is recommended, rather than a build dependency, so the
-Settings set does not rebuild Shell, Mutter or GJS.
+Settings set does not rebuild Shell, Mutter or GJS. The Shell/runtime change
+has a separate GNOME runtime build set; select `livecd-gnome-runtime` to build it.
 
 In the running native session:
 
@@ -117,6 +123,10 @@ python tests/native/test-settings.py
 python tests/native/test-settings.py --resolution
 # Close Settings first; this opens/closes every compiled panel with fatal criticals:
 python tests/native/test-settings.py --panels-ui
+# Run a separate software-rendered Shell with temporary settings/history:
+python tests/native/test-screen-time.py --panels-ui
+# Unit checks for idle/resume and watch cleanup, in the GNOME 48 GJS environment:
+gjs -m tests/native/test-session-activity.js
 ```
 
 The notification test checks the owning service, notification submission and
@@ -134,5 +144,6 @@ inspected. Existing appearance lifecycle/accent tests passed. The port also fixe
 missing template type registrations and deferred sidebar/window work after
 disposal, discovered by the panel smoke test. The Wellbeing panel was opened and
 inspected on a private Xvfb display. Break-schedule changes reach Shell. The
-`--panels-ui` run has not yet been repeated with Wellbeing, since it opens
-windows on the live display. Broader panel functionality remains unfinished.
+private screen-time acceptance test can also open/close all eleven panels.
+It uses a fresh bus, display, settings profile and history directory; its Eval
+access is enabled only in that temporary Shell and the live session is untouched. Broader panel functionality remains unfinished.

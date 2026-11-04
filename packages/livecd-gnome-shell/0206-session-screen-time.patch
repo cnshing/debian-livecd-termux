@@ -1,0 +1,101 @@
+Track native desktop activity for Wellbeing without logind or device privileges.
+
+--- a/js/misc/loginManager.js
++++ b/js/misc/loginManager.js
+@@ -5,6 +5,7 @@
+ import * as Signals from './signals.js';
+ 
+ import {loadInterfaceXML} from './fileUtils.js';
++import {SessionActivityUser} from './termux/sessionActivity.js';
+ 
+ const SystemdLoginManagerIface = loadInterfaceXML('org.freedesktop.login1.Manager');
+ const SystemdLoginSessionIface = loadInterfaceXML('org.freedesktop.login1.Session');
+@@ -237,10 +238,11 @@
+         this._preparingForSleep = false;
+     }
+ 
+-    getCurrentUserProxy() {
+-        // we could return a DummyUser object that fakes whatever callers
+-        // expect, but just never settling the promise should be safer
+-        return new Promise(() => {});
++    async getCurrentUserProxy() {
++        // Only screen-time accounting consumes this object. Keep the other
++        // unsupported login, power and authentication methods unchanged.
++        this._userProxy ??= new SessionActivityUser();
++        return this._userProxy;
+     }
+ 
+     getCurrentSessionProxy() {
+--- a/js/js-resources.gresource.xml
++++ b/js/js-resources.gresource.xml
+@@ -32,6 +32,7 @@
+     <file>misc/jsParse.js</file>
+     <file>misc/keyboardManager.js</file>
+     <file>misc/loginManager.js</file>
++    <file>misc/termux/sessionActivity.js</file>
+     <file>misc/modemManager.js</file>
+     <file>misc/objectManager.js</file>
+     <file>misc/params.js</file>
+--- /dev/null
++++ b/js/misc/termux/sessionActivity.js
+@@ -0,0 +1,60 @@
++// SPDX-License-Identifier: GPL-2.0-or-later
++// Session-local activity for screen-time accounting without logind. This does
++// not expose Android users, authorization, device power, or other login APIs.
++import Meta from 'gi://Meta';
++import * as Signals from '../signals.js';
++
++// Screen blanking is disabled in the native profile (idle-delay=0). Keep the
++// accounting threshold independent so idle desktop time is still excluded.
++export const IDLE_THRESHOLD_MS = 60 * 1000;
++
++export class SessionActivityUser extends Signals.EventEmitter {
++    constructor(idleMonitor = global.backend.get_core_idle_monitor()) {
++        super();
++        this._monitor = idleMonitor;
++        this._idleHint = idleMonitor.get_idletime() >= IDLE_THRESHOLD_MS;
++        this._activeWatch = 0;
++        this._idleWatch = idleMonitor.add_idle_watch_full(
++            IDLE_THRESHOLD_MS, () => this._onIdle(),
++            Meta.IdleMonitorWatchFlags.UNINHIBITABLE);
++        if (this._idleHint)
++            this._watchActive();
++    }
++
++    get State() {
++        return 'active';
++    }
++
++    get IdleHint() {
++        return this._idleHint;
++    }
++
++    _watchActive() {
++        if (!this._activeWatch) {
++            this._activeWatch = this._monitor.add_user_active_watch(() => {
++                this._activeWatch = 0; // One-shot watch, removed by Mutter.
++                this._setIdle(false);
++            });
++        }
++    }
++
++    _onIdle() {
++        this._watchActive();
++        this._setIdle(true);
++    }
++
++    _setIdle(idle) {
++        if (this._idleHint === idle)
++            return;
++        this._idleHint = idle;
++        this.emit('g-properties-changed');
++    }
++
++    destroy() {
++        if (this._idleWatch)
++            this._monitor.remove_watch(this._idleWatch);
++        if (this._activeWatch)
++            this._monitor.remove_watch(this._activeWatch);
++        this._idleWatch = this._activeWatch = 0;
++    }
++}

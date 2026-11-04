@@ -3,6 +3,7 @@ TERMUX_PKG_DESCRIPTION="GNOME Shell 48 for native Termux on X11"
 TERMUX_PKG_LICENSE="GPL-2.0-or-later"
 TERMUX_PKG_MAINTAINER="@cnshing"
 TERMUX_PKG_VERSION="48.8"
+TERMUX_PKG_REVISION=1
 TERMUX_PKG_SRCURL="https://download.gnome.org/sources/gnome-shell/${TERMUX_PKG_VERSION%%.*}/gnome-shell-${TERMUX_PKG_VERSION}.tar.xz"
 TERMUX_PKG_SHA256=cb9b7d86cf362530e648e68caaf109a32af4e832874a26791ca8789773efd233
 TERMUX_PKG_DEPENDS="at-spi2-core, atk, gcr4, geoclue, gdk-pixbuf, glib, gnome-desktop4, gnome-menus, gnome-session, gobject-introspection, graphene, gtk4, ibus, libgweather, libx11, libxext, libxfixes, libxml2, livecd-gjs, livecd-mutter, livecd-upower, pango, pulseaudio"

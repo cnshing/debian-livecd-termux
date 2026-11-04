@@ -1,0 +1,5 @@
+[RemoteVolumeMonitor]
+Name=GProxyLivecdStorageVolumeMonitor
+DBusName=org.gtk.vfs.LivecdStorageVolumeMonitor
+IsNative=false
+NativePriority=0

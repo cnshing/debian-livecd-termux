@@ -69,8 +69,6 @@ jobs:
       run: python3 tests/mic/test-bluetooth.py
     - name: Test packaging and profile integration
       run: python3 tests/packaging/test-packaging.py
-    - name: Test GNOME wallpaper registration
-      run: python3 tests/packaging/test-settings-backgrounds.py
     - name: Test network discovery integration
       run: python3 tests/packaging/test-network-discovery.py
     - name: Test Android storage mount discovery

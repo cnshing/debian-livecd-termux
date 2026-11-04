@@ -129,21 +129,36 @@ python tests/native/test-screen-time.py --panels-ui
 gjs -m tests/native/test-session-activity.js
 ```
 
-The notification test checks the owning service, notification submission and
-preference access. The Wellbeing test turns on a break schedule and waits for
-Shell's break manager to report it. Manual UI acceptance also confirmed a visible banner with banners enabled and
-suppression with Do Not Disturb enabled. Per-application and lock-screen policies
-still require further UI acceptance. The resolution test restores
-the original preferences in a `finally` block.
+The private screen-time test checks actual Shell banners, per-application banner
+suppression, Do Not Disturb and disabled applications. The session test also
+checks notification service ownership and turns on a break schedule, waiting for
+Shell's break manager to report it. Lock-screen notification policies still need
+validation. The resolution test restores the original preferences in a `finally`
+block.
 
-Device validation so far: the package builds/installs on arm64 Android 11; the ten
-panels before Wellbeing open and close with fatal GLib criticals enabled; resolution changes to 1280×720, confirmation, cancel,
-parent-pipe loss and timeout restore passed without restarting GNOME. The GUI
-chooser, confirmation and automatic dismissal after rollback were visually
-inspected. Existing appearance lifecycle/accent tests passed. The port also fixes
-missing template type registrations and deferred sidebar/window work after
-disposal, discovered by the panel smoke test. The Wellbeing panel was opened and
-inspected on a private Xvfb display. Break-schedule changes reach Shell. The
-private screen-time acceptance test can also open/close all eleven panels.
-It uses a fresh bus, display, settings profile and history directory; its Eval
-access is enabled only in that temporary Shell and the live session is untouched. Broader panel functionality remains unfinished.
+Device validation: the package builds/installs on arm64 Android 11, and all eleven
+compiled panels open and close with fatal GLib criticals enabled. Resolution
+changes to 1280×720, confirmation, cancel, parent-pipe loss and timeout restore
+passed without restarting GNOME. The GUI chooser, confirmation and automatic
+dismissal after rollback were visually inspected. Existing appearance
+lifecycle/accent tests passed. The port also fixes missing template type
+registrations and deferred sidebar/window work after disposal, discovered by the
+panel smoke test. Break-schedule changes reach Shell.
+
+GitHub Actions passed for both the single [Settings build set](https://github.com/cnshing/debian-livecd-termux/actions/runs/41798801984)
+and the single [Shell/runtime build set](https://github.com/cnshing/debian-livecd-termux/actions/runs/41798806145)
+at source revision `7e56fb76d3d19fd503d996b284f508f4de97428f`.
+The Settings artifact installed successfully on the phone. The extracted CI
+runtime passed notification policies, daily-limit notification and grayscale,
+idle/resume history, break-schedule integration and all eleven panel lifecycle
+checks. Process mappings confirmed that GJS, SpiderMonkey and Mutter came from
+the extracted artifacts. This validates the packaged runtime in a private session;
+the running desktop has not been switched to it.
+
+The runtime acceptance test uses a fresh bus, display, settings profile and
+history directory; Eval access is enabled only in that temporary Shell. Use
+`--runtime DIR` to validate an extracted CI runtime without replacing the running
+desktop. The harness relocates private copies of activation launchers and
+reserves Mutter's fallback frame-client path exclusively, removing it afterward;
+it never replaces an existing file there. Broader panel functionality remains
+unfinished.

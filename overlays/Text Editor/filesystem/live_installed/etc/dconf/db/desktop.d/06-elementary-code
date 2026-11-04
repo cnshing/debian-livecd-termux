@@ -1,0 +1,2 @@
+[io/elementary/code/settings]
+plugins-enabled=['brackets-completion', 'detect-indent', 'editorconfig', 'theme_sync']

@@ -1,0 +1,12 @@
+<?xml version="1.0"?>
+<dump>
+  <enum name="GtkSpellError" get-type="gtk_spell_error_get_type">
+    <member name="GTK_SPELL_ERROR_BACKEND" nick="backend" value="0"/>
+  </enum>  <class name="GtkSpellChecker" get-type="gtk_spell_checker_get_type" parents="GInitiallyUnowned,GObject">
+    <property name="decode-language-codes" type="gboolean" flags="3" default-value="FALSE"/>
+    <signal name="language-changed" return="void" when="last">
+      <param type="gchararray"/>
+    </signal>
+  </class>
+  <error-quark function="gtk_spell_error_quark" domain="gtkspell-error-quark"/>
+</dump>

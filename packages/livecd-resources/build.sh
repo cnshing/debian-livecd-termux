@@ -33,8 +33,9 @@ termux_step_make_install() {
 	# Real TLS, needing Android 10. With the default emulated TLS, preloading this library aborts
 	# every Node.js program: "Pointer tag ... was truncated". See docs/resources/README.md#compatibility-boundary.
 	$CC $CFLAGS -fno-emulated-tls -shared -fPIC "$TERMUX_PKG_BUILDER_DIR/proc-compat.c" -I"$TERMUX_PKG_BUILDER_DIR" -L"$TERMUX_PREFIX/lib" -llivecd_resources -ldl -pthread $LDFLAGS -o "$TERMUX_PREFIX/lib/liblivecd-proc.so"
-	# Check the emitted artifact, rather than treating a compiler flag as proof.
-	if ! "$READELF" -lW "$TERMUX_PREFIX/lib/liblivecd-proc.so" | grep -q ' TLS '; then
+	# Check the emitted artifact, rather than treating a compiler flag as proof. grep reads every line:
+	# with -q it can exit before readelf finishes, and pipefail then fails a library that has the segment.
+	if ! "$READELF" -lW "$TERMUX_PREFIX/lib/liblivecd-proc.so" | grep ' TLS ' >/dev/null; then
 		termux_error_exit "The resource preload must use ELF TLS (Android 10+)"
 	fi
 	install -Dm755 "$TERMUX_PKG_BUILDER_DIR/livecd-resources-run" "$TERMUX_PREFIX/bin/livecd-resources-run"

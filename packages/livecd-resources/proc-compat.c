@@ -61,8 +61,10 @@ static struct file *files;
 static struct directory *directories;
 
 static __thread int fork_locked;
-static void before_fork(void) { if (!inside) { pthread_mutex_lock(&mutex); fork_locked = 1; } }
-static void after_fork(void) { if (fork_locked) { fork_locked = 0; pthread_mutex_unlock(&mutex); } }
+// Count fork as inside too: a signal handler that writes while fork holds the mutex, such as GLib's
+// child watch when VTE respawns a shell, must pass straight through rather than wait on its own thread.
+static void before_fork(void) { if (!inside) { inside++; pthread_mutex_lock(&mutex); fork_locked = 1; } }
+static void after_fork(void) { if (fork_locked) { fork_locked = 0; pthread_mutex_unlock(&mutex); inside--; } }
 
 __attribute__((constructor)) static void initialize(void) {
     inside++;

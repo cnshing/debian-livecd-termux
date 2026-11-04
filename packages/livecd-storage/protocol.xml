@@ -1,0 +1,27 @@
+<node>
+  <!-- Wire format from GVfs 1.62's monitor/proxy/dbus-interfaces.xml. -->
+  <interface name="org.gtk.Private.RemoteVolumeMonitor">
+    <method name="IsSupported"><arg type="b" direction="out"/></method>
+    <method name="List">
+      <arg type="a(ssssbbbbbbbbuasa{ss}sa{sv})" direction="out"/>
+      <arg type="a(ssssssbbssa{ss}sa{sv})" direction="out"/>
+      <arg type="a(ssssssbsassa{sv})" direction="out"/>
+    </method>
+    <method name="CancelOperation">
+      <arg type="s" direction="in"/><arg type="b" direction="out"/>
+    </method>
+    <method name="MountUnmount">
+      <arg type="s" direction="in"/><arg type="s" direction="in"/>
+      <arg type="u" direction="in"/><arg type="s" direction="in"/>
+    </method>
+    <signal name="MountAdded">
+      <arg type="s"/><arg type="s"/><arg type="(ssssssbsassa{sv})"/>
+    </signal>
+    <signal name="MountChanged">
+      <arg type="s"/><arg type="s"/><arg type="(ssssssbsassa{sv})"/>
+    </signal>
+    <signal name="MountRemoved">
+      <arg type="s"/><arg type="s"/><arg type="(ssssssbsassa{sv})"/>
+    </signal>
+  </interface>
+</node>

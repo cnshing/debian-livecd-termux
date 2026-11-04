@@ -1,0 +1,36 @@
+name: Android storage mounts
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+    - .github/workflows/storage-mounts.yml
+    - packages/livecd-storage/**
+    - overlays/File Manager/hooks/termux/7100-storage-mounts.py
+    - tests/native/storage_mount_integration.py
+    - tests/native/test-storage-mounts.py
+  pull_request:
+    paths:
+    - .github/workflows/storage-mounts.yml
+    - packages/livecd-storage/**
+    - overlays/File Manager/hooks/termux/7100-storage-mounts.py
+    - tests/native/storage_mount_integration.py
+    - tests/native/test-storage-mounts.py
+
+permissions:
+  contents: read
+
+jobs:
+  storage-mounts:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    steps:
+    - uses: actions/checkout@v7
+    - name: Install GIO, GVfs and a session bus
+      run: |
+        sudo apt-get update -qq
+        sudo apt-get install --yes --no-install-recommends python3-gi gir1.2-glib-2.0 dbus gvfs
+    - name: Check storage discovery and legacy bookmark migration
+      run: /usr/bin/python3 tests/native/test-storage-mounts.py
+    - name: Check real GIO mounts and event-driven updates
+      run: /usr/bin/python3 tests/native/test-storage-mounts.py --integration

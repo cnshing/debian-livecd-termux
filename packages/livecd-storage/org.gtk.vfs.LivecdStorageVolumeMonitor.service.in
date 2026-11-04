@@ -1,0 +1,3 @@
+[D-BUS Service]
+Name=org.gtk.vfs.LivecdStorageVolumeMonitor
+Exec=@TERMUX_PREFIX@/bin/python @TERMUX_PREFIX@/libexec/livecd-storage/monitor.py

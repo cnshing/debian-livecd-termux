@@ -1,0 +1,67 @@
+--- a/meson.build
++++ b/meson.build
+@@ -15,7 +15,7 @@
+ dependency('libadwaita-1', version: '>=1.8.0')
+ dependency('gweather4', version: '>=4.0.0')
+ # Required by glycin crate
+-dependency('libseccomp', version: '>= 2.5.0')
++# Android uses glycin-builtin; external loaders and libseccomp are not needed.
+ 
+ # Optional dependencies
+ gtk4_x11 = dependency('gtk4-x11', required: get_option('x11'))
+--- a/src/meson.build
++++ b/src/meson.build
+@@ -2,7 +2,9 @@
+ source_root = meson.project_source_root()
+ 
+ cargo_options = ['--manifest-path', source_root / 'Cargo.toml']
+-cargo_options += ['--target-dir', build_root / 'src']
++cargo_target_dir = run_command('printenv', 'CARGO_TARGET_DIR', check: true).stdout().strip()
++cargo_target = run_command('printenv', 'CARGO_BUILD_TARGET', check: true).stdout().strip()
++cargo_options += ['--target-dir', cargo_target_dir, '--target', cargo_target, '--locked']
+ cargo_options += ['--profile', profile]
+ 
+ if gtk4_x11.found()
+@@ -16,7 +18,6 @@
+ endif
+ 
+ cargo_env = {
+-  'CARGO_HOME': build_root / 'cargo-home',
+   'APP_ID': app_id,
+   'VERSION': version,
+   'LOCALEDIR': localedir,
+@@ -48,7 +49,7 @@
+   output: meson.project_name(),
+   command: [
+     'cp',
+-    'src' / rust_target / meson.project_name(),
++    cargo_target_dir / cargo_target / rust_target / meson.project_name(),
+     '@OUTPUT@',
+   ],
+ )
+--- a/data/meson.build
++++ b/data/meson.build
+@@ -33,23 +33,6 @@
+   'image/x-xbitmap',
+   # XPM
+   'image/x-xpixmap'
+-]
+-
+-# SVG
+-mime_types += [
+-  'image/svg+xml',
+-  'image/svg+xml-compressed',
+-]
+-
+-# HEIF
+-mime_types += [
+-  'image/avif',
+-  'image/heic',
+-]
+-
+-# JXL
+-mime_types += [
+-  'image/jxl',
+ ]
+ 
+ conf = configuration_data()

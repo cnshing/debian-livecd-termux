@@ -201,6 +201,30 @@ class Packaging(unittest.TestCase):
             self.assertIn('MimeType=x-scheme-handler/code-oss;', (root / 'code-oss-url-handler.desktop').read_text())
             self.assertNotIn('@@', (root / 'code-oss-url-handler.desktop').read_text())
 
+    def test_loupe_defaults_preserve_other_associations_and_follow_package_formats(self):
+        hook = module('loupe_overlay', 'overlays/Image Viewer/hooks/termux/5500-loupe.py')
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            applications = root / 'share/applications'
+            applications.mkdir(parents=True)
+            (applications / 'org.gnome.Loupe.desktop').write_text(
+                '[Desktop Entry]\nMimeType=image/png;image/jpeg;\n')
+            config = root / 'config'
+            config.mkdir()
+            path = config / 'mimeapps.list'
+            path.write_text('[Default Applications]\ntext/plain=editor.desktop;\n'
+                            'image/png=old.desktop;\nimage/svg+xml=browser.desktop;\n'
+                            '[Added Associations]\nimage/png=old.desktop;\n')
+            hook.configure(config, root)
+            first = path.read_text()
+            hook.configure(config, root)
+            self.assertEqual(first, path.read_text())
+            self.assertIn('image/png=org.gnome.Loupe.desktop;', first)
+            self.assertIn('image/jpeg=org.gnome.Loupe.desktop;', first)
+            self.assertIn('text/plain=editor.desktop;', first)
+            self.assertIn('image/svg+xml=browser.desktop;', first)
+            self.assertIn('[Added Associations]\nimage/png=old.desktop;', first)
+
     def test_native_install_includes_subpackages_and_excludes_unrelated_outputs(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

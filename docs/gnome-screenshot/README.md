@@ -32,3 +32,26 @@ gh workflow run packages.yml --ref feat/gnome-screenshot -f packages=gnome-scree
 On native Termux, `bash tools/build-packages.sh --install gnome-screenshot` builds
 and installs through APT. The normal installer also installs it through the default
 Shell overlay. Apply overlays with the managed desktop stopped.
+
+With the native desktop running, verify the installed launcher and real delayed
+screen/window captures with `python tests/native/test-screenshot.py`. The test
+opens a temporary GTK window and removes its captures afterwards.
+
+## Verification
+
+Verified November 3, 2026:
+
+- [Isolated GitHub Actions run 41776417785](https://github.com/cnshing/debian-livecd-termux/actions/runs/41776417785)
+  passed planning, the `gnome-screenshot` build and repository assembly, with
+  `packages=gnome-screenshot` and `rebuild=true`.
+- Installed that run's `gnome-screenshot_41.0_aarch64.deb` through APT on the
+  native arm64 Android phone.
+- `tests/native/test-screenshot.py` passed with the Zink GNOME session:
+  delayed full-screen PNG 1280×1024 in 4.76 seconds (requested delay: three
+  seconds), active-window PNG 456×395 in 0.38 seconds. Both decoded and contained
+  nonblank image data.
+- `gtk-launch org.gnome.Screenshot` opened a visible Screenshot dialog.
+- Session `gsettings` reads confirmed delay `3`, file type `'png'` and pointer
+  inclusion `false`. All 12 host packaging checks passed.
+
+The screenshots cover the Termux:X11 desktop, rather than Android's system UI.

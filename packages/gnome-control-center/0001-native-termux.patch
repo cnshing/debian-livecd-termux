@@ -1,0 +1,571 @@
+Native GNOME session build: X11 input discovery and a first panel inventory.
+
+--- a/meson.build
++++ b/meson.build
+@@ -20,7 +20,8 @@
+ 
+ control_center_gettext = meson.project_name() + '-2.0'
+ 
+-host_is_linux = host_machine.system().contains('linux')
++# Android has no NetworkManager, ModemManager or BlueZ system service.
++host_is_linux = false
+ host_is_linux_not_s390 = host_is_linux and not host_machine.cpu().contains('s390')
+ 
+ cc = meson.get_compiler('c')
+@@ -182,27 +183,20 @@
+   default_options: 'tests=false',
+ )
+ 
+-accounts_dep = dependency('accountsservice', version: '>= 23.11.69')
+ colord_dep = dependency('colord', version: '>= 0.1.34')
+ gdk_pixbuf_dep = dependency('gdk-pixbuf-2.0', version: '>= 2.23.0')
+ gio_dep = dependency('gio-2.0')
+ glib_dep = dependency('glib-2.0', version: '>= 2.76.6')
+ gnome_desktop_dep = dependency('gnome-desktop-4')
+ gnome_bg_dep = dependency('gnome-bg-4')
+-gnome_rr_dep = dependency('gnome-rr-4')
+-gnome_settings_dep = dependency('gnome-settings-daemon', version: '>= 48.rc', fallback: 'gsd')
+-goa_dep = dependency('goa-1.0', version: goa_req_version, fallback: 'goa')
+ gsettings_desktop_dep = dependency('gsettings-desktop-schemas', version: '>= 48.alpha')  # actually requires commit 9d55553, just after alpha
+ libxml_dep = dependency('libxml-2.0')
+ pulse_dep = dependency('libpulse', version: pulse_req_version)
+ pulse_mainloop_dep = dependency('libpulse-mainloop-glib', version: pulse_req_version)
+ upower_glib_dep = dependency('upower-glib', version: '>= 1.90.6')
+-gudev_dep = dependency('gudev-1.0', version: '>= 232')
+ x11_dep = dependency('x11', version: '>= 1.8')
+ xi_dep = dependency('xi', version: '>= 1.2')
+ epoxy_dep = dependency('epoxy')
+-gcr_dep = dependency('gcr-4', version: '>= 4.1.0')
+-pwquality_dep = dependency('pwquality', version: '>= 1.2.2')
+ 
+ m_dep = cc.find_library('m')
+ 
+@@ -216,44 +210,11 @@
+   gtk_dep,
+ ]
+ 
+-polkit_gobject_dep = dependency('polkit-gobject-1', version: '>= 0.103')
+-# Also verify that polkit ITS files exist:
+-# https://gitlab.gnome.org/GNOME/gnome-control-center/-/issues/491
+-polkit_files = [ 'gettext/its/polkit.its', 'gettext/its/polkit.loc' ]
+-foreach polkit_file: polkit_files
+-  r = run_command('build-aux/meson/find_xdg_file.py', polkit_file, check: true)
+-  assert(r.returncode() == 0, 'ITS support missing from polkit, please upgrade or contact your distribution')
+-endforeach
+-
+ # Localisation API
+ if cc.has_header_symbol('langinfo.h', '_NL_TIME_FIRST_WEEKDAY')
+   config_h.set('HAVE__NL_TIME_FIRST_WEEKDAY', 1,
+                description: 'Define if langinfo.h supports _NL_TIME_FIRST_WEEKDAY')
+ endif
+-
+-# Check for CUPS 1.4 or newer
+-cups_dep = dependency('cups', version : '>= 1.4', required: false)
+-assert(cups_dep.found(), 'CUPS 1.4 or newer not found')
+-
+-# https://bugzilla.gnome.org/show_bug.cgi?id=696766
+-cups_cflags = []
+-if cups_dep.version().version_compare('>= 1.6')
+-  cups_cflags += '-D_PPD_DEPRECATED='
+-endif
+-
+-# cups headers
+-check_headers = [
+-  ['HAVE_CUPS_CUPS_H', 'cups/cups.h'],
+-  ['HAVE_CUPS_PPD_H', 'cups/ppd.h']
+-]
+-
+-foreach header: check_headers
+-  assert(cc.has_header(header[1], args: cups_cflags), 'CUPS headers not found: ' + header[1])
+-endforeach
+-
+-config_h.set10('HAVE_CUPS_HTTPCONNECT2',
+-               cc.has_function('httpConnect2', dependencies: cups_dep),
+-               description: 'Define if httpConnect2() is available in CUPS')
+ 
+ # IBus support
+ enable_ibus = get_option('ibus')
+--- a/panels/common/gsd-device-manager.c
++++ b/panels/common/gsd-device-manager.c
+@@ -22,7 +22,7 @@
+ #include "config.h"
+ 
+ #include <string.h>
+-#include <gudev/gudev.h>
++
+ 
+ #include "gsd-device-manager.h"
+ #include "gsd-common-enums.h"
+@@ -54,7 +54,7 @@
+ {
+         GObject parent_instance;
+ 	GHashTable *devices;
+-	GUdevClient *udev_client;
++	GdkSeat *seat;
+ } GsdDeviceManagerPrivate;
+ 
+ enum {
+@@ -274,7 +274,7 @@
+         GsdDeviceManagerPrivate *priv = gsd_device_manager_get_instance_private (manager);
+ 
+ 	g_hash_table_destroy (priv->devices);
+-	g_object_unref (priv->udev_client);
++	g_signal_handlers_disconnect_by_data (priv->seat, manager);
+ 
+ 	G_OBJECT_CLASS (gsd_device_manager_parent_class)->finalize (object);
+ }
+@@ -391,146 +391,55 @@
+ 			      GSD_TYPE_DEVICE | G_SIGNAL_TYPE_STATIC_SCOPE);
+ }
+ 
+-static GsdDeviceType
+-udev_device_get_device_type (GUdevDevice *device)
+-{
+-	GsdDeviceType type = 0;
+-	gint i;
+-
+-	for (i = 0; i < G_N_ELEMENTS (udev_ids); i++) {
+-		if (g_udev_device_get_property_as_boolean (device, udev_ids[i]))
+-			type |= (1 << i);
+-	}
+-
+-	return type;
+-}
+-
+-static gboolean
+-device_is_evdev (GUdevDevice *device)
+-{
+-	const gchar *device_file;
+-
+-	device_file = g_udev_device_get_device_file (device);
+-
+-	if (!device_file || strstr (device_file, "/event") == NULL)
+-		return FALSE;
+-
+-	return g_udev_device_get_property_as_boolean (device, "ID_INPUT");
+-}
+-
+-static GsdDevice *
+-create_device (GUdevDevice *udev_device, GUdevDevice *parent)
+-{
+-	const gchar *vendor, *product, *name, *group;
+-	guint width, height;
+-
+-	name = g_udev_device_get_sysfs_attr (parent, "name");
+-	vendor = g_udev_device_get_property (udev_device, "ID_VENDOR_ID");
+-	product = g_udev_device_get_property (udev_device, "ID_MODEL_ID");
+-
+-	if (!vendor || !product) {
+-		vendor = g_udev_device_get_sysfs_attr (udev_device, "device/id/vendor");
+-		product = g_udev_device_get_sysfs_attr (udev_device, "device/id/product");
+-	}
+-
+-	width = g_udev_device_get_property_as_int (udev_device, "ID_INPUT_WIDTH_MM");
+-	height = g_udev_device_get_property_as_int (udev_device, "ID_INPUT_HEIGHT_MM");
+-
+-	group = g_udev_device_get_property (udev_device, "LIBINPUT_DEVICE_GROUP");
+-
+-	return g_object_new (GSD_TYPE_DEVICE,
+-			     "name", name,
+-			     "device-file", g_udev_device_get_device_file (udev_device),
+-			     "type", udev_device_get_device_type (udev_device),
+-			     "vendor-id", vendor,
+-			     "product-id", product,
+-			     "width", width,
+-			     "height", height,
+-			     "group", group,
+-			     NULL);
+-}
+-
+-static void
+-add_device (GsdDeviceManager *manager,
+-	    GUdevDevice	     *udev_device)
++static void
++native_device_added (GdkSeat *seat, GdkDevice *input, GsdDeviceManager *manager)
+ {
+         GsdDeviceManagerPrivate *priv = gsd_device_manager_get_instance_private (manager);
+-	g_autoptr(GUdevDevice) parent = NULL;
+-	GsdDevice *device;
+-	const gchar *syspath;
+-
+-	parent = g_udev_device_get_parent (udev_device);
+-
+-	if (!parent)
+-		return;
+-
+-	device = create_device (udev_device, parent);
+-	syspath = g_udev_device_get_sysfs_path (udev_device);
+-	g_hash_table_insert (priv->devices, g_strdup (syspath), device);
+-	g_signal_emit_by_name (manager, "device-added", device);
+-}
+-
+-static void
+-remove_device (GsdDeviceManager *manager,
+-	       GUdevDevice	*udev_device)
+-{
+-	GsdDeviceManagerPrivate *priv = gsd_device_manager_get_instance_private (manager);
+-	GsdDevice *device;
+-	const gchar *syspath;
+-
+-	syspath = g_udev_device_get_sysfs_path (udev_device);
+-	device = g_hash_table_lookup (priv->devices, syspath);
+-
+-	if (!device)
+-		return;
+-
+-	g_hash_table_steal (priv->devices, syspath);
+-	g_signal_emit_by_name (manager, "device-removed", device);
+-
+-	g_object_unref (device);
+-}
+-
+-static void
+-udev_event_cb (GUdevClient	*client,
+-	       gchar		*action,
+-	       GUdevDevice	*device,
+-	       GsdDeviceManager *manager)
+-{
+-	if (!device_is_evdev (device))
+-		return;
+-
+-	if (g_strcmp0 (action, "add") == 0) {
+-		add_device (manager, device);
+-	} else if (g_strcmp0 (action, "remove") == 0) {
+-		remove_device (manager, device);
+-	}
++        GsdDeviceType type;
++        GsdDevice *device;
++        char *key;
++
++        switch (gdk_device_get_source (input)) {
++        case GDK_SOURCE_MOUSE: type = GSD_DEVICE_TYPE_MOUSE; break;
++        case GDK_SOURCE_KEYBOARD: type = GSD_DEVICE_TYPE_KEYBOARD; break;
++        case GDK_SOURCE_TOUCHPAD: type = GSD_DEVICE_TYPE_TOUCHPAD; break;
++        case GDK_SOURCE_TOUCHSCREEN: type = GSD_DEVICE_TYPE_TOUCHSCREEN; break;
++        case GDK_SOURCE_PEN: type = GSD_DEVICE_TYPE_TABLET; break;
++        default: return;
++        }
++        key = g_strdup_printf ("%p", input);
++        device = g_object_new (GSD_TYPE_DEVICE,
++                               "name", gdk_device_get_name (input),
++                               "type", type, NULL);
++        g_hash_table_replace (priv->devices, key, device);
++        g_signal_emit (manager, signals[DEVICE_ADDED], 0, device);
++}
++
++static void
++native_device_removed (GdkSeat *seat, GdkDevice *input, GsdDeviceManager *manager)
++{
++        GsdDeviceManagerPrivate *priv = gsd_device_manager_get_instance_private (manager);
++        g_autofree char *key = g_strdup_printf ("%p", input);
++        GsdDevice *device = g_hash_table_lookup (priv->devices, key);
++        if (device)
++                g_signal_emit (manager, signals[DEVICE_REMOVED], 0, device);
++        g_hash_table_remove (priv->devices, key);
+ }
+ 
+ static void
+ gsd_device_manager_init (GsdDeviceManager *manager)
+ {
+         GsdDeviceManagerPrivate *priv = gsd_device_manager_get_instance_private (manager);
+-	const gchar *subsystems[] = { "input", NULL };
+-	g_autoptr(GList) devices = NULL;
+-	GList *l;
+-
+-	priv->devices = g_hash_table_new_full (g_str_hash, g_str_equal,
+-					       (GDestroyNotify) g_free,
+-					       (GDestroyNotify) g_object_unref);
+-
+-	priv->udev_client = g_udev_client_new (subsystems);
+-	g_signal_connect (priv->udev_client, "uevent",
+-			  G_CALLBACK (udev_event_cb), manager);
+-
+-	devices = g_udev_client_query_by_subsystem (priv->udev_client,
+-						    subsystems[0]);
+-
+-	for (l = devices; l; l = l->next) {
+-		g_autoptr(GUdevDevice) device = l->data;
+-
+-		if (device_is_evdev (device))
+-			add_device (manager, device);
+-	}
++        g_autoptr(GList) devices = NULL;
++        GList *l;
++        priv->devices = g_hash_table_new_full (g_str_hash, g_str_equal,
++                                               g_free, g_object_unref);
++        priv->seat = gdk_display_get_default_seat (gdk_display_get_default ());
++        devices = gdk_seat_get_devices (priv->seat, GDK_SEAT_CAPABILITY_ALL);
++        for (l = devices; l; l = l->next)
++                native_device_added (priv->seat, l->data, manager);
++        g_signal_connect (priv->seat, "device-added", G_CALLBACK (native_device_added), manager);
++        g_signal_connect (priv->seat, "device-removed", G_CALLBACK (native_device_removed), manager);
+ }
+ 
+ GsdDeviceManager *
+--- a/panels/common/meson.build
++++ b/panels/common/meson.build
+@@ -22,7 +22,6 @@
+ )
+ 
+ sources = files(
+-  'cc-hostname-entry.c',
+   'cc-number-row.c',
+   'cc-timelike-entry.c',
+   'cc-util.c',
+@@ -33,7 +32,7 @@
+   'widgets',
+   sources: sources,
+   include_directories: top_inc,
+-  dependencies: common_deps + [ generates_sources_dep, polkit_gobject_dep ]
++  dependencies: common_deps + [ generates_sources_dep ]
+ )
+ libwidgets_dep = declare_dependency(
+   include_directories: common_inc,
+@@ -93,7 +92,7 @@
+ 
+ sources = common_sources + files(gsd_sources)
+ 
+-deps = common_deps + [ gudev_dep ]
++deps = common_deps + [ x11_dep, xi_dep ]
+ 
+ libdevice = static_library(
+   'device',
+--- a/panels/display/cc-display-panel.c
++++ b/panels/display/cc-display-panel.c
+@@ -77,7 +77,8 @@
+ 
+   guint           focus_id;
+ 
+-  CcNightLightPage *night_light_page;
++  AdwPreferencesGroup *native_resolution_group;
++  AdwBin *night_light_page;
+   CcListRow        *night_light_row;
+ 
+   UpClient *up_client;
+@@ -607,6 +608,7 @@
+   gtk_widget_class_bind_template_child (widget_class, CcDisplayPanel, display_settings_group);
+   gtk_widget_class_bind_template_child (widget_class, CcDisplayPanel, display_settings_page);
+   gtk_widget_class_bind_template_child (widget_class, CcDisplayPanel, escape_shortcut);
++  gtk_widget_class_bind_template_child (widget_class, CcDisplayPanel, native_resolution_group);
+   gtk_widget_class_bind_template_child (widget_class, CcDisplayPanel, night_light_page);
+   gtk_widget_class_bind_template_child (widget_class, CcDisplayPanel, night_light_row);
+   gtk_widget_class_bind_template_child (widget_class, CcDisplayPanel, primary_display_row);
+@@ -1065,6 +1067,16 @@
+ }
+ 
+ static void
++open_desktop_resolution (AdwActionRow *row, gpointer user_data)
++{
++  g_autoptr(GError) error = NULL;
++  const char *argv[] = { "@TERMUX_PREFIX@/bin/python",
++                        "@TERMUX_PREFIX@/libexec/gnome-control-center/resolution.py", NULL };
++  if (!g_spawn_async (NULL, (char **) argv, NULL, G_SPAWN_DEFAULT, NULL, NULL, NULL, &error))
++    g_warning ("Could not open desktop resolution: %s", error->message);
++}
++
++static void
+ cc_display_panel_init (CcDisplayPanel *self)
+ {
+   g_autoptr(GtkCssProvider) provider = NULL;
+@@ -1073,6 +1085,19 @@
+   g_resources_register (cc_display_get_resource ());
+ 
+   gtk_widget_init_template (GTK_WIDGET (self));
++
++  if (g_file_test ("@TERMUX_PREFIX@/bin/termux-x11-preference", G_FILE_TEST_IS_EXECUTABLE))
++    {
++      AdwActionRow *row = ADW_ACTION_ROW (adw_action_row_new ());
++      adw_preferences_row_set_title (ADW_PREFERENCES_ROW (row), _("Desktop Resolution"));
++      adw_action_row_set_subtitle (row, _("Choose the desktop size or follow the window size"));
++      gtk_list_box_row_set_activatable (GTK_LIST_BOX_ROW (row), TRUE);
++      adw_action_row_add_suffix (row, gtk_image_new_from_icon_name ("go-next-symbolic"));
++      adw_preferences_group_add (self->native_resolution_group, GTK_WIDGET (row));
++      g_signal_connect (row, "activated", G_CALLBACK (open_desktop_resolution), self);
++    }
++  else
++    gtk_widget_set_visible (GTK_WIDGET (self->native_resolution_group), FALSE);
+ 
+   self->arrangement = cc_display_arrangement_new (NULL);
+   gtk_widget_set_size_request (GTK_WIDGET (self->arrangement), -1, 175);
+--- a/panels/display/cc-display-panel.ui
++++ b/panels/display/cc-display-panel.ui
+@@ -142,11 +142,16 @@
+                   </object>
+                 </child>
+ 
++                <child>
++                  <object class="AdwPreferencesGroup" id="native_resolution_group"/>
++                </child>
++
+                 <!-- Night Light -->
+                 <child>
+                   <object class="AdwPreferencesGroup">
+                     <child>
+                       <object class="CcListRow" id="night_light_row">
++                        <property name="visible">False</property>
+                         <property name="title" translatable="yes" comments="This is the redshift functionality where we suppress blue light when the sun has gone down">_Night Light</property>
+                         <property name="icon-name">night-light-symbolic</property>
+                         <property name="show-arrow">True</property>
+@@ -219,7 +224,7 @@
+ 
+             <!-- Night Light -->
+             <property name="content">
+-              <object class="CcNightLightPage" id="night_light_page" />
++              <object class="AdwBin" id="night_light_page" />
+             </property>
+ 
+           </object>
+--- a/panels/display/cc-display-settings.c
++++ b/panels/display/cc-display-settings.c
+@@ -735,6 +735,19 @@
+   adw_switch_row_set_active (self->underscanning_row,
+                              cc_display_monitor_get_underscanning (self->selected_output));
+ 
++  /* Termux:X11 rejects the disabled-CRTC step in Mutter's XRandR apply
++   * sequence. Its native preference interface owns virtual resolution changes.
++   * Do not offer rotation, scale or output-disable controls through that path. */
++  if (g_strcmp0 (cc_display_monitor_get_connector_name (self->selected_output), "builtin") == 0)
++    {
++      gtk_widget_set_visible (self->orientation_row, FALSE);
++      gtk_widget_set_visible (self->enabled_listbox, FALSE);
++      gtk_widget_set_sensitive (self->resolution_row, FALSE);
++      gtk_widget_set_sensitive (self->refresh_rate_row, FALSE);
++      gtk_widget_set_visible (self->scale_buttons_row, FALSE);
++      gtk_widget_set_visible (self->scale_combo_row, FALSE);
++    }
++
+   self->updating = TRUE;
+   g_object_thaw_notify ((GObject*) self->enabled_row);
+   g_object_thaw_notify ((GObject*) self->orientation_row);
+@@ -1231,6 +1244,14 @@
+   gboolean use_combo;
+ 
+   self->collapsed = collapsed;
++  if (self->selected_output &&
++      g_strcmp0 (cc_display_monitor_get_connector_name (self->selected_output), "builtin") == 0)
++    {
++      gtk_widget_set_visible (self->scale_combo_row, FALSE);
++      gtk_widget_set_visible (self->scale_buttons_row, FALSE);
++      return;
++    }
++
+   use_combo = self->num_scales > MAX_SCALE_BUTTONS || (self->num_scales > 2 && collapsed);
+ 
+   gtk_widget_set_visible (self->scale_combo_row, use_combo);
+--- a/panels/display/meson.build
++++ b/panels/display/meson.build
+@@ -31,7 +31,6 @@
+ 
+ deps = common_deps + [
+   colord_dep,
+-  gnome_rr_dep,
+   m_dep,
+   upower_glib_dep
+ ]
+--- a/panels/meson.build
++++ b/panels/meson.build
+@@ -1,28 +1,18 @@
+ subdir('common')
+ 
+-dependent_panels = [
+-  'keyboard',
+-]
++dependent_panels = ['keyboard']
+ 
+ panels = [
+   'applications',
+   'background',
+-  'color',
+   'display',
+   'mouse',
+   'multitasking',
+   'notifications',
+-  'online-accounts',
+-  'power',
+-  'printers',
+-  'privacy',
+   'search',
+-  'sharing',
+   'sound',
+-  'system',
+   'universal-access',
+   'wellbeing',
+-  'wwan',
+ ]
+ 
+ if host_is_linux
+--- a/panels/mouse/meson.build
++++ b/panels/mouse/meson.build
+@@ -24,7 +24,6 @@
+ )
+ 
+ deps = common_deps + [
+-  gnome_settings_dep,
+   libdevice_dep,
+   x11_dep,
+   xi_dep
+--- a/shell/cc-panel-loader.c
++++ b/shell/cc-panel-loader.c
+@@ -89,33 +89,21 @@
+   PANEL_TYPE("applications",     cc_applications_panel_get_type,         NULL),
+   PANEL_TYPE("background",       cc_background_panel_get_type,           NULL),
+ #ifdef BUILD_BLUETOOTH
+-  PANEL_TYPE("bluetooth",        cc_bluetooth_panel_get_type,            NULL),
+-#endif
+-  PANEL_TYPE("color",            cc_color_panel_get_type,                NULL),
++#endif
+   PANEL_TYPE("display",          cc_display_panel_get_type,              NULL),
+   PANEL_TYPE("keyboard",         cc_keyboard_panel_get_type,             NULL),
+   PANEL_TYPE("mouse",            cc_mouse_panel_get_type,                NULL),
+   PANEL_TYPE("multitasking",     cc_multitasking_panel_get_type,         NULL),
+ #ifdef BUILD_NETWORK
+-  PANEL_TYPE("network",          cc_network_panel_get_type,              NULL),
+-  PANEL_TYPE("wifi",             cc_wifi_panel_get_type,                 cc_wifi_panel_static_init_func),
+ #endif
+   PANEL_TYPE("notifications",    cc_notifications_panel_get_type,        NULL),
+-  PANEL_TYPE("online-accounts",  cc_online_accounts_panel_get_type,      NULL),
+-  PANEL_TYPE("power",            cc_power_panel_get_type,                NULL),
+-  PANEL_TYPE("printers",         cc_printers_panel_get_type,             NULL),
+-  PANEL_TYPE("privacy",          cc_privacy_panel_get_type,              NULL),
+   PANEL_TYPE("search",           cc_search_panel_get_type,               NULL),
+-  PANEL_TYPE("sharing",          cc_sharing_panel_get_type,              cc_sharing_panel_static_init_func),
+   PANEL_TYPE("sound",            cc_sound_panel_get_type,                NULL),
+-  PANEL_TYPE("system",           cc_system_panel_get_type,               NULL),
+   PANEL_TYPE("universal-access", cc_ua_panel_get_type,                   NULL),
+ #ifdef BUILD_WACOM
+-  PANEL_TYPE("wacom",            cc_wacom_panel_get_type,                cc_wacom_panel_static_init_func),
+ #endif
+   PANEL_TYPE("wellbeing",        cc_wellbeing_panel_get_type,            NULL),
+ #ifdef BUILD_WWAN
+-  PANEL_TYPE("wwan",             cc_wwan_panel_get_type,                 cc_wwan_panel_static_init_func),
+ #endif
+ };
+ 
+@@ -131,15 +119,9 @@
+   const gchar *name;
+ } CcSubpageLoaderVtable;
+ 
+-static CcSubpageLoaderVtable default_subpages[] =
+-{
+-  {CC_CATEGORY_SYSTEM, "about"},
+-  {CC_CATEGORY_SYSTEM, "datetime"},
+-  {CC_CATEGORY_SYSTEM, "region"},
+-  {CC_CATEGORY_SYSTEM, "users"},
+-};
++static CcSubpageLoaderVtable default_subpages[] = { { 0, NULL } };
+ static CcSubpageLoaderVtable *subpages_vtable = default_subpages;
+-static gsize supages_vtable_len = G_N_ELEMENTS (default_subpages);
++static gsize supages_vtable_len = 0;
+ 
+ static int
+ parse_categories (GDesktopAppInfo *app)
+--- a/shell/style-dark.css
++++ b/shell/style-dark.css
+@@ -1 +1 @@
+-@import url("resource:///org/gnome/control-center/wellbeing/wellbeing-dark.css");
++/* This native build does not yet include the Wellbeing panel. */
+--- a/shell/style-hc.css
++++ b/shell/style-hc.css
+@@ -1 +1 @@
+-@import url("resource:///org/gnome/control-center/wellbeing/wellbeing-hc.css");
++/* This native build does not yet include the Wellbeing panel. */

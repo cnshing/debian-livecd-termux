@@ -4,6 +4,7 @@ TERMUX_PKG_LICENSE="GPL-2.0-or-later"
 TERMUX_PKG_LICENSE_FILE="COPYING"
 TERMUX_PKG_MAINTAINER="@cnshing"
 TERMUX_PKG_VERSION="48.8"
+TERMUX_PKG_REVISION=1
 TERMUX_PKG_SRCURL=(
 	"https://download.gnome.org/sources/gnome-settings-daemon/48/gnome-settings-daemon-48.1.tar.xz"
 	"https://github.com/GNOME/localsearch/archive/refs/tags/3.9.0.tar.gz"
@@ -12,7 +13,7 @@ TERMUX_PKG_SHA256=(
 	3860a2ea214dcbcb6600ae7a1e3358a5389215087bc3e4a47cee3f87baee062e
 	6d8d5ff2a2320632e2cd14ef5a9c6a57d67430ac71d36428a257404a81dcf943
 )
-TERMUX_PKG_DEPENDS="gnome-session, livecd-gnome-shell (= 48.8), livecd-gnome-data"
+TERMUX_PKG_DEPENDS="gnome-session, livecd-gnome-shell (= 48.8-1), livecd-gnome-data"
 TERMUX_PKG_CONFLICTS="livecd-gi-paths, mutter-x11-frames"
 TERMUX_PKG_PLATFORM_INDEPENDENT=true
 TERMUX_PKG_BUILD_IN_SRC=true

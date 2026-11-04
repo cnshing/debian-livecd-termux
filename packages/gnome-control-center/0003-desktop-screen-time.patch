@@ -1,0 +1,14 @@
+Explain the scope of native desktop screen-time accounting.
+
+--- a/panels/wellbeing/cc-wellbeing-panel.ui
++++ b/panels/wellbeing/cc-wellbeing-panel.ui
+@@ -15,7 +15,8 @@
+           <object class="AdwPreferencesPage">
+             <child>
+               <object class="AdwPreferencesGroup">
+-                <property name="title" translatable="yes">Screen Time</property>
++                <property name="title" translatable="yes">Desktop Screen Time</property>
++                <property name="description" translatable="yes">Tracks activity in this desktop session. Android app usage is not included.</property>
+                 <child type="header-suffix">
+                   <object class="GtkMenuButton" id="screen_time_statistics_info_button">
+                     <property name="tooltip-text" translatable="yes">More Information</property>

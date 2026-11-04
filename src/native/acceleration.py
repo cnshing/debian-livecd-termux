@@ -310,7 +310,116 @@ def prepare(profile, command, abi, video_override):
     return argv, env
 
 
+def gio_bridge(arguments):
+    # GVfs FUSE is unavailable, so GIO hands mpv raw smb:// URIs that neither
+    # mpv nor Termux FFmpeg can open. Serve them from the session's GIO mount
+    # over loopback HTTP with Range support; the random token keeps other apps out.
+    if not any(argument.startswith('smb://') for argument in arguments):
+        return arguments
+    import secrets
+    import threading
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+    from urllib.parse import quote
+    from gi.repository import Gio, GLib
+
+    def info(file):
+        attributes = 'standard::size,standard::content-type'
+        try:
+            return file.query_info(attributes, Gio.FileQueryInfoFlags.NONE, None)
+        except GLib.Error as error:
+            if not error.matches(Gio.io_error_quark(), Gio.IOErrorEnum.NOT_MOUNTED):
+                raise
+        loop, errors = GLib.MainLoop(), []
+        def mounted(source, result):
+            try:
+                source.mount_enclosing_volume_finish(result)
+            except GLib.Error as error:
+                errors.append(error)
+            loop.quit()
+        file.mount_enclosing_volume(Gio.MountMountFlags.NONE, None, None, mounted)
+        loop.run()
+        if errors:
+            raise errors[0]
+        return file.query_info(attributes, Gio.FileQueryInfoFlags.NONE, None)
+
+    token, files, result = secrets.token_urlsafe(16), {}, []
+    for argument in arguments:
+        if argument.startswith('smb://'):
+            file = Gio.File.new_for_uri(argument)
+            try:
+                details = info(file)
+            except GLib.Error as error:
+                print('livecd-accelerate: ' + argument + ': ' + error.message, file=sys.stderr)
+            else:
+                key = str(len(files))
+                files[key] = (file, details.get_size(), details.get_content_type() or 'application/octet-stream')
+                result.append(f'/{token}/{key}/{quote(file.get_basename())}')
+                continue
+        result.append(argument)
+
+    class Handler(BaseHTTPRequestHandler):
+        def log_message(self, *args):
+            pass
+
+        def do_HEAD(self):
+            self.serve(False)
+
+        def do_GET(self):
+            self.serve(True)
+
+        def serve(self, body):
+            parts = self.path.split('/')
+            if len(parts) < 3 or parts[1] != token or parts[2] not in files:
+                self.send_error(404)
+                return
+            file, size, kind = files[parts[2]]
+            start, end = 0, size - 1
+            match = re.fullmatch(r'bytes=(\d*)-(\d*)', self.headers.get('Range', ''))
+            if match and match[1]:
+                start = int(match[1])
+                end = min(int(match[2]), end) if match[2] else end
+            elif match and match[2]:
+                start = max(size - int(match[2]), 0)
+            if match and start >= size:
+                self.send_response(416)
+                self.send_header('Content-Range', f'bytes */{size}')
+                self.end_headers()
+                return
+            self.send_response(206 if match else 200)
+            self.send_header('Content-Type', kind)
+            self.send_header('Accept-Ranges', 'bytes')
+            self.send_header('Content-Length', str(end - start + 1))
+            if match:
+                self.send_header('Content-Range', f'bytes {start}-{end}/{size}')
+            self.end_headers()
+            if not body:
+                return
+            stream = file.read(None)
+            try:
+                stream.seek(start, GLib.SeekType.SET, None)
+                left = end - start + 1
+                while left > 0:
+                    data = stream.read_bytes(min(left, 1 << 20), None).get_data()
+                    if not data:
+                        break
+                    self.wfile.write(data)
+                    left -= len(data)
+            except (BrokenPipeError, ConnectionResetError):
+                pass  # mpv drops the connection whenever it seeks.
+            finally:
+                stream.close(None)
+
+    server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
+    server.daemon_threads = True
+    server.handle_error = lambda *args: None
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    origin = f'http://127.0.0.1:{server.server_address[1]}'
+    return [origin + argument if argument.startswith(f'/{token}/') else argument for argument in result]
+
+
 def launch(profile, command, abi, video_override):
+    if profile == 'mpv':
+        command = [command[0], *gio_bridge(command[1:])]
     argv, env = prepare(profile, command, abi, video_override)
     process = subprocess.Popen(argv, env=env)
     def forward(number, frame):

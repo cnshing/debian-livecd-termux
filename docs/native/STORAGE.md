@@ -85,6 +85,14 @@ readable directories, mount-added/changed/removed signals, no periodic rescans,
 no bookmark writes and no unsupported eject actions. Scanner and migration tests
 cover storage access, duplicate views, device labels, escaped paths and custom
 bookmark preservation. Physical card/USB hotplug has not been performed.
-Local UI/device captures are under `temp/storage-mounts/`.
+On the Android 11 phone, the Actions-built package activated on demand and
+reported Internal storage and SD card as real GIO `GProxyMount` objects with
+readable native roots. Both directories enumerated successfully. The old helper
+process, autostart entry and owned bookmarks were removed; the bookmarks file
+was empty while GIO still reported both storage mounts. The provider inherited
+the desktop's process ownership tag. Eight scanner/migration checks and the
+isolated GIO integration test also passed on the phone.
+Local device results are under `temp/storage-mounts/`, including
+`device-final.json` and `integration-phone.json`.
 
 For network shares, see [LAN hostname resolution](LAN-HOSTNAMES.md).

@@ -1,0 +1,4 @@
+[org/gnome/gnome-screenshot]
+delay=3
+include-pointer=false
+default-file-type='png'

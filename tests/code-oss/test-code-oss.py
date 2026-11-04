@@ -801,7 +801,12 @@ def main():
         if fixture:
             note('launcher_crashes', fixture.launcher_crashes)
             fixture.close()
+            # Extension helpers, such as GitLens's gk hook, can take a few seconds to exit.
+            deadline = time.monotonic() + 10
             left = fixture.session_pids()
+            while left and time.monotonic() < deadline:
+                time.sleep(0.5)
+                left = fixture.session_pids()
             check('nothing_left_running', not left, left)
             for pid in {*left, *fixture.brokers}:
                 try:

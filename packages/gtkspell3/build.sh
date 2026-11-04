@@ -17,4 +17,6 @@ TERMUX_PKG_EXTRA_CONFIGURE_ARGS="
 
 termux_step_pre_configure() {
 	termux_setup_gir
+	# configure takes vapigen from pkg-config, which names the target's binary, so override it for make.
+	TERMUX_PKG_EXTRA_MAKE_ARGS+=" VAPIGEN=${GI_CROSS_LAUNCHER%/*}/vapigen"
 }

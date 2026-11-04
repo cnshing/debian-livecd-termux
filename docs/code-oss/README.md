@@ -16,7 +16,8 @@ account signed in. Most checks ran on a private display. The real desktop and a 
 
 ## Install
 
-With the desktop stopped, in native Termux, from this repository:
+`install.sh` applies the `Text Editor+Code OSS` overlay by default. To apply it again, with the desktop
+stopped, in native Termux, from this repository:
 
 ```sh
 python src/apply-overlays.py "Text Editor+Code OSS"

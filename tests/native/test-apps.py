@@ -80,27 +80,6 @@ def main():
         return proc
 
     try:
-        doc = ROOT / f'editor-{os.getpid()}.txt'
-        doc.write_text('before\n')
-        app('editor', ['gnome-text-editor', str(doc)])
-        wid = window(doc.name)
-        activate(wid)
-        # The title precedes asynchronous document loading and first GL paint.
-        # Allow the initial native window to finish loading before typing.
-        time.sleep(6)
-        xd('key', 'ctrl+End')
-        xd('key', 'Return')
-        xd('type', '--clearmodifiers', '--delay', '5', 'edited through X11 on the phone')
-        xd('key', 'ctrl+s')
-        for _ in range(40):
-            if 'edited through X11' in doc.read_text():
-                break
-            time.sleep(0.25)
-        assert doc.read_text().rstrip() == 'before\nedited through X11 on the phone'
-        results['editor_open_edit_save'] = doc.read_text()
-        shot('editor')
-        print('EDITOR_PASS', flush=True)
-
         app('nautilus', ['nautilus', str(ROOT)])
         for _ in range(80):
             try:

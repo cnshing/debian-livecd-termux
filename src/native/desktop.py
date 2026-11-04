@@ -220,16 +220,16 @@ def cleanup(tag):
         raise RuntimeError('Owned processes survived cleanup: ' + str(remaining))
 
 
-def launch_terminal(env, cwd, emulator='gnome-terminal'):
+def terminal_command(cwd):
+    return [str(PREFIX / 'bin/ghostty'), '--gtk-single-instance=false', '--working-directory=' + cwd]
+
+
+def launch_terminal(env, cwd, emulator='ghostty'):
     if not isinstance(cwd, str) or not cwd.startswith('/') or '\0' in cwd or len(cwd) > 4096 or not Path(cwd).is_dir():
         raise ValueError('Expected an existing absolute native directory')
-    if emulator == 'ghostty':
-        command = [str(PREFIX / 'bin/ghostty'), '--gtk-single-instance=false', '--working-directory=' + cwd]
-    elif emulator == 'gnome-terminal':
-        command = ['gnome-terminal', '--wait', '--working-directory=' + cwd, '--', str(PREFIX / 'bin/bash'), '-l']
-    else:
+    if emulator != 'ghostty':
         raise ValueError('Unknown native terminal emulator')
-    return subprocess.Popen(command, env=env, cwd=cwd, start_new_session=True)
+    return subprocess.Popen(terminal_command(cwd), env=env, cwd=cwd, start_new_session=True)
 
 
 def standalone_terminal(cwd):
@@ -245,8 +245,7 @@ def standalone_terminal(cwd):
         raise SystemExit(128 + signum)
     signal.signal(signal.SIGTERM, terminate)
     signal.signal(signal.SIGINT, terminate)
-    child = subprocess.Popen(['dbus-run-session', '--', 'gnome-terminal', '--wait',
-        '--working-directory=' + cwd, '--', str(PREFIX / 'bin/bash'), '-l'], env=env)
+    child = subprocess.Popen(['dbus-run-session', '--', *terminal_command(cwd)], env=env)
     try:
         return child.wait()
     finally:
@@ -441,7 +440,7 @@ def run(safe, renderer='software'):
                         result = {'ok': True}
                     elif mode in ('termux', 'terminal'):
                         terminal_env = apply_renderer(live_env.copy(), message['renderer']) if message.get('renderer') else live_env
-                        child = launch_terminal(terminal_env, message.get('cwd', str(Path.home())), message.get('emulator', 'gnome-terminal'))
+                        child = launch_terminal(terminal_env, message.get('cwd', str(Path.home())), message.get('emulator', 'ghostty'))
                         children.append(child)
                         result = {'ok': True, 'pid': child.pid}
                     else:
@@ -486,7 +485,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('action', choices=['start', 'stop', 'status', 'terminal', 'exec', 'validate', 'select', '_run', '_inner', '_standalone'])
     parser.add_argument('--safe', action='store_true')
-    parser.add_argument('--emulator', choices=['gnome-terminal', 'ghostty'], default='gnome-terminal')
+    parser.add_argument('--emulator', choices=['ghostty'], default='ghostty')
     parser.add_argument('--renderer', choices=['software', 'zink'])
     args, rest = parser.parse_known_args()
     if args.renderer and args.action not in ('start', '_run', 'exec', 'terminal', 'select'):
@@ -547,7 +546,7 @@ def main():
             with open(STATE / 'terminal.log', 'ab', buffering=0) as log:
                 child = subprocess.Popen([sys.executable, str(BASE / 'desktop.py'), '_standalone', cwd],
                     stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
-            result = {'ok': True, 'standalone': True, 'pid': child.pid, 'emulator': 'gnome-terminal'}
+            result = {'ok': True, 'standalone': True, 'pid': child.pid, 'emulator': 'ghostty'}
         print(json.dumps(result))
     elif args.action == 'select':
         status = request('status')

@@ -3,8 +3,7 @@
 #   bash install.sh "Audio Effects"
 #   python src/apply-overlays.py "Desktop Environment+Phone Sync"
 #
-# Opt-in overlays: Audio Effects, Browser+Chromium, Desktop Environment+Phone Sync, Microphone, Music Player,
-# Text Editor+Code OSS
+# Opt-in overlays: Audio Effects, Browser+Chromium, Desktop Environment+Phone Sync, Microphone, Music Player
 overlays:
 - Desktop Environment
 - Desktop Environment+Shell
@@ -14,6 +13,7 @@ overlays:
 - Terminal
 - File Manager
 - Text Editor
+- Text Editor+Code OSS
 - Image Viewer
 - Video Player
 - System Monitor

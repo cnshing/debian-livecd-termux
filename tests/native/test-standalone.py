@@ -29,7 +29,7 @@ def wait(predicate):
 
 
 def window():
-    result = subprocess.run(['xdotool', 'search', '--onlyvisible', '--class', 'gnome-terminal'], env=env, text=True, capture_output=True)
+    result = subprocess.run(['xdotool', 'search', '--onlyvisible', '--class', 'ghostty'], env=env, text=True, capture_output=True)
     return result.stdout.splitlines()
 
 

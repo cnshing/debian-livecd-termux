@@ -90,11 +90,10 @@ repository's WhiteSur/Colloid assets, wallpapers, font choices, lock restriction
 and startup preferences. Fonts and extension data taken from Debian packages
 are architecture-independent assets; Debian executables and libraries are excluded.
 
-Native Nautilus, GNOME Text Editor, Firefox with signed uBlock Origin,
-LibreOffice, mpv-x and xfce4-taskmanager provide the application workflows.
-GNOME Terminal is the default terminal; Ghostty is available with its existing
-close-button limitation. Both use their packages' own launchers and
-start a login shell (`temp/docs/evidence/native/stock-launchers.txt`). Ghostty reads
+Native Nautilus, [Code OSS](../code-oss/README.md), Firefox with signed uBlock Origin,
+LibreOffice, mpv-x and [Mission Center](../mission-center/README.md) provide the application workflows.
+Ghostty is the only terminal, with its existing close-button limitation. It uses its package's own launcher and
+starts a login shell (`temp/docs/evidence/native/stock-launchers.txt`). Ghostty reads
 `~/.config/livecd-native/ghostty/config.ghostty`, which installing keeps, and which
 loads the theme from `appearance.ghostty`, which installing replaces.
 Nautilus offers **Scripts → Open in Terminal**, passing
@@ -105,13 +104,12 @@ updates remain enabled, and the final device check recorded signed 1.75.0.
 
 ```sh
 livecd-native terminal "$HOME/Documents"
-livecd-native terminal --emulator ghostty "$HOME/Documents"
 livecd-native exec -- nautilus "$HOME/Documents"
-livecd-native exec -- xfce4-taskmanager
+livecd-native exec -- missioncenter
 ```
 
 The terminal command can open an independent recovery terminal when GNOME is
-stopped, provided Termux:X11 is already running. It uses GNOME Terminal and a
+stopped, provided Termux:X11 is already running. It uses Ghostty and a
 private bus. Native terminals never enter Debian.
 
 [EasyEffects/AutoEq](../audio/README.md) and [GSConnect](../gsconnect/README.md)
@@ -124,7 +122,6 @@ the effects graph or establish GSConnect Shell-panel integration.
 [Chromium, Google Chrome and Firefox's other extensions](../browsers/README.md) are also a
 separate opt-in port, and appear in this desktop's menu once installed.
 [Mixtapes](../mixtapes/README.md) is another, with its own menu entry.
-[Code OSS](../code-oss/README.md) is another, with GitHub and SSH extensions from Open VSX.
 
 ## Session integrations
 
@@ -213,9 +210,8 @@ Still open after the fixes:
 
 - With six taskbar entries, the last one slides under the status icons, as
   Ghostty's did (`temp/docs/evidence/native/icons-panel-ghostty.png`).
-- The dock's Terminal pin has not been seen since it moved to the stock `org.gnome.Terminal.desktop`. Shell's
-  tracker assigns Terminal's windows to that entry (`temp/docs/evidence/native/window-tracker-census.txt`), so it should
-  highlight, where the old launcher got a separate entry (`temp/docs/evidence/native/icons-panel-terminal.png`).
+- The dock's pins changed from GNOME Terminal and GNOME Text Editor to Ghostty and Code OSS, and the new pins
+  have not been seen on the phone.
 - Chromium's first-run terms dialog sets no `WM_CLASS`, so it depends on its startup ID. One copy on the
   desktop had none and showed the generic icon, and what started that copy is not known. Launched from the
   panel it had one and matched (`temp/docs/evidence/native/window-tracker-census.txt`).
@@ -376,7 +372,7 @@ shared Termux package upgrades.
 
 ## System resource access
 
-The System Monitor and Mission Center overlays install the [shared resource backend](../resources/README.md).
+The System Monitor overlay installs the [shared resource backend](../resources/README.md).
 With this controller version installed, after `livecd-resources-setup` and a desktop restart, native session applications inherit its
 on-demand `/proc` and supported `/sys` compatibility layer. This enables whole-device CPU
 and Android process data in ordinary monitors, including `top`, `htop` and libgtop clients.

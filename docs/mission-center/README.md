@@ -43,9 +43,7 @@ the fixed reader into a private, shell-owned directory under `/data/local/tmp`.
 Repeat setup after removing that directory or updating the reader. No Termux
 APK patch, PRoot, preload shim, SELinux change, or additional Shizuku APK is used.
 
-The optional `System Monitor+Mission Center` overlay installs the package when
-available from the repository. The existing System Monitor overlay remains
-available separately.
+The default System Monitor overlay installs the package.
 
 ## Supported data and failure behavior
 

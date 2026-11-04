@@ -28,14 +28,12 @@ SCRATCH = Path(tempfile.mkdtemp(prefix='window-icons-', dir=os.environ['TMPDIR']
 (SCRATCH / 'firefox').mkdir()
 APPLICATIONS = {
     'Firefox': ['firefox', '--profile', str(SCRATCH / 'firefox'), '--no-remote', 'about:blank'],
-    'GNOME Text Editor': ['gnome-text-editor', '--standalone', '--ignore-session'],
+    'Code OSS': ['code-oss', '--user-data-dir=' + str(SCRATCH / 'code-oss'), '--new-window'],
     'Nautilus': ['nautilus', '--new-window', str(SCRATCH)],
-    'GNOME Terminal': ['gnome-terminal', '--wait'],
     'Ghostty': ['ghostty'],
     'Ghostty menu entry': ['gtk-launch', 'com.mitchellh.ghostty'],
-    'Terminal menu entry': ['gtk-launch', 'org.gnome.Terminal'],
     'mpv': ['mpv', '--force-window=yes', '--idle=yes', '--vo=x11', '--ao=null', '--no-config'],
-    'Task Manager': ['xfce4-taskmanager'],
+    'Mission Center': ['missioncenter'],
     'Mixtapes': ['env', 'XDG_DATA_HOME=' + str(SCRATCH / 'data'), 'XDG_CACHE_HOME=' + str(SCRATCH / 'cache'), 'mixtapes'],
     'Chromium': ['chromium-browser', '--user-data-dir=' + str(SCRATCH / 'chromium'), '--no-first-run', 'about:blank'],
     'Google Chrome': ['google-chrome', '--user-data-dir=' + str(SCRATCH / 'chrome'), '--no-first-run', 'about:blank'],

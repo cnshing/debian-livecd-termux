@@ -75,12 +75,9 @@ def main():
 
     try:
         fixtures = Path.home() / 'Documents/livecd-native-validation'
-        editor = fixtures / f'gpu-editor-{os.getpid()}.txt'
-        editor.write_text('Native GTK GPU rendering validation.\n')
         folder = fixtures / f'gpu-folder-{os.getpid()}'
         folder.mkdir()
         for name, arguments, title in [
-            ('editor', ['gnome-text-editor', '--new-window', str(editor)], editor.name),
             ('nautilus', ['nautilus', '--new-window', str(folder)], folder.name),
         ]:
             launch(name, arguments)

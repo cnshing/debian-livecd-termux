@@ -12,7 +12,7 @@ from desktop import STATE, request, process_identity
 
 
 def windows():
-    result = subprocess.run(['xdotool', 'search', '--onlyvisible', '--class', 'gnome-terminal'], text=True, capture_output=True)
+    result = subprocess.run(['xdotool', 'search', '--onlyvisible', '--class', 'ghostty'], text=True, capture_output=True)
     return set(result.stdout.splitlines())
 
 

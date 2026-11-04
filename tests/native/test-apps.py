@@ -169,7 +169,8 @@ def main():
                 '--rate=48000', '--channels=2'], stdout=capture, stderr=subprocess.DEVNULL)
             try:
                 time.sleep(0.5)
-                subprocess.run(['paplay', str(tone)], check=True, timeout=15)
+                # Name the sink: with a Bluetooth headset connected, the default is the headset.
+                subprocess.run(['paplay', '--device=OpenSL_ES_sink', str(tone)], check=True, timeout=15)
                 time.sleep(0.5)
             finally:
                 recorder.terminate()

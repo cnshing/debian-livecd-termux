@@ -21,5 +21,5 @@ termux_step_pre_configure() {
 	export CARGO_TARGET_DIR=$TERMUX_PKG_CACHEDIR/cargo-target
 	export APP_ID=org.gnome.Loupe VERSION=$TERMUX_PKG_VERSION LOCALEDIR=$TERMUX_PREFIX/share/locale
 	local target=${CARGO_TARGET_NAME//-/_}
-	export "CARGO_TARGET_${target^^}_RUSTFLAGS=${RUSTFLAGS:-} -C link-arg=-liconv"
+	export CARGO_TARGET_${target^^}_RUSTFLAGS+=" -C link-arg=-liconv"
 }

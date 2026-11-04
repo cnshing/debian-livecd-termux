@@ -117,6 +117,14 @@ printf 'Package: %s\nPin: release n=livecd\nPin-Priority: 1001\n' "$ours" > "$PR
 # replace a newer Termux build of one of our packages.
 apt=(apt-get -y --allow-downgrades -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold)
 apt-get update
+# Termux's mirror picker can choose a mirror that stopped syncing; one served a ten-month-old index
+# without packages this desktop needs. Use Termux's own server then, as termux-change-repo can.
+index=$(ls "$PREFIX"/var/lib/apt/lists/*termux-main_dists_stable_*Release 2>/dev/null | head -n 1 || true)
+if test -n "$index" && test $(( $(date +%s) - $(date -d "$(sed -n 's/^Date: //p' "$index")" +%s) )) -gt 1209600; then
+    echo "The Termux mirror in $PREFIX/etc/apt/sources.list is out of date; using packages-cf.termux.dev."
+    printf 'deb https://packages-cf.termux.dev/apt/termux-main stable main\n' > "$PREFIX/etc/apt/sources.list"
+    apt-get update
+fi
 # Termux supports only whole upgrades: new packages link against libraries, such as libc++,
 # that are newer than a fresh bootstrap's. This also finishes an earlier interrupted run.
 "${apt[@]}" --fix-broken full-upgrade

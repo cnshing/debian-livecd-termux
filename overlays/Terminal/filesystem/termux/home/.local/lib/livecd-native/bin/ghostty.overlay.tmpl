@@ -1,0 +1,4 @@
+#!@TERMUX_PREFIX@/bin/sh
+# Ghostty 1.4 cannot create its terminal surface while GTK also draws through GL on Zink
+# (error.BadAccess). GTK's own widgets draw with Cairo; the terminal still renders with OpenGL.
+GSK_RENDERER=cairo exec @TERMUX_PREFIX@/bin/ghostty "$@"

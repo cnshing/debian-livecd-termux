@@ -229,7 +229,9 @@ def launch_terminal(env, cwd, emulator='ghostty'):
         raise ValueError('Expected an existing absolute native directory')
     if emulator != 'ghostty':
         raise ValueError('Unknown native terminal emulator')
-    return subprocess.Popen(terminal_command(cwd), env=env, cwd=cwd, start_new_session=True)
+    # As the Terminal overlay's launcher does: Ghostty 1.4 cannot create its surface while GTK
+    # also draws through GL on Zink. The terminal itself still renders with OpenGL.
+    return subprocess.Popen(terminal_command(cwd), env={**env, 'GSK_RENDERER': 'cairo'}, cwd=cwd, start_new_session=True)
 
 
 def standalone_terminal(cwd):

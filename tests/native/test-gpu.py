@@ -40,7 +40,18 @@ def activate(wid):
 def named_window(name):
     result = subprocess.run(['xdotool', 'search', '--onlyvisible', '--name', name],
                             capture_output=True, text=True, timeout=5)
-    return result.stdout.splitlines()[-1] if result.stdout.strip() else None
+    # Mutter's frame windows copy the title. Current vkcube's own window does not match a
+    # name search, but takes the focus when it maps.
+    clients = [wid for wid in result.stdout.split() if 'mutter-x11-frames' not in
+               subprocess.run(['xprop', '-id', wid, 'WM_CLASS'], capture_output=True, text=True).stdout]
+    if clients:
+        return clients[-1]
+    if result.stdout.strip():
+        active = subprocess.run(['xdotool', 'getactivewindow'], capture_output=True, text=True).stdout.strip()
+        title = subprocess.run(['xdotool', 'getwindowname', active], capture_output=True, text=True).stdout.strip()
+        if active and re.search(name, title):
+            return active
+    return None
 
 
 def gpu_process(pid):

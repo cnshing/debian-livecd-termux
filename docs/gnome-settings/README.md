@@ -126,9 +126,19 @@ Android. The bridge has no WI-C310-specific device filter. See
 On the phone, enabling `livecd-mic` produced a visible **Microphone** input and
 level meter in Sound. With an Android-connected WI-C310, the bridge produced
 visible **WI-C310 Headphones** and **WI-C310 Microphone** controls in Sound.
-The older test-phone controller's missing integration hook was staged for its
-next start, with a backup; its running desktop was kept alive. These checks cover
-device discovery and the input meter, not a new end-to-end call-quality test.
+The Bluetooth source also delivered 96,000 samples in a two-second capture probe;
+the probe discarded the audio. The older test-phone controller's missing
+integration hook and component helper were staged for its next start, with
+backups; its running desktop was kept alive. The startup integration recognized
+and reused the active headset without claiming ownership of its controller.
+These checks cover device discovery, sample delivery and the input meter, not a
+new end-to-end call-quality test. Only one Android microphone route is exposed
+at a time, as intended: phone microphone or Bluetooth call microphone.
+
+The wallpaper update and catalog regression check passed the single
+[Settings build set](https://github.com/cnshing/debian-livecd-termux/actions/runs/41804013338)
+at source revision `a0207b2`. All 52 wallpaper files were checked against their
+Git blob hashes at the pinned upstream revision before inclusion.
 
 ## Build and validate
 

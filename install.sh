@@ -7,6 +7,9 @@ set -euo pipefail
 test "${PREFIX:-}" = /data/data/com.termux/files/usr || { echo 'Run in native com.termux, outside PRoot.' >&2; exit 2; }
 test "$(dpkg --print-architecture)" = aarch64 || { echo 'The pinned GNOME runtime requires aarch64.' >&2; exit 2; }
 repo=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+mkdir -p "$HOME/.local/state/livecd"
+exec > >(tee -a "$HOME/.local/state/livecd/install.log") 2>&1
+echo "=== install.sh $(date '+%F %T') $*"
 # The desktop's Android integrations need these apps. Termux cannot install them, so name what is missing.
 missing=
 for app in com.termux.x11=Termux:X11 com.termux.api=Termux:API moe.shizuku.privileged.api=Shizuku; do
@@ -37,6 +40,8 @@ case $(rish id 2>/dev/null) in
 esac
 # Termux:API shares Termux's user ID, so its microphone permission covers the desktop's processes.
 rish pm grant com.termux.api android.permission.RECORD_AUDIO
+# Android otherwise stops a backgrounded desktop to save battery.
+rish dumpsys deviceidle whitelist +com.termux >/dev/null
 release=https://github.com/cnshing/debian-livecd-termux/releases/latest/download
 tarball_name=livecd-termux-repo-aarch64.tar.gz
 tarball=

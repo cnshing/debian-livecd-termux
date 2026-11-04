@@ -10,12 +10,14 @@ PREFIX = Path('/data/data/com.termux/files/usr')
 def component_environment(component, arguments=(), inherited=None):
     env = dict(os.environ if inherited is None else inherited)
     # Audio clients keep the desktop's bus/settings; controllers and GSConnect
-    # use their existing native profiles and shared Termux libraries.
+    # use their existing native profiles and shared Termux libraries, which their
+    # RUNPATH finds. Naming $PREFIX/lib in LD_LIBRARY_PATH would instead put
+    # libandroid-stub's libOpenSLES.so and libmediandk.so ahead of Android's.
     if not (component == 'livecd-audio' and list(arguments[:1]) == ['exec']):
         for key in ('GI_TYPELIB_PATH', 'GJS_PATH', 'GSETTINGS_SCHEMA_DIR', 'DCONF_PROFILE',
                     'GNOME_SHELL_DATADIR', 'GNOME_SHELL_LIBDIR'):
             env.pop(key, None)
-        env['LD_LIBRARY_PATH'] = str(PREFIX / 'lib')
+        env.pop('LD_LIBRARY_PATH', None)
         for variable, directory in [('XDG_CONFIG_HOME', '.config'), ('XDG_DATA_HOME', '.local/share'),
                                     ('XDG_CACHE_HOME', '.cache'), ('XDG_STATE_HOME', '.local/state')]:
             env[variable] = str(Path.home() / directory)

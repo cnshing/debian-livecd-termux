@@ -206,8 +206,12 @@ class PulseDevices:
         self.directory = tempfile.TemporaryDirectory(prefix="livecd-bt-", dir=PREFIX / "tmp")
         fifo = Path(self.directory.name) / "output.pcm"
         os.mkfifo(fifo, 0o600)
+        # The player finds Termux's libraries through its RUNPATH. Listing $PREFIX/lib in
+        # LD_LIBRARY_PATH, as the desktop session does, puts libandroid-stub's libOpenSLES.so
+        # ahead of Android's, and its engine then fails with error 12.
+        environment = {key: value for key, value in os.environ.items() if key != "LD_LIBRARY_PATH"}
         self.player = subprocess.Popen([str(PLAYER), str(fifo)], stdin=subprocess.DEVNULL,
-                stdout=subprocess.PIPE, stderr=self.log, text=True)
+                stdout=subprocess.PIPE, stderr=self.log, text=True, env=environment)
         if not select.select([self.player.stdout], [], [], 5)[0]:
             raise RouteError("Native Bluetooth voice player did not start within five seconds.")
         line = self.player.stdout.readline()

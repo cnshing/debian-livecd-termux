@@ -53,7 +53,24 @@ package does not rewrite DNS settings or install a global `.local` resolver.
 
 ## Verification
 
-Runtime results are recorded after testing the Actions artifacts. Host, share,
-user and volume names belong in local environment variables or ignored evidence,
-not source or reports. A test against one server cannot establish compatibility
-with every SMB server or Android release.
+The Actions-built `gvfs` and `livecd-avahi` packages were installed on an
+Android 11 Galaxy Note10+ and checked inside the native desktop with
+`tests/native/test-network-shares.py` against one LAN SMB server:
+
+| Check | Result |
+|---|---|
+| SMB and DNS-SD backends registered with GIO | Pass |
+| `avahi-daemon` running rootless on the private system bus | Pass |
+| Direct `smb://HOST/SHARE` mount and directory listing | Pass |
+| Server's `_smb._tcp` service listed in `dns-sd://local/` and Network | Pass |
+| Discovered entry opens and lists the server's shares | Pass |
+
+Discovered SMB entries point to the server's address rather than its `.local`
+name, which Android's resolver cannot look up. The first listing of
+`dns-sd://local/` starts the backend and can return empty; entries appear a few
+seconds later as Avahi reports them. Nautilus updates in place, and the test
+polls for up to 20 seconds.
+
+Host, share, user and volume names belong in local environment variables or
+ignored evidence, not source or reports. A test against one server cannot
+establish compatibility with every SMB server or Android release.

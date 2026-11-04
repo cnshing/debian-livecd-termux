@@ -8,6 +8,7 @@ only check results; server addresses and directory entries are not printed.
 import json
 import os
 import sys
+import time
 
 from gi.repository import Gio, GLib
 
@@ -72,12 +73,19 @@ def main():
     except GLib.Error as error:
         result['share_directory_readable'] = False
         result['share_error_code'] = error.code
-    try:
-        found = entries('dns-sd://local/')
-        result['smb_service_discovered'] = any('_smb._tcp' in x.get_name() for x in found)
-    except GLib.Error as error:
-        result['smb_service_discovered'] = False
-        result['discovery_error_code'] = error.code
+    # The first listing starts gvfsd-dnssd, which fills in as Avahi's browse
+    # results arrive; Nautilus watches the location, so poll the same way.
+    result['smb_service_discovered'] = False
+    deadline = time.monotonic() + 20
+    while not result['smb_service_discovered'] and time.monotonic() < deadline:
+        try:
+            found = entries('dns-sd://local/')
+            result['smb_service_discovered'] = any('_smb._tcp' in x.get_name() for x in found)
+        except GLib.Error as error:
+            result['discovery_error_code'] = error.code
+            break
+        if not result['smb_service_discovered']:
+            time.sleep(2)
     print(json.dumps(result, indent=2))
     return 0 if all(result.get(key) for key in ('smb_backend', 'dnssd_backend',
                    'share_directory_readable', 'smb_service_discovered')) else 1

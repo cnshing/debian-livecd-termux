@@ -93,11 +93,12 @@ fi
 mkdir -p "$repo/repo"
 rm -rf "$repo/repo/dists" "$repo/repo/pool"
 tar -xzf "$tarball" -C "$repo"
+# A fresh Termux has neither directory.
+mkdir -p "$PREFIX/etc/apt/sources.list.d" "$PREFIX/etc/apt/preferences.d"
 # trusted=yes because this index is not signed; the tarball's checksum is the only check.
 printf 'deb [trusted=yes] file://%s livecd main\n' "$repo/repo" > "$PREFIX/etc/apt/sources.list.d/livecd.list"
 # Our builds carry the Android patches, so a same-named package from Termux's mirrors must not
 # replace them, even at a newer version. Packages only on those mirrors are unaffected.
-mkdir -p "$PREFIX/etc/apt/preferences.d"
 printf 'Package: *\nPin: release n=livecd\nPin-Priority: 1001\n' > "$PREFIX/etc/apt/preferences.d/livecd"
 apt-get install -y x11-repo
 apt-get update

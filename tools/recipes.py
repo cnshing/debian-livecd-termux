@@ -2,7 +2,8 @@
 """Plan CI builds and check patches for the recipes in packages/.
 
   recipes.py plan [--all] [NAME...]    Print the GitHub Actions build matrix as JSON.
-  recipes.py changed BASE              Print the packages changed since the commit BASE.
+  recipes.py unbuilt < MATRIX          Drop the sets an earlier run already built, for CI.
+  recipes.py artifact NAME             Print the download URL of a set's packages from an earlier run.
   recipes.py check-patches [NAME...]   Apply each recipe's patches to its pinned source.
   recipes.py prepare CHECKOUT         Stage recipes in the pinned Termux checkout.
   recipes.py order NAME...            Print packages and local dependencies in build order.
@@ -19,6 +20,8 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import urllib.parse
+import urllib.request
 
 PACKAGES = Path(__file__).resolve().parents[1] / 'packages'
 BUILD_CONFIG = Path(__file__).with_name('termux-build.json')
@@ -38,6 +41,10 @@ EXACT_DEPENDENCIES = {'chromium'}
 # Build-machine libraries that a recipe's own tools link when it is cross-compiled. They are installed
 # in the builder container before the build, since termux-packages refuses sudo inside a recipe.
 HOST_PACKAGES = {'lsp-plugins-lv2': ['libcairo2-dev', 'libsndfile1-dev']}
+# CI reuses a set's packages while everything it is built from stays the same: its recipes, the builder
+# revision and the settings above. Bump this after changing how CI builds packages in some other way,
+# so that every set is built again.
+BUILD_EPOCH = 1
 # What termux-packages fills in when it applies a patch; the values only matter for applying.
 PLACEHOLDERS = {'@TERMUX_PREFIX@': '/data/data/com.termux/files/usr', '@TERMUX_HOME@': '/data/data/com.termux/files/home'}
 READ = '''set +u
@@ -87,6 +94,7 @@ def directory_hash(names):
 
 def plan(names):
     """One job per dependent set: a job holds its targets and the recipes they need from here."""
+    revision = json.loads(BUILD_CONFIG.read_text())['revision']
     ours = set(all_names())
     needs = {name: read_recipe(name)['depends'] & ours for name in ours}
     selected, pending = set(), list(names)
@@ -126,11 +134,16 @@ def plan(names):
         if not separate and group[name] <= covered:
             continue
         ordered = closure(group[name])
+        exact = bool(group[name] & EXACT_DEPENDENCIES)
+        hosts = host_packages(ordered)
+        inputs = json.dumps([BUILD_EPOCH, revision, exact, hosts, directory_hash(ordered)])
         include.append({'name': '_'.join(sorted(group[name])), 'packages': ' '.join(ordered),
                         'hash': directory_hash(ordered), 'large': bool(group[name] & LARGE),
                         'timeout': SEPARATE_TIMEOUT if separate else TIMEOUT,
-                        'exact': bool(group[name] & EXACT_DEPENDENCIES),
-                        'host_packages': ' '.join(host_packages(ordered))})
+                        'exact': exact, 'host_packages': ' '.join(hosts),
+                        # Names the set's packages after everything they are built from.
+                        'artifact': 'debs-{}-{}'.format(sorted(group[name])[0],
+                                                        hashlib.sha256(inputs.encode()).hexdigest()[:16])})
     return {'include': include}
 
 
@@ -138,25 +151,31 @@ def host_packages(names):
     return sorted({package for name in names for package in HOST_PACKAGES.get(name, [])})
 
 
-def changed(base):
-    try:
-        output = subprocess.check_output(['git', 'diff', '--name-only', base, 'HEAD'],
-                                         cwd=PACKAGES.parent, text=True, stderr=subprocess.DEVNULL)
-    except subprocess.CalledProcessError:
-        # A new branch or a force push has no usable base.
-        return all_names()
-    paths = [Path(line) for line in output.splitlines()]
-    if any(str(path) in ('tools/recipes.py', 'tools/termux-build.json', '.github/workflows/packages.yml')
-           for path in paths):
-        return all_names()
-    selected = {path.parts[1] for path in paths if len(path.parts) > 1 and path.parts[0] == 'packages'}
-    changed_paths = {PACKAGES.parent / path for path in paths}
-    # Local source and shared helper links are part of their owning recipes.
-    for name in all_names():
-        if any(path.is_symlink() and path.resolve() in changed_paths
-               for path in (PACKAGES / name).rglob('*')):
-            selected.add(name)
-    return sorted(selected & set(all_names()))
+def built_artifact(name):
+    """The newest unexpired artifact NAME from this run or from the default branch of this repository.
+
+    Runs from forks and other branches are left out, so a pull request cannot supply released packages.
+    """
+    url = '{}/repos/{}/actions/artifacts?name={}&per_page=100'.format(
+        os.environ.get('GITHUB_API_URL', 'https://api.github.com'), os.environ['GITHUB_REPOSITORY'],
+        urllib.parse.quote(name))
+    request = urllib.request.Request(url, headers={'Authorization': 'Bearer ' + os.environ['GH_TOKEN'],
+                                                   'Accept': 'application/vnd.github+json'})
+    with urllib.request.urlopen(request) as response:
+        artifacts = json.load(response)['artifacts']
+    for artifact in artifacts:
+        run = artifact.get('workflow_run') or {}
+        if artifact['expired'] or artifact['name'] != name:
+            continue
+        if str(run.get('id')) == os.environ.get('GITHUB_RUN_ID') or (
+                run.get('head_branch') == os.environ['DEFAULT_BRANCH']
+                and run.get('head_repository_id') == run.get('repository_id')):
+            return artifact
+    return None
+
+
+def unbuilt(matrix):
+    return {'include': [job for job in matrix['include'] if not built_artifact(job['artifact'])]}
 
 
 def build_order(names):
@@ -266,7 +285,8 @@ def main():
     planner = commands.add_parser('plan')
     planner.add_argument('--all', action='store_true')
     planner.add_argument('names', nargs='*')
-    commands.add_parser('changed').add_argument('base')
+    commands.add_parser('unbuilt')
+    commands.add_parser('artifact').add_argument('name')
     commands.add_parser('check-patches').add_argument('names', nargs='*')
     commands.add_parser('prepare').add_argument('checkout')
     commands.add_parser('order').add_argument('names', nargs='+')
@@ -278,8 +298,12 @@ def main():
     args = parser.parse_args()
     if args.command == 'plan':
         print(json.dumps(plan(all_names() if args.all else checked(args.names))))
-    elif args.command == 'changed':
-        print(' '.join(changed(args.base)))
+    elif args.command == 'unbuilt':
+        print(json.dumps(unbuilt(json.load(sys.stdin))))
+    elif args.command == 'artifact':
+        artifact = built_artifact(args.name)
+        if artifact:
+            print(artifact['archive_download_url'])
     elif args.command == 'prepare':
         prepare_builder(args.checkout)
     elif args.command == 'order':

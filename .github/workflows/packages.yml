@@ -4,15 +4,19 @@
 #   One or several packages:  Actions > Packages > Run workflow, packages: "nautilus easyeffects"
 #                             or: gh workflow run packages.yml -f packages="nautilus easyeffects"
 #   Every package:            leave packages empty.
+#   Build again anyway:       add rebuild: true, or -f rebuild=true.
 #   Publish a release:        push a tag such as v1, or set release: v1 with packages left empty.
-#   Pushes and pull requests build only the packages they change, and publish nothing. A push counts
-#   every change since the last push whose run succeeded, so a cancelled or failed run's packages
-#   are built by the next one.
+#   Pushes and pull requests publish nothing.
 #
 # Each dependent set of recipes gets its own job, so unrelated packages build concurrently. A job
 # always includes the recipes from this repository that its target depends on, for example
 # nautilus brings gnome-autoar. Chromium always has a job of its own, with its libva, because
 # it alone takes most of the six hours a job may run. See tools/recipes.py.
+#
+# A set is built once. Its packages are kept as an artifact named after everything they are built
+# from, and any later run that asks for the same set takes them from there instead, whatever else
+# that earlier run did. So a set's job depends only on whether that set was built, never on a whole
+# run succeeding, and the apt repository is assembled from each set's newest build.
 name: Packages
 
 on:
@@ -23,9 +27,13 @@ on:
         required: false
         default: ""
       release:
-        description: Release tag to publish. Needs a full build, so leave packages empty.
+        description: Release tag to publish. Needs every package, so leave packages empty.
         required: false
         default: ""
+      rebuild:
+        description: Build the sets even if an earlier run already built them.
+        type: boolean
+        default: false
   push:
     tags: ["v*"]
     branches: [main]
@@ -36,10 +44,6 @@ on:
 permissions:
   contents: read
 
-concurrency:
-  group: packages-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
-
 env:
   # The builder revision and matching NDK image are pinned in tools/termux-build.json.
   REPO_TARBALL: livecd-termux-repo-aarch64.tar.gz
@@ -49,17 +53,16 @@ jobs:
     runs-on: ubuntu-26.04
     permissions:
       contents: read
-      actions: read  # To find the last successful run.
+      actions: read  # To find the sets earlier runs built.
     outputs:
       matrix: ${{ steps.plan.outputs.matrix }}
       count: ${{ steps.plan.outputs.count }}
+      artifacts: ${{ steps.plan.outputs.artifacts }}
       release: ${{ steps.plan.outputs.release }}
       revision: ${{ steps.config.outputs.revision }}
       image: ${{ steps.config.outputs.image }}
     steps:
     - uses: actions/checkout@v7
-      with:
-        fetch-depth: 0
     - name: Test the AutoEq converter
       run: python3 tests/audio/test-autoeq.py
     - name: Test Bluetooth microphone session cleanup
@@ -74,51 +77,49 @@ jobs:
       env:
         INPUT_PACKAGES: ${{ inputs.packages }}
         INPUT_RELEASE: ${{ inputs.release }}
-        PR_BASE: ${{ github.event.pull_request.base.sha }}
+        INPUT_REBUILD: ${{ inputs.rebuild }}
         GH_TOKEN: ${{ github.token }}
+        DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
       run: |
         set -f  # Package names are split into words below, and must not expand as globs.
         release=
-        case "$GITHUB_EVENT_NAME" in
-          workflow_dispatch)
-            release=$INPUT_RELEASE
-            if test -z "$INPUT_PACKAGES"; then
-              matrix=$(python3 tools/recipes.py plan --all)
-            elif test -n "$release"; then
-              # install.sh takes the latest release as complete, so a partial one would break it.
-              echo "::error::A release needs every package: leave packages empty."
-              exit 1
-            else
-              matrix=$(python3 tools/recipes.py plan $INPUT_PACKAGES)
-            fi;;
-          pull_request)
-            matrix=$(python3 tools/recipes.py plan $(python3 tools/recipes.py changed "$PR_BASE"));;
-          *)
-            if test "$GITHUB_REF_TYPE" = tag; then
-              release=$GITHUB_REF_NAME
-              matrix=$(python3 tools/recipes.py plan --all)
-            else
-              # Not the previous commit: GitHub cancels a waiting run when a newer push queues, and
-              # that run's changes would otherwise never be built.
-              base=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/packages.yml/runs?branch=$GITHUB_REF_NAME&event=push&status=success&per_page=1" \
-                --jq '.workflow_runs[0].head_sha // empty')
-              if test -n "$base"; then
-                echo "Building changes since $base, the last successful push run."
-                matrix=$(python3 tools/recipes.py plan $(python3 tools/recipes.py changed "$base"))
-              else
-                matrix=$(python3 tools/recipes.py plan --all)
-              fi
-            fi;;
-        esac
+        if test "$GITHUB_EVENT_NAME" = workflow_dispatch; then
+          release=$INPUT_RELEASE
+        elif test "$GITHUB_REF_TYPE" = tag; then
+          release=$GITHUB_REF_NAME
+        fi
+        if test -z "$INPUT_PACKAGES"; then
+          requested=$(python3 tools/recipes.py plan --all)
+        elif test -n "$release"; then
+          # install.sh takes the latest release as complete, so a partial one would break it.
+          echo "::error::A release needs every package: leave packages empty."
+          exit 1
+        else
+          requested=$(python3 tools/recipes.py plan $INPUT_PACKAGES)
+        fi
+        if test "$INPUT_REBUILD" = true; then
+          matrix=$requested
+        else
+          matrix=$(printf '%s' "$requested" | python3 tools/recipes.py unbuilt)
+        fi
+        artifacts=$(printf '%s' "$requested" | python3 -c 'import json,sys; print(" ".join(job["artifact"] for job in json.load(sys.stdin)["include"]))')
         count=$(printf '%s' "$matrix" | python3 -c 'import json,sys; print(len(json.load(sys.stdin)["include"]))')
-        printf 'matrix=%s\ncount=%s\nrelease=%s\n' "$matrix" "$count" "$release" >> "$GITHUB_OUTPUT"
-        printf 'Building %s job(s): %s\n' "$count" "$matrix"
+        printf 'matrix=%s\ncount=%s\nartifacts=%s\nrelease=%s\n' "$matrix" "$count" "$artifacts" "$release" >> "$GITHUB_OUTPUT"
+        printf 'Building %s of the requested sets: %s\n' "$count" "$matrix"
 
   build:
     name: ${{ matrix.name }}
     needs: plan
     if: needs.plan.outputs.count != '0'
     runs-on: ubuntu-26.04
+    permissions:
+      contents: read
+      actions: read  # To find a set that another run built while this job waited.
+    # One job at a time per set, across runs. A job that waited here for another run's build of the
+    # same set finds that build's packages below and stops there.
+    concurrency:
+      group: packages-${{ matrix.artifact }}
+      cancel-in-progress: false
     # Set per job by tools/recipes.py, which gives chromium the most GitHub allows.
     timeout-minutes: ${{ matrix.timeout }}
     env:
@@ -130,18 +131,34 @@ jobs:
       matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
     steps:
     - uses: actions/checkout@v7
+    - name: Look for this set's packages from another run
+      id: earlier
+      if: inputs.rebuild != true
+      env:
+        ARTIFACT: ${{ matrix.artifact }}
+        GH_TOKEN: ${{ github.token }}
+        DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+      run: |
+        if test -n "$(python3 tools/recipes.py artifact "$ARTIFACT")"; then
+          echo "Another run already built $ARTIFACT."
+          echo built=true >> "$GITHUB_OUTPUT"
+        fi
     - name: Check that the patches still apply
+      if: steps.earlier.outputs.built != 'true'
       env:
         PACKAGES: ${{ matrix.packages }}
       run: python3 tools/recipes.py check-patches $PACKAGES
     - uses: actions/checkout@v7
+      if: steps.earlier.outputs.built != 'true'
       with:
         repository: termux/termux-packages
         ref: ${{ env.TERMUX_PACKAGES_COMMIT }}
         path: termux-packages
     - name: Add this repository's recipes
+      if: steps.earlier.outputs.built != 'true'
       run: python3 tools/recipes.py prepare termux-packages
     - name: Keep the builder's work directory on the runner, where it can be cached
+      if: steps.earlier.outputs.built != 'true'
       run: |
         mkdir -p ~/.termux-build
         echo "TERMUX_DOCKER_RUN_EXTRA_ARGS=--volume $HOME/.termux-build:/home/builder/.termux-build" >> "$GITHUB_ENV"
@@ -154,12 +171,14 @@ jobs:
     # Chromium's 1.9 GB source, which downloads in seconds.
     - name: Restore the host tools
       id: tools
+      if: steps.earlier.outputs.built != 'true'
       uses: actions/cache/restore@v6
       with:
         path: ~/.termux-build/_cache
         key: termux-host-tools-${{ env.TERMUX_PACKAGES_COMMIT }}-${{ matrix.name }}
     - name: Restore dependency packages and sources
       id: deps
+      if: steps.earlier.outputs.built != 'true'
       uses: actions/cache/restore@v6
       with:
         path: |
@@ -170,10 +189,11 @@ jobs:
         restore-keys: termux-downloads-${{ env.TERMUX_PACKAGES_COMMIT }}-${{ matrix.name }}-
 
     - name: Start the builder container
+      if: steps.earlier.outputs.built != 'true'
       working-directory: termux-packages
       run: ./scripts/run-docker.sh true
     - name: Install the build-machine libraries that recipes' own tools link
-      if: matrix.host_packages != ''
+      if: steps.earlier.outputs.built != 'true' && matrix.host_packages != ''
       working-directory: termux-packages
       env:
         HOST_PACKAGES: ${{ matrix.host_packages }}
@@ -185,11 +205,12 @@ jobs:
         ./scripts/run-docker.sh env DEBIAN_FRONTEND=noninteractive \
           apt-get -o APT::Sandbox::User=root install -yqq --no-install-recommends $HOST_PACKAGES
     - name: Free disk space
-      if: matrix.large
+      if: steps.earlier.outputs.built != 'true' && matrix.large
       working-directory: termux-packages
       run: ./scripts/free-space.sh
     - name: Build
       id: build
+      if: steps.earlier.outputs.built != 'true'
       working-directory: termux-packages
       env:
         PACKAGES: ${{ matrix.packages }}
@@ -223,28 +244,43 @@ jobs:
           !~/.termux-build/chromium/cache/chromium-*-linux.tar.xz
         key: ${{ steps.deps.outputs.cache-primary-key }}
 
+    # Kept for later runs, which take the set from here while it stays the same. 90 days is the most
+    # GitHub keeps an artifact; after that the set is simply built again.
     - uses: actions/upload-artifact@v7
+      if: steps.build.outcome == 'success'
       with:
-        name: debs-${{ matrix.name }}
+        name: ${{ matrix.artifact }}
         path: termux-packages/output/*.deb
         if-no-files-found: error
-        # Only the assemble job needs these.
-        retention-days: 1
+        retention-days: 90
 
   assemble:
-    # Skipped unless every build job succeeded, so a release is never missing a package.
+    # Skipped unless every set built here succeeded, so a release is never missing a package.
     needs: [plan, build]
-    if: needs.plan.outputs.count != '0'
+    if: >-
+      ${{ !cancelled() && needs.plan.result == 'success'
+      && (needs.build.result == 'success' || needs.build.result == 'skipped')
+      && (needs.plan.outputs.count != '0' || needs.plan.outputs.release != '') }}
     runs-on: ubuntu-26.04
     permissions:
       contents: write
+      actions: read  # To download the sets earlier runs built.
     steps:
     - uses: actions/checkout@v7
-    - uses: actions/download-artifact@v8
-      with:
-        pattern: debs-*
-        path: debs
-        merge-multiple: true
+    - name: Collect every set's packages, from this run or the one that built them
+      env:
+        ARTIFACTS: ${{ needs.plan.outputs.artifacts }}
+        GH_TOKEN: ${{ github.token }}
+        DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+      run: |
+        mkdir -p debs
+        for artifact in $ARTIFACTS; do
+          url=$(python3 tools/recipes.py artifact "$artifact")
+          test -n "$url" || { echo "::error::No build of $artifact was found."; exit 1; }
+          # curl does not pass the token on to the storage host the download redirects to.
+          curl -fsSL --retry 3 -H "Authorization: Bearer $GH_TOKEN" -o "$RUNNER_TEMP/$artifact.zip" "$url"
+          unzip -oq "$RUNNER_TEMP/$artifact.zip" -d debs
+        done
     - name: Build the apt repository tarball
       run: |
         command -v apt-ftparchive >/dev/null || { sudo apt-get update; sudo apt-get install --yes apt-utils; }

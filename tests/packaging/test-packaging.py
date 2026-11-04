@@ -88,9 +88,34 @@ class Packaging(unittest.TestCase):
                 else:
                     probe.assert_called_once_with(str(library) + ':' + termux_exec)
 
-    def test_native_source_changes_schedule_the_desktop_package(self):
-        with mock.patch.object(recipes.subprocess, 'check_output', return_value='src/native/desktop.py\n'):
-            self.assertIn('livecd-desktop', recipes.changed('before'))
+    def test_build_inputs_name_the_reused_packages(self):
+        def artifact():
+            return recipes.plan(['lsp-plugins-lv2'])['include'][0]['artifact']
+        first = artifact()
+        self.assertTrue(first.startswith('debs-lsp-plugins-lv2-'))
+        self.assertEqual(first, artifact())
+        with mock.patch.object(recipes, 'BUILD_EPOCH', recipes.BUILD_EPOCH + 1):
+            self.assertNotEqual(first, artifact())
+        with mock.patch.object(recipes, 'HOST_PACKAGES', {}):
+            self.assertNotEqual(first, artifact())
+
+    def test_reused_packages_come_only_from_this_run_or_the_default_branch(self):
+        def candidate(id, branch, run, fork=False, expired=False):
+            return {'id': id, 'name': 'debs-x', 'expired': expired,
+                    'workflow_run': {'id': run, 'head_branch': branch, 'repository_id': 1,
+                                     'head_repository_id': 2 if fork else 1}}
+        def found(artifacts, run_id='99'):
+            response = mock.MagicMock()
+            response.__enter__.return_value = io.StringIO(json.dumps({'artifacts': artifacts}))
+            env = {'GITHUB_REPOSITORY': 'o/r', 'GH_TOKEN': 't', 'DEFAULT_BRANCH': 'main', 'GITHUB_RUN_ID': run_id}
+            with mock.patch.dict(os.environ, env), \
+                    mock.patch.object(recipes.urllib.request, 'urlopen', return_value=response):
+                artifact = recipes.built_artifact('debs-x')
+            return artifact and artifact['id']
+        self.assertEqual(found([candidate(1, 'feature', 5), candidate(2, 'main', 6, fork=True),
+                                candidate(3, 'main', 7, expired=True), candidate(4, 'main', 8)]), 4)
+        self.assertEqual(found([candidate(1, 'feature', 99), candidate(4, 'main', 8)]), 1)
+        self.assertIsNone(found([candidate(1, 'feature', 5), candidate(2, 'main', 6, fork=True)]))
 
     def test_source_changes_invalidate_the_package_cache(self):
         with tempfile.TemporaryDirectory() as temporary:

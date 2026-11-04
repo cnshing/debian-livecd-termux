@@ -146,10 +146,22 @@ python src/apply-overlays.py "Audio Effects"
 | Several packages | `gh workflow run packages.yml -f packages="nautilus easyeffects"` |
 | Everything | `gh workflow run packages.yml` |
 | Everything, and publish a release | Push a tag such as `v1`, or add `-f release=v1` |
-| Only what changed | Automatic on pushes to `main` and on pull requests that change `packages/`. A push builds everything changed since the last push whose run succeeded, so nothing from a cancelled or failed run is skipped |
+| Only what is not built yet | Automatic on pushes to `main` and on pull requests that change `packages/` |
+| A set again, although it was built | Add `-f rebuild=true` |
 
-Only a full build can publish, because `install.sh` takes the latest release as complete. The result of any
-other run is available as a workflow artifact, and `install.sh --repo-tarball` can install it.
+Only a full set of packages can be published, because `install.sh` takes the latest release as complete. The
+result of any run is available as a workflow artifact, and `install.sh --repo-tarball` can install it.
+
+**Each set is built once.** A set's packages are kept for 90 days as an artifact named after everything they
+are built from: the set's recipes, including the `src/` files they link to, the builder revision, and the
+per-set settings in `tools/recipes.py`. A run builds only the sets it asks for that have no such artifact
+from `main`, and the repository tarball and releases are assembled from each set's newest one, whichever run
+built it. So one set never waits for, or depends on, a whole run succeeding: a failed set is built again by
+the next run, and the others are taken as they are. Each set's job also runs one at a time across runs, and
+a job that waited for another run's build of the same set takes that build instead of repeating it. Builds
+from pull requests and other branches are never reused for `main`. After changing how CI builds packages in
+some way the artifact names cannot see, such as the build command, bump `BUILD_EPOCH` in
+`tools/recipes.py` so that every set is built again.
 
 **Parallel jobs.** Each group of recipes that depend on each other is one job, and groups run at the same time,
 up to 20. A job always includes the recipes from this repository that its target needs, so

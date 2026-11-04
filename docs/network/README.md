@@ -63,13 +63,30 @@ Android 11 Galaxy Note10+ and checked inside the native desktop with
 | `avahi-daemon` running rootless on the private system bus | Pass |
 | Direct `smb://HOST/SHARE` mount and directory listing | Pass |
 | Server's `_smb._tcp` service listed in `dns-sd://local/` and Network | Pass |
-| Discovered entry opens and lists the server's shares | Pass |
+| Discovered entry opens and lists the same server's shares | Pass |
+| Desktop stop removes its daemon; restart starts a new owned daemon | Pass |
 
 Discovered SMB entries point to the server's address rather than its `.local`
 name, which Android's resolver cannot look up. The first listing of
 `dns-sd://local/` starts the backend and can return empty; entries appear a few
 seconds later as Avahi reports them. Nautilus updates in place, and the test
-polls for up to 20 seconds.
+polls for up to 20 seconds. The acceptance check matches discovery results to
+the server supplied in `SMB_TEST_URI`, opens its advertised target, and verifies
+its Network entry. It passed again after a desktop stop/start cycle.
+
+```sh
+SMB_TEST_URI='smb://HOST/SHARE' livecd-native exec -- python tests/native/test-network-shares.py
+```
+
+The checks mounted and enumerated directories without modifying remote files.
+Authenticated accounts, remote writes, other server implementations, and newer
+Android versions were not tested. Ordinary `.local` lookups still follow
+Android's resolver; discovery works by using the address Avahi supplies.
+
+GitHub Actions built only the `livecd-avahi gvfs` set and checked its packaged
+Android executables, dynamic dependencies and GVfs mount definitions. Host tests
+cover the one-job plan and private-session startup boundary. Local device
+results are retained under `temp/` and are excluded from Git.
 
 Host, share, user and volume names belong in local environment variables or
 ignored evidence, not source or reports. A test against one server cannot

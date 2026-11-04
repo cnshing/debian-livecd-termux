@@ -7,8 +7,10 @@ only check results; server addresses and directory entries are not printed.
 """
 import json
 import os
+import socket
 import sys
 import time
+from urllib.parse import urlsplit
 
 from gi.repository import Gio, GLib
 
@@ -76,19 +78,44 @@ def main():
     # The first listing starts gvfsd-dnssd, which fills in as Avahi's browse
     # results arrive; Nautilus watches the location, so poll the same way.
     result['smb_service_discovered'] = False
+    result['discovered_server_readable'] = False
+    result['network_entry_visible'] = False
+    server = urlsplit(uri).hostname
+    addresses = {row[4][0] for row in socket.getaddrinfo(server, None)}
+
+    def matches(item):
+        target = item.get_attribute_string('standard::target-uri') or ''
+        return urlsplit(target).hostname in addresses | {server}
+
+    advertised = None
     deadline = time.monotonic() + 20
     while not result['smb_service_discovered'] and time.monotonic() < deadline:
         try:
             found = entries('dns-sd://local/')
-            result['smb_service_discovered'] = any('_smb._tcp' in x.get_name() for x in found)
+            advertised = next((item.get_attribute_string('standard::target-uri')
+                               for item in found if '_smb._tcp' in item.get_name() and matches(item)), None)
+            result['smb_service_discovered'] = advertised is not None
         except GLib.Error as error:
             result['discovery_error_code'] = error.code
             break
         if not result['smb_service_discovered']:
             time.sleep(2)
+    if advertised:
+        try:
+            entries(advertised)
+            result['discovered_server_readable'] = True
+            # Network is populated asynchronously from the same DNS-SD backend.
+            deadline = time.monotonic() + 10
+            while not result['network_entry_visible'] and time.monotonic() < deadline:
+                result['network_entry_visible'] = any(matches(item) for item in entries('network:///'))
+                if not result['network_entry_visible']:
+                    time.sleep(1)
+        except GLib.Error as error:
+            result['discovered_server_error_code'] = error.code
     print(json.dumps(result, indent=2))
     return 0 if all(result.get(key) for key in ('smb_backend', 'dnssd_backend',
-                   'share_directory_readable', 'smb_service_discovered')) else 1
+                   'share_directory_readable', 'smb_service_discovered',
+                   'discovered_server_readable', 'network_entry_visible')) else 1
 
 
 if __name__ == '__main__':

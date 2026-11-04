@@ -225,14 +225,37 @@ def panels_ui_test():
         Gio.Settings.sync()
 
 
+def backgrounds_test():
+    import xml.etree.ElementTree as ET
+    import gi
+    gi.require_version('GdkPixbuf', '2.0')
+    from gi.repository import GdkPixbuf
+    data = Path(os.environ['XDG_DATA_HOME'])
+    catalog = data / 'gnome-background-properties/livecd.xml'
+    assert catalog.is_file(), 'Apply the Desktop Environment+Theming overlay to register wallpapers'
+    items = ET.parse(catalog).getroot().findall('wallpaper')
+    assert len(items) == 52, f'Expected the complete upstream collection, found {len(items)}'
+    for item in items:
+        filename = item.findtext('filename')
+        assert Path(filename).is_file(), filename
+        preview = GdkPixbuf.Pixbuf.new_from_file_at_scale(filename, 160, 100, True)
+        assert preview.get_width() > 0 and preview.get_height() > 0, filename
+    print('PASS: all 52 registered LiveCD wallpapers decode for Appearance previews')
+
+
 def main():
     if '--session' not in sys.argv:
         subprocess.run([sys.executable, __file__, '--session', *sys.argv[1:]],
                        env=session_environment(), check=True)
         return
+    if '--backgrounds-only' in sys.argv:
+        backgrounds_test()
+        return
     panels_test()
     notification_test()
     wellbeing_test()
+    if '--backgrounds' in sys.argv:
+        backgrounds_test()
     if '--resolution' in sys.argv:
         resolution_test()
     if '--panels-ui' in sys.argv:

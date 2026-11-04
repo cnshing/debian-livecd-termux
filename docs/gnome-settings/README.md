@@ -95,6 +95,41 @@ The existing `livecd-appearance@local` extension handles WhiteSur/Colloid change
 and the XSettings bridge forwards GTK theme/font/icon/cursor preferences to X11
 applications. Arbitrary theme selection is not a stock Appearance feature.
 
+## Wallpaper collection and microphone devices
+
+The Theming overlay includes all 52 wallpapers and their attribution file from
+the upstream revision recorded in `overlays/UPSTREAM`. On Termux, the overlay
+applier copies them to `~/.local/share/livecd-native/backgrounds`, rather than
+Android's unavailable `/usr/share/backgrounds`. Its registration hook generates
+`~/.local/share/livecd-native/gnome-background-properties/livecd.xml` with native
+absolute filenames. GNOME Appearance reads catalogs in `XDG_DATA_HOME`; merely
+copying images into a backgrounds directory does not register them. The hook
+refreshes its own catalog and preserves other wallpaper catalogs. Reopen Settings
+after adding a catalog. Device checks verified all 52 Appearance entries and AVIF/
+JPEG preview decoding.
+
+Sound uses PulseAudio's existing source notifications, including cardless OpenSL
+and Bluetooth bridge devices. It does not pair or discover Android Bluetooth
+hardware itself. The existing Microphone overlay supplies `livecd-mic` and
+`livecd-mic-bluetooth`; these must publish a source before Sound can list it.
+`livecd_no_microphone` is an intentional silent fallback, not the phone's microphone.
+
+The current desktop controller starts installed microphone integrations in normal
+sessions: it tries any Android-reported Bluetooth call headset, then falls back
+to the phone microphone. Both hooks can be disabled in the integration settings.
+Older manually staged desktop controllers lack this startup integration. Discovery
+runs at desktop startup or when `livecd-mic-bluetooth on --default` is invoked;
+there is no continuous headset-connect/reconnect watcher. Pair and enable Calls in
+Android. The bridge has no WI-C310-specific device filter. See
+[the microphone guide](../mic/README.md) for permission and Shizuku requirements.
+
+On the phone, enabling `livecd-mic` produced a visible **Microphone** input and
+level meter in Sound. With an Android-connected WI-C310, the bridge produced
+visible **WI-C310 Headphones** and **WI-C310 Microphone** controls in Sound.
+The older test-phone controller's missing integration hook was staged for its
+next start, with a backup; its running desktop was kept alive. These checks cover
+device discovery and the input meter, not a new end-to-end call-quality test.
+
 ## Build and validate
 
 ```sh
@@ -123,6 +158,8 @@ python tests/native/test-settings.py
 python tests/native/test-settings.py --resolution
 # Close Settings first; this opens/closes every compiled panel with fatal criticals:
 python tests/native/test-settings.py --panels-ui
+# Decode every registered LiveCD wallpaper preview:
+python tests/native/test-settings.py --backgrounds-only
 # Run a separate software-rendered Shell with temporary settings/history:
 python tests/native/test-screen-time.py --panels-ui
 # Unit checks for idle/resume and watch cleanup, in the GNOME 48 GJS environment:

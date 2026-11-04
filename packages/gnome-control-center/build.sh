@@ -11,7 +11,7 @@ TERMUX_PKG_SHA256=(
 	f647fa5a1cb176ffcfa65e0e3283981da442c262a0a47560ba64ce0097dd6b98
 	783d3464d2a2cf7eb1507649dbd9ff09ce24852c2a6c9a0d365db84063d3d401
 )
-TERMUX_PKG_DEPENDS="fontconfig, gdk-pixbuf, glib, gnome-desktop4, gsound, gsettings-desktop-schemas, gtk4, ibus, libadwaita, libcairo, libcolord, libepoxy, libx11, libxi, libxml2, pango, pulseaudio, pygobject, python, termux-x11-nightly, upower (>= 1.90.6)"
+TERMUX_PKG_DEPENDS="fontconfig, gdk-pixbuf, glib, gnome-desktop4, gsound, gsettings-desktop-schemas, gtk4, ibus, json-glib, libadwaita, libcairo, libcolord, libepoxy, libx11, libxi, libxml2, pango, pulseaudio, pygobject, python, termux-x11-nightly, upower (>= 1.90.6)"
 TERMUX_PKG_RECOMMENDS="livecd-gnome-runtime"
 TERMUX_PKG_BUILD_DEPENDS="glib-cross"
 TERMUX_PKG_AUTO_UPDATE=false

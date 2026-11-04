@@ -8,7 +8,7 @@ Android settings for notifications or device power.
 ## Current implementation and remaining scope
 
 The package currently builds Appearance, Displays, Notifications, Apps, Sound,
-Multitasking, Search, Mouse & Touchpad, Keyboard and Accessibility. This inventory
+Multitasking, Search, Mouse & Touchpad, Keyboard, Accessibility and Wellbeing. This inventory
 is an initial implementation, **not completion of the requested broader Settings
 port**. Opening a panel is not evidence that every switch has an effective backend.
 
@@ -17,8 +17,8 @@ Power and Night Light. The existing Shell battery indicator and UPower backend
 remain independent of the excluded Power page.
 
 Other upstream panels still need porting: Color, Online Accounts, Printers,
-Privacy & Security, Sharing, System (apart from the excluded Users page), Wacom
-and Wellbeing. They are not compiled in this first build. Their missing Linux
+Privacy & Security, Sharing, System (apart from the excluded Users page) and
+Wacom. They are not compiled in this build. Their missing Linux
 services and libraries must be handled before those panels can be considered
 functional. In particular, shipping a panel must not be taken to mean Android
 system time, system services or hardware devices can be administered from Termux.
@@ -50,6 +50,27 @@ output-disable controls for the virtual `builtin` output are suppressed because
 they would use the failing Mutter apply path. Fractional/integer display scaling,
 physical refresh-rate selection and external-monitor layout are not validated.
 Text scaling through the existing XSettings bridge is a separate setting.
+
+## Wellbeing
+
+Wellbeing edits `org.gnome.desktop.break-reminders` and
+`org.gnome.desktop.screen-time-limits`. Break reminders work: GNOME Shell's
+break manager uses Mutter's idle monitor, and it reports the schedule state on
+`org.gnome.Shell.ScreenTime`.
+
+Screen time does not work yet. Shell's time-limits manager needs logind's user
+`State` and `IdleHint`. This session has no `org.freedesktop.login1`, so Shell
+falls back to its dummy login manager. That manager's `getCurrentUserProxy()`
+never resolves, and Shell's screen-time state machine stops after recording the
+session start:
+
+- The Screen Time chart counts every hour since Shell started, idle time included.
+- Shell never sends the notifications that apply **Screen Time Limit** and its
+  grayscale option, so they have no effect.
+
+The fix belongs in `livecd-gnome-shell`, not in this package: a dummy user whose
+`IdleHint` follows the session idle delay. Until then, these Screen Time
+controls must not be described as working.
 
 ## Notifications and appearance
 
@@ -99,16 +120,19 @@ python tests/native/test-settings.py --panels-ui
 ```
 
 The notification test checks the owning service, notification submission and
-preference access. Manual UI acceptance also confirmed a visible banner with banners enabled and
+preference access. The Wellbeing test turns on a break schedule and waits for
+Shell's break manager to report it. Manual UI acceptance also confirmed a visible banner with banners enabled and
 suppression with Do Not Disturb enabled. Per-application and lock-screen policies
 still require further UI acceptance. The resolution test restores
 the original preferences in a `finally` block.
 
-Device validation so far: the package builds/installs on arm64 Android 11; all ten
-compiled panels open and close with fatal GLib criticals enabled; resolution changes to 1280×720, confirmation, cancel,
+Device validation so far: the package builds/installs on arm64 Android 11; the ten
+panels before Wellbeing open and close with fatal GLib criticals enabled; resolution changes to 1280×720, confirmation, cancel,
 parent-pipe loss and timeout restore passed without restarting GNOME. The GUI
 chooser, confirmation and automatic dismissal after rollback were visually
 inspected. Existing appearance lifecycle/accent tests passed. The port also fixes
 missing template type registrations and deferred sidebar/window work after
-disposal, discovered by the panel smoke test. Broader panel functionality
-remains unfinished.
+disposal, discovered by the panel smoke test. The Wellbeing panel was opened and
+inspected on a private Xvfb display. Break-schedule changes reach Shell. The
+`--panels-ui` run has not yet been repeated with Wellbeing, since it opens
+windows on the live display. Broader panel functionality remains unfinished.

@@ -464,7 +464,7 @@ Native GNOME session build: X11 input discovery and a first panel inventory.
  ]
 --- a/panels/meson.build
 +++ b/panels/meson.build
-@@ -1,28 +1,17 @@
+@@ -1,28 +1,18 @@
  subdir('common')
  
 -dependent_panels = [
@@ -489,7 +489,7 @@ Native GNOME session build: X11 input discovery and a first panel inventory.
    'sound',
 -  'system',
    'universal-access',
--  'wellbeing',
+   'wellbeing',
 -  'wwan',
  ]
  
@@ -506,7 +506,7 @@ Native GNOME session build: X11 input discovery and a first panel inventory.
    xi_dep
 --- a/shell/cc-panel-loader.c
 +++ b/shell/cc-panel-loader.c
-@@ -89,33 +89,20 @@
+@@ -89,33 +89,21 @@
    PANEL_TYPE("applications",     cc_applications_panel_get_type,         NULL),
    PANEL_TYPE("background",       cc_background_panel_get_type,           NULL),
  #ifdef BUILD_BLUETOOTH
@@ -534,15 +534,14 @@ Native GNOME session build: X11 input discovery and a first panel inventory.
    PANEL_TYPE("universal-access", cc_ua_panel_get_type,                   NULL),
  #ifdef BUILD_WACOM
 -  PANEL_TYPE("wacom",            cc_wacom_panel_get_type,                cc_wacom_panel_static_init_func),
--#endif
--  PANEL_TYPE("wellbeing",        cc_wellbeing_panel_get_type,            NULL),
-+#endif
+ #endif
+   PANEL_TYPE("wellbeing",        cc_wellbeing_panel_get_type,            NULL),
  #ifdef BUILD_WWAN
 -  PANEL_TYPE("wwan",             cc_wwan_panel_get_type,                 cc_wwan_panel_static_init_func),
  #endif
  };
  
-@@ -131,15 +118,9 @@
+@@ -131,15 +119,9 @@
    const gchar *name;
  } CcSubpageLoaderVtable;
  

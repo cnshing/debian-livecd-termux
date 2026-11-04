@@ -64,7 +64,7 @@ def main():
         settings.set_string('accent-color', 'red')
         settings.set_string('color-scheme', 'prefer-light')
         wait_for(lambda: 'WhiteSur-Light-solid-red-nord' in owned.read_text()
-                 and settings.get_string('icon-theme') == 'Colloid-Light'
+                 and settings.get_string('icon-theme') == 'Colloid-Red-Light'
                  and settings.get_string('gtk-theme') == 'WhiteSur-Light-solid-red-nord')
         results['light_red_variant'] = settings.get_string('gtk-theme')
         for accent in ('blue','teal','green','yellow','orange','red','pink','purple','slate'):

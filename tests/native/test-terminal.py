@@ -28,7 +28,10 @@ def wait(predicate):
 def gone(pid):
     try:
         return process_identity(pid)[0] == 'Z'
-    except FileNotFoundError:
+    except (FileNotFoundError, ProcessLookupError):
+        return True
+    except OSError:
+        # A process part-way through exiting can answer EIO before /proc drops it.
         return True
 
 

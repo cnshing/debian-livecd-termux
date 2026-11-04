@@ -69,7 +69,7 @@ def install_termux_va(work):
 
 
 def libraries_needed(path):
-    text = subprocess.run(['readelf', '-d', str(path)], capture_output=True, text=True, check=True).stdout
+    text = subprocess.run([shutil.which('readelf') or 'greadelf', '-d', str(path)], capture_output=True, text=True, check=True).stdout
     return [line.split('[')[1].split(']')[0] for line in text.splitlines() if '(NEEDED)' in line]
 
 

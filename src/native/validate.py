@@ -3,6 +3,7 @@
 import json
 import os
 from pathlib import Path
+import shutil
 import signal
 import subprocess
 import sys
@@ -20,7 +21,7 @@ def main():
     def check(name, result, detail=None):
         checks[name] = {'ok': bool(result), 'detail': detail}
 
-    check('native_linker', '/system/bin/linker64' in subprocess.check_output(['readelf', '-l', str(ROOT / 'bin/gnome-shell')], text=True))
+    check('native_linker', '/system/bin/linker64' in subprocess.check_output([shutil.which('readelf') or 'greadelf', '-l', str(ROOT / 'bin/gnome-shell')], text=True))
     check('shell_48', subprocess.check_output([str(ROOT / 'bin/gnome-shell'), '--version'], text=True).strip().startswith('GNOME Shell 48.'))
     check('private_home_config', os.environ.get('XDG_CONFIG_HOME') == str(Path.home() / '.config/livecd-native'))
     sinks = subprocess.check_output(['pactl', 'list', 'short', 'sinks'], text=True)

@@ -4,8 +4,12 @@ import json
 import os
 from pathlib import Path
 import re
+import shutil
 import subprocess
 import sys
+
+# Termux's binutils names GNU readelf greadelf.
+READELF = shutil.which('readelf') or 'greadelf'
 
 
 def audit(root, prefix, extra_roots=()):
@@ -21,7 +25,7 @@ def audit(root, prefix, extra_roots=()):
         if path.resolve() in visited:
             continue
         visited.add(path.resolve())
-        details = subprocess.check_output(['readelf', '-d', '-l', str(path)], text=True)
+        details = subprocess.check_output([READELF, '-d', '-l', str(path)], text=True)
         needed = re.findall(r'\(NEEDED\).*?\[(.*?)\]', details)
         interpreter = re.findall(r'Requesting program interpreter: (.*?)\]', details)
         if interpreter and interpreter != ['/system/bin/linker64']:

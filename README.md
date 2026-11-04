@@ -6,47 +6,76 @@
 A port of [debian-livecd](https://github.com/cnshing/debian-livecd)'s GNOME desktop to native
 Termux on Android, without PRoot. Tested on an arm64 Note10+ running Android 11.
 
-## Requirements by feature
+## Requirements
 
-Start with native Termux and the Termux:X11 Android app. The validated setup uses
-arm64 Android 11 with the standard `com.termux` prefix; other devices and Android
-versions need their own validation. Follow the linked guides for the features you want:
+A fresh arm64 Android phone needs only these apps. The validated setup is an Android 11 Note10+
+with the standard `com.termux` prefix; other devices and Android versions need their own validation.
 
-| Feature set | Requirements and setup |
-| --- | --- |
-| GNOME desktop and native applications | [Native desktop setup](docs/native/README.md#install-and-run), including the separately installed Termux:X11 APK. |
-| Phone microphone | [Microphone setup](docs/mic/README.md#set-up): matching-source Termux:API Android app, microphone permission and the Microphone overlay. |
-| Bluetooth headset microphone and call audio | [Bluetooth setup](docs/mic/README.md#android-managed-bluetooth-audio-devices): microphone setup, running Shizuku with Termux authorized, exported `rish`, and a headset connected in Android with **Calls** enabled. See the [device and Android-version limits](docs/mic/BLUETOOTH.md#android-permission-boundary). |
-| Whole-device CPU, processes and supported sensors | [Resource access setup](docs/resources/README.md#build-and-use): Shizuku, Termux authorization, exported `rish` and `livecd-resources`. |
-| EasyEffects and AutoEq | [Audio effects setup](docs/audio/README.md#build-and-install): Audio Effects overlay and a running Termux PulseAudio server; see [application routing](docs/audio/README.md#run). |
-| GSConnect phone/desktop sync | [GSConnect setup](docs/gsconnect/README.md#build-and-install) and [runtime requirements](docs/gsconnect/README.md#run): Phone Sync overlay, an X display and a compatible peer reachable on the LAN. |
-| GPU rendering and hardware video | [Acceleration guide](docs/native/ACCELERATION.md): compatible device drivers, application backends and codec support; requirements and verified results vary by application. |
-| Battery status and health | [Battery backend requirements](docs/battery/README.md#where-the-numbers-come-from): readable Android battery data, with Termux:API as a fallback; Shizuku enables event updates and supported health readings. |
+1. **Termux**, **Termux:X11** and **Termux:API**, all from the same source (F-Droid or each
+   project's GitHub releases). Android rejects a differently signed mix, because Termux:API
+   shares Termux's user ID.
+2. **Shizuku** (or Shizuku+), running, with Termux allowed under its authorized applications.
+   In Shizuku, choose **Use Shizuku in terminal apps** and export the files to a folder in shared
+   storage, such as `Shizuku/`. The installer finds them there.
 
-Installed optional integrations can follow the desktop's lifetime; see
-[session integration settings](docs/native/README.md#session-integrations).
+Everything else is automatic. `install.sh` asks Android for storage access (accept the prompt), and
+through Shizuku it grants Termux:API's microphone permission, which covers Termux, and exempts Termux
+from battery optimization. It stops with the step to take when an app or permission is missing.
 
 ## Install
 
-Get this repository onto the phone, then run this in native Termux:
+In Termux:
 
 ```sh
-bash install.sh
+pkg install -y git
+git clone https://github.com/cnshing/debian-livecd-termux
+bash debian-livecd-termux/install.sh
 ```
 
+If `pkg` stops at a mirror error, such as `429 Too Many Requests`, run `termux-change-repo`, choose
+another mirror group, and run the command again.
+
 The script fetches the compiled packages from this project's latest release into a local apt
-repository, then installs them and applies the overlays. To add optional features, name their overlays:
-`bash install.sh "Audio Effects"`.
+repository, installs them and applies the default overlays. To use a release tarball you already
+have, run `bash debian-livecd-termux/install.sh --repo-tarball FILE`. Its log is
+`~/.local/state/livecd/install.log`.
 
-To use a tarball you already have, run `bash install.sh --repo-tarball FILE`.
+Then start the desktop. It opens the Termux:X11 app:
 
-`livecd start` also starts installed microphone/Bluetooth,
-EasyEffects and GSConnect integrations and stages the resource reader. They follow
-the desktop's lifetime; see [session integrations](docs/native/README.md#session-integrations)
-for prerequisites, routing and per-feature switches.
+```sh
+livecd start
+```
 
-> **Status:** the programs have been built and tested on a phone, but this install flow has not run,
-> and no release exists yet. See [the status section](docs/structure.md#status).
+`livecd stop` ends it, and `livecd status` reports it. On a Qualcomm GPU, setup installs Mesa's
+Turnip driver and the desktop renders through Zink; elsewhere it renders in software.
+
+The desktop's Android integrations start with it: the phone microphone, or a connected Bluetooth
+headset (pair it in Android with **Calls** enabled), EasyEffects, GSConnect, whole-device CPU and
+process readings for Mission Center, battery status, and internal storage, SD card and USB drives
+in Files. See [session integrations](docs/native/README.md#session-integrations) to switch one off.
+
+### Optional applications
+
+```sh
+livecd-pkg list
+livecd-pkg install mixtapes     # or serein, chromium, ...
+```
+
+`livecd-pkg` adds features and applications that the default installation leaves out. It works while
+the desktop runs, unless the installation would upgrade a library the desktop is using.
+
+### Feature guides
+
+| Feature | Guide |
+| --- | --- |
+| GNOME desktop and native applications | [Native desktop](docs/native/README.md#install-and-run) |
+| Phone microphone and Bluetooth headsets | [Microphone](docs/mic/README.md), [Bluetooth limits](docs/mic/BLUETOOTH.md#android-permission-boundary) |
+| Whole-device CPU, processes and sensors | [Resource access](docs/resources/README.md) |
+| EasyEffects and AutoEq | [Audio effects](docs/audio/README.md), [application routing](docs/audio/README.md#run) |
+| GSConnect phone/desktop sync | [GSConnect](docs/gsconnect/README.md); needs a compatible peer on the LAN |
+| GPU rendering and hardware video | [Acceleration guide](docs/native/ACCELERATION.md); results vary by application |
+| Battery status and health | [Battery backend](docs/battery/README.md#where-the-numbers-come-from) |
+| Shared storage and SD card | [Storage](docs/native/STORAGE.md) |
 
 ## Layout
 

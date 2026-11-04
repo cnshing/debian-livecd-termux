@@ -23,11 +23,11 @@ permission applies to Termux's processes.
 
 1. Install the Termux:API app from the same source as Termux. Android rejects a differently signed
    build. The `termux-api` package alone does not supply the app.
-2. Grant the permission and install the command:
+2. Run `install.sh`. The Microphone overlay is a default, and setup grants the permission through
+   Shizuku. Without Shizuku, grant it from a PC:
 
 ```sh
-adb shell pm grant com.termux.api android.permission.RECORD_AUDIO   # from the PC
-python src/apply-overlays.py Microphone                             # in Termux
+adb shell pm grant com.termux.api android.permission.RECORD_AUDIO
 ```
 
 **The permission then applies to every Termux process, not just one application.** Android 11 shows

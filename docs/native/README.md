@@ -18,33 +18,21 @@ decoding is configured but unverified, and Chromium needs the VA-API-enabled bui
 
 ## Install and run
 
-> **This install flow has not run yet.** `install.sh` needs a release from GitHub Actions, and none exists.
-> [Device results](VERIFICATION.md) describe the earlier on-device flow, which is kept in
-> `.backup/pre-restructure.tar.gz`. The test phone itself now runs the
-> GNOME source port, built on the phone ([verification](VERIFICATION.md)).
-
-In native Termux, from this repository:
+Follow the [root README](../../README.md#install) on a fresh phone: it lists the Android apps and
+the one-time Shizuku export, then runs `install.sh`. That installs the packages, connects the
+packaged runtime, applies the default overlays, grants the Android permissions through Shizuku,
+stages the Turnip GPU driver on Qualcomm GPUs and audits the recursive ELF dependency closure. It
+rejects a running session, and a rerun finishes an interrupted one.
 
 ```sh
-# Stop whichever managed desktop is running before installation or updates.
-~/.local/bin/livecd stop
-bash install.sh
-~/.local/bin/livecd-native start
-~/.local/bin/livecd-native validate
-~/.local/bin/livecd-native select
-
-# Once selected, these commands use the native backend.
-~/.local/bin/livecd start
-~/.local/bin/livecd status
-~/.local/bin/livecd stop
-~/.local/bin/livecd start --safe
+livecd start                       # Zink on Qualcomm GPUs, otherwise software
+livecd status
+livecd validate
+livecd stop
+livecd start --safe                # software rendering, no session integrations
+livecd start --renderer software   # or --renderer zink, for this start only
+livecd select                      # validate the running renderer and save it as the default
 ```
-
-On a new phone, omit the first stop command if no desktop is installed. Install
-the Termux:X11 Android APK separately. Setup fetches this project's latest release into a local
-apt repository, or uses `--repo-tarball FILE`, installs the packages, connects the packaged runtime,
-applies the overlays and audits the recursive ELF dependency closure. It rejects a running session.
-`select` runs the native core validation before saving the renderer as the default.
 
 From the PC rig, use the currently connected serial from `adb devices -l`:
 

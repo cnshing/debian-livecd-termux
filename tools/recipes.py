@@ -87,7 +87,8 @@ def directory_hash(names):
     digest = hashlib.sha256()
     for name in sorted(names):
         for path in sorted((PACKAGES / name).rglob('*')):
-            if path.is_file():
+            # Tests import some recipes' Python, and the bytecode they leave records when that happened.
+            if path.is_file() and '__pycache__' not in path.parts:
                 digest.update(str(path.relative_to(PACKAGES)).encode() + b'\0' + path.read_bytes())
     return digest.hexdigest()[:16]
 

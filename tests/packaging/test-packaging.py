@@ -98,6 +98,15 @@ class Packaging(unittest.TestCase):
             self.assertNotEqual(first, artifact())
         with mock.patch.object(recipes, 'HOST_PACKAGES', {}):
             self.assertNotEqual(first, artifact())
+        # The plan job's tests import recipes' Python first, which writes bytecode into them.
+        bytecode = recipes.PACKAGES / 'lsp-plugins-lv2/__pycache__/probe.pyc'
+        bytecode.parent.mkdir(exist_ok=True)
+        try:
+            bytecode.write_bytes(os.urandom(16))
+            self.assertEqual(first, artifact())
+        finally:
+            bytecode.unlink()
+            bytecode.parent.rmdir()
 
     def test_reused_packages_come_only_from_this_run_or_the_default_branch(self):
         def candidate(id, branch, run, fork=False, expired=False):

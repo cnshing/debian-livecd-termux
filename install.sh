@@ -103,12 +103,13 @@ printf 'deb [trusted=yes] file://%s livecd main\n' "$repo/repo" > "$PREFIX/etc/a
 printf 'Package: *\nPin: release n=livecd\nPin-Priority: 1001\n' > "$PREFIX/etc/apt/preferences.d/livecd"
 # Keep existing configuration files rather than stop at dpkg's question.
 apt=(apt-get -y -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold)
-"${apt[@]}" install x11-repo
 apt-get update
 # Termux supports only whole upgrades: new packages link against libraries, such as libc++,
 # that are newer than a fresh bootstrap's. This also finishes an earlier interrupted run.
 "${apt[@]}" --fix-broken full-upgrade
 dpkg --configure -a
+"${apt[@]}" install x11-repo
+apt-get update
 # An on-device UPower build holds upower, which would stop livecd-upower replacing it.
 if dpkg -s upower >/dev/null 2>&1; then apt-mark unhold upower; fi
 mapfile -t packages < "$repo/src/native/packages.txt"

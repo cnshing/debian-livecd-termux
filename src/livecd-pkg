@@ -28,9 +28,12 @@ case ${1:-} in
             grep -qxF -- "- $name" "$repo/overlays/termux.yaml" && continue
             test -e "$path/packages/termux.yaml" -o -e "$path/hooks/termux" -o -e "$path/filesystem/termux" && echo "  $name"
         done
-        echo 'Applications not installed yet:'
-        sed -n 's/^Package: //p' "$repo"/repo/dists/livecd/main/binary-*/Packages | sort -u |
-            while read -r package; do dpkg -s "$package" >/dev/null 2>&1 || echo "  $package"; done
+        echo 'Packages from this project not installed yet:'
+        for recipe in "$repo"/packages/*/; do
+            package=$(basename -- "$recipe")
+            dpkg -s "$package" >/dev/null 2>&1 && continue
+            printf '  %-22s %s\n' "$package" "$(sed -n 's/^TERMUX_PKG_DESCRIPTION="\(.*\)"$/\1/p' "$recipe/build.sh")"
+        done
         echo 'Short names: mixtapes, chromium, easyeffects, gsconnect, microphone'
         ;;
     install)

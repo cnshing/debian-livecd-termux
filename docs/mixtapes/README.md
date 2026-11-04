@@ -20,14 +20,11 @@ a pinned upstream commit, verifies its SHA-256 and applies the patches. To insta
 repository, run this in native Termux:
 
 ```sh
-python src/apply-overlays.py "Music Player"
+livecd-pkg install mixtapes
 ```
 
-For uploaded songs, also add Termux's glibc repository and its OpenSSL. Everything else works without:
-
-```sh
-pkg install glibc-repo && apt update && pkg install glibc openssl-glibc
-```
+`livecd-pkg install mixtapes` also adds Termux's glibc repository, glibc and its OpenSSL, which
+uploaded songs need. Everything else works without them.
 
 > **What was tested:** every result below comes from a binary built on the phone by
 > an earlier on-phone build script, since removed. The

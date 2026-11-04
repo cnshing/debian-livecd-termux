@@ -10,6 +10,7 @@ repo=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 mkdir -p "$HOME/.local/state/livecd"
 exec > >(tee -a "$HOME/.local/state/livecd/install.log") 2>&1
 echo "=== install.sh $(date '+%F %T') $*"
+trap 'echo "install.sh stopped at line $LINENO. The log is ~/.local/state/livecd/install.log." >&2' ERR
 # The desktop's Android integrations need these apps. Termux cannot install them, so name what is missing.
 missing=
 for app in com.termux.x11=Termux:X11 com.termux.api=Termux:API moe.shizuku.privileged.api=Shizuku; do
@@ -24,7 +25,8 @@ if ! test -r /sdcard/Android; then
 fi
 shizuku=$HOME/.local/lib/shizuku
 if ! test -f "$shizuku/rish_shizuku.dex"; then
-    exported=$(find /sdcard/ -maxdepth 3 -name rish_shizuku.dex -printf '%h\n' 2>/dev/null | head -n 1)
+    # find reports Android's unreadable app directories as a failure.
+    exported=$(find /sdcard/ -maxdepth 3 -name rish_shizuku.dex -printf '%h\n' 2>/dev/null | head -n 1 || true)
     if test -z "$exported" || ! test -f "$exported/rish"; then
         echo 'In Shizuku, choose "Use Shizuku in terminal apps", export the files to shared storage, then run this again.' >&2
         exit 2

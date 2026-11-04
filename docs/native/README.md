@@ -90,8 +90,10 @@ repository's WhiteSur/Colloid assets, wallpapers, font choices, lock restriction
 and startup preferences. Fonts and extension data taken from Debian packages
 are architecture-independent assets; Debian executables and libraries are excluded.
 
-Native Nautilus, [Code OSS](../code-oss/README.md), Firefox with signed uBlock Origin,
+Native Nautilus, [Code OSS](../code-oss/README.md), elementary Code, Firefox with signed uBlock Origin,
 LibreOffice, mpv-x and [Mission Center](../mission-center/README.md) provide the application workflows.
+elementary Code carries the liveCD's theme-sync plugin, which matches its editor colors to the GTK theme
+when Code starts; after a theme change, Code shows the new colors from its next start.
 Ghostty is the only terminal, with its existing close-button limitation. It uses its package's own launcher and
 starts a login shell (`temp/docs/evidence/native/stock-launchers.txt`). Ghostty reads
 `~/.config/livecd-native/ghostty/config.ghostty`, which installing keeps, and which

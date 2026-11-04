@@ -19,3 +19,16 @@ termux_step_pre_configure() {
 	termux_setup_gir
 	termux_setup_glib_cross_pkg_config_wrapper
 }
+
+termux_step_post_make_install() {
+	# The liveCD's theme-sync plugin, from debian-livecd at the commit overlays/UPSTREAM names,
+	# unmodified apart from its Debian paths. The Text Editor overlay enables it.
+	local plugin="$TERMUX_PREFIX/lib/io.elementary.code/plugins/theme-sync"
+	install -Dm644 -t "$plugin" "$TERMUX_PKG_BUILDER_DIR"/theme-sync/theme-sync.plugin
+	sed -e "s|/usr/share/gtksourceview-4/|$TERMUX_PREFIX/share/gtksourceview-4/|" \
+		-e "s|\"/usr/local/share:/usr/share\"|\"$TERMUX_PREFIX/share\"|" \
+		"$TERMUX_PKG_BUILDER_DIR"/theme-sync/theme_sync.py > "$plugin"/theme_sync.py
+	chmod 644 "$plugin"/theme_sync.py
+	grep -q "\"$TERMUX_PREFIX/share/gtksourceview-4/" "$plugin"/theme_sync.py ||
+		termux_error_exit "theme_sync.py no longer names the stock schemes where this expects"
+}

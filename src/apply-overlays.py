@@ -89,7 +89,7 @@ def main():
     overlays = [OVERLAYS / name for name in dict.fromkeys(names)]
     packages = [package for overlay in overlays for package in listed(overlay / 'packages/termux.yaml')]
     if packages:
-        subprocess.run(['apt-get', 'install', '-y', '--no-install-recommends', '-o', 'Dpkg::Options::=--force-confdef',
+        subprocess.run(['apt-get', 'install', '-y', '--allow-downgrades', '--no-install-recommends', '-o', 'Dpkg::Options::=--force-confdef',
                         '-o', 'Dpkg::Options::=--force-confold', *packages],
                        env={**os.environ, 'DEBIAN_FRONTEND': 'noninteractive'}, check=True)
     for overlay in overlays:

@@ -104,10 +104,18 @@ mkdir -p "$PREFIX/etc/apt/sources.list.d" "$PREFIX/etc/apt/preferences.d"
 # trusted=yes because this index is not signed; the tarball's checksum is the only check.
 printf 'deb [trusted=yes] file://%s livecd main\n' "$repo/repo" > "$PREFIX/etc/apt/sources.list.d/livecd.list"
 # Our builds carry the Android patches, so a same-named package from Termux's mirrors must not
-# replace them, even at a newer version. Packages only on those mirrors are unaffected.
-printf 'Package: *\nPin: release n=livecd\nPin-Priority: 1001\n' > "$PREFIX/etc/apt/preferences.d/livecd"
-# Keep existing configuration files rather than stop at dpkg's question.
-apt=(apt-get -y -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold)
+# replace them, even at a newer version. Libraries the builder compiled along the way, such as
+# libexpat, are not pinned: Termux's newer releases of those win, and ours remain a fallback.
+ours=$(for recipe in "$repo"/packages/*/; do
+    basename "$recipe"
+    for subpackage in "$recipe"*.subpackage.sh; do
+        if test -e "$subpackage"; then basename "$subpackage" .subpackage.sh; fi
+    done
+done | tr '\n' ' ')
+printf 'Package: %s\nPin: release n=livecd\nPin-Priority: 1001\n' "$ours" > "$PREFIX/etc/apt/preferences.d/livecd"
+# Keep existing configuration files rather than stop at dpkg's question, and let the pin
+# replace a newer Termux build of one of our packages.
+apt=(apt-get -y --allow-downgrades -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold)
 apt-get update
 # Termux supports only whole upgrades: new packages link against libraries, such as libc++,
 # that are newer than a fresh bootstrap's. This also finishes an earlier interrupted run.

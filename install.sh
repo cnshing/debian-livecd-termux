@@ -136,7 +136,7 @@ fi
 python "$repo/src/apply-overlays.py" --default "$@"
 # Qualcomm GPUs get Mesa's Turnip driver, and the desktop then renders through Zink.
 # `livecd start --renderer software` remains available, and a saved choice is kept.
-if test -e /dev/kgsl-3d0 && python "$repo/prebuilt/turnip/gpu-setup.py" > "$state/gpu-setup.json"; then
+if test -e /dev/kgsl-3d0 && python "$repo/prebuilt/turnip/gpu-setup.py" > "$state/gpu-setup.log"; then
     python - "$HOME/.local/lib/livecd/config.json" <<'EOF'
 import json, sys
 path = sys.argv[1]

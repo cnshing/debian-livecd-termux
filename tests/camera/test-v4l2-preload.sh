@@ -93,10 +93,11 @@ print(f"stat+open+close: {(time.perf_counter() - t) * 10:.2f} us per round")'
     printf 'without preload: '; python -c "$bench"
     printf 'with preload:    '; with_preload python -c "$bench"
 
+    # Closed by the 2 s timer, or earlier by Android when the other camera opened.
     echo; echo "=== cameras released 2 s after the last stream"
     sleep 3
-    expect pass grep -q "camera $front closed" "$T/front.log"
-    expect pass grep -q "camera $rear closed" "$T/rear.log"
+    expect pass grep -qx idle "$ANDROID_V4L2_DIR/state/video0"
+    expect pass grep -qx idle "$ANDROID_V4L2_DIR/state/video1"
 
     echo; echo "=== cameras stopped: the devices must disappear"
     kill "$front_pid" "$rear_pid"

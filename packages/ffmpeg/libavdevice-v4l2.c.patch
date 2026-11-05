@@ -1,0 +1,55 @@
+--- a/libavdevice/v4l2.c
++++ b/libavdevice/v4l2.c
+@@ -30,6 +30,7 @@
+  * V4L2_PIX_FMT_* and AV_PIX_FMT_*
+  */
+ 
++#include <stdarg.h>
+ #include <stdatomic.h>
+ 
+ #include "libavutil/avassert.h"
+@@ -138,11 +139,28 @@
+     int err;
+     int flags = O_RDWR;
+ 
++#if CONFIG_LIBV4L2
++/* libv4l2's v4l2_ioctl takes an unsigned long request, unlike a POSIX ioctl such as Android's.
++ * Forward with the right types rather than call it through a mismatched pointer. */
++#if HAVE_POSIX_IOCTL
++static int ioctl_libv4l2(int fd, int request, ...)
++#else
++static int ioctl_libv4l2(int fd, unsigned long int request, ...)
++#endif
++{
++    va_list args;
++    void *arg;
++    va_start(args, request);
++    arg = va_arg(args, void *);
++    va_end(args);
++    return v4l2_ioctl(fd, (unsigned int)request, arg);
++}
++#endif
++
+ #define SET_WRAPPERS(prefix) do {       \
+     s->open_f   = prefix ## open;       \
+     s->close_f  = prefix ## close;      \
+     s->dup_f    = prefix ## dup;        \
+-    s->ioctl_f  = prefix ## ioctl;      \
+     s->read_f   = prefix ## read;       \
+     s->mmap_f   = prefix ## mmap;       \
+     s->munmap_f = prefix ## munmap;     \
+@@ -151,12 +169,14 @@
+     if (s->use_libv4l2) {
+ #if CONFIG_LIBV4L2
+         SET_WRAPPERS(v4l2_);
++        s->ioctl_f = ioctl_libv4l2;
+ #else
+         av_log(ctx, AV_LOG_ERROR, "libavdevice is not built with libv4l2 support.\n");
+         return AVERROR(EINVAL);
+ #endif
+     } else {
+         SET_WRAPPERS();
++        s->ioctl_f = ioctl;
+     }
+ 
+ #define v4l2_open   s->open_f

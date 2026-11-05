@@ -15,7 +15,7 @@
 +#if CONFIG_LIBV4L2
 +/* libv4l2's v4l2_ioctl takes an unsigned long request, unlike a POSIX ioctl such as Android's.
 + * Forward with the right types rather than call it through a mismatched pointer. */
-+#if HAVE_POSIX_IOCTL
++#if HAVE_IOCTL_POSIX
 +static int ioctl_libv4l2(int fd, int request, ...)
 +#else
 +static int ioctl_libv4l2(int fd, unsigned long int request, ...)

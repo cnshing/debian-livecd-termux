@@ -31,7 +31,8 @@ termux_step_make_install() {
 	local schemas="$TERMUX_PREFIX/opt/gnome-48/share/glib-2.0/schemas"
 	install -d "$extensions" "$schemas"
 	cp -R usr/share/gnome-shell/extensions/arcmenu@arcmenu.com "$extensions/"
-	find usr/share -name '*.gschema.xml' -exec install -m644 -t "$schemas" {} +
+	# One file at a time: some archives, such as ArcMenu's, carry the same schema twice.
+	find usr/share -name '*.gschema.xml' -exec install -m644 -t "$schemas" {} \;
 	# Debian's package also omits upstream's stylesheet.
 	install -m644 "$TERMUX_PKG_BUILDER_DIR/stylesheet.css" "$extensions/arcmenu@arcmenu.com/stylesheet.css"
 	cp -R ArcMenu-v65/icons/. "$extensions/arcmenu@arcmenu.com/icons/"

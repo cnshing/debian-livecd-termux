@@ -27,7 +27,8 @@ termux_step_make_install() {
 	local schemas="$TERMUX_PREFIX/opt/gnome-48/share/glib-2.0/schemas"
 	install -d "$extensions" "$schemas"
 	cp -R usr/share/gnome-shell/extensions/noannoyance-fork@vrba.dev "$extensions/"
-	find usr/share -name '*.gschema.xml' -exec install -m644 -t "$schemas" {} +
+	# One file at a time: some archives, such as ArcMenu's, carry the same schema twice.
+	find usr/share -name '*.gschema.xml' -exec install -m644 -t "$schemas" {} \;
 }
 
 termux_step_create_debscripts() {

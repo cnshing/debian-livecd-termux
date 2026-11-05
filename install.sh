@@ -17,13 +17,14 @@ for app in com.termux.x11=Termux:X11 com.termux.api=Termux:API moe.shizuku.privi
     /system/bin/pm path "${app%%=*}" >/dev/null 2>&1 || missing="$missing ${app#*=}"
 done
 test -z "$missing" || { echo "Install these Android apps first:$missing. See README.md." >&2; exit 2; }
-# Shared storage holds Shizuku's rish export, and Files shows it. termux-setup-storage asks Android.
-if ! test -r /sdcard/Android; then
+shizuku=$HOME/.local/lib/shizuku
+# The first run finds Shizuku's rish export in shared storage, so it asks Android for access with
+# termux-setup-storage. Later runs already have rish, which grants storage below.
+if ! test -f "$shizuku/rish_shizuku.dex" && ! test -r /sdcard/Android; then
     termux-setup-storage || true
     for _ in $(seq 60); do test -r /sdcard/Android && break; sleep 1; done
     test -r /sdcard/Android || { echo 'Allow Termux storage access, then run this again.' >&2; exit 2; }
 fi
-shizuku=$HOME/.local/lib/shizuku
 if ! test -f "$shizuku/rish_shizuku.dex"; then
     # find reports Android's unreadable app directories as a failure.
     exported=$(find /sdcard/ -maxdepth 3 -name rish_shizuku.dex -printf '%h\n' 2>/dev/null | head -n 1 || true)
@@ -48,6 +49,12 @@ for attempt in $(seq 10); do
 done
 # Termux:API shares Termux's user ID, so its microphone permission covers the desktop's processes.
 rish pm grant com.termux.api android.permission.RECORD_AUDIO
+# Files and the desktop's storage mounts read and write shared storage. Android can withdraw the
+# read permission on its own, as the app-op, so set both the permission and the app-op.
+for permission in READ_EXTERNAL_STORAGE WRITE_EXTERNAL_STORAGE; do
+    rish pm grant com.termux android.permission.$permission
+    rish appops set com.termux $permission allow
+done
 # Android otherwise stops a backgrounded desktop to save battery.
 rish dumpsys deviceidle whitelist +com.termux >/dev/null
 release=https://github.com/cnshing/debian-livecd-termux/releases/latest/download

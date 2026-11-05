@@ -88,7 +88,7 @@ the native X11 display directly.
   clients use the owned Unix socket. No desktop Pulse TCP listener is started.
 - Optional GSConnect and audio launchers restore their existing native component
   profiles and shared Termux library paths, avoiding CJS/GJS ABI mixing. Audio
-  clients launched with `livecd-audio exec` retain desktop settings and bus
+  clients launched with `easyeffects-bridge exec` retain desktop settings and bus
   ownership while selecting the effects socket.
 
 `sources.lock.json`, `build-components.py`, the included patches and

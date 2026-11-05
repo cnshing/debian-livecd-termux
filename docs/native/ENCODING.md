@@ -118,7 +118,7 @@ All changes are generic: none is specific to a program.
 
 | Program | Status |
 | --- | --- |
-| Serein (packaged) | Already compiles its Linux camera encoder for Android and tries `vah264enc`; needs only GStreamer's `va` plugin. [`packages/livecd-gst-va`](../../packages/livecd-gst-va) adds that plugin beside Termux's `gst-plugins-bad` without replacing it. The recipe's patch applies; the package has not been built in the Termux builder |
+| Serein (packaged) | Already compiles its Linux camera encoder for Android and tries `vah264enc`; needs only GStreamer's `va` plugin. [`packages/gst-plugins-va`](../../packages/gst-plugins-va) adds that plugin beside Termux's `gst-plugins-bad` without replacing it. The recipe's patch applies; the package has not been built in the Termux builder |
 | GStreamer programs | The same package |
 | `ffmpeg`, libavcodec programs | Termux's FFmpeg needs `--enable-vaapi` and `libva`. A test build of 9.0.2 needed only that, plus `-Wno-error=incompatible-function-pointer-types` for libv4l2 and `--disable-xlib`. No recipe yet: Termux's FFmpeg is in its main repository, which `tools/recipes.py` does not stage, and replacing it affects every program that links it |
 | OBS Studio | Termux's recipe removes VAAPI on purpose (its patch 0007) and builds without V4L2. Restoring both needs a recipe override and libpci, which Termux does not package. Not built or tested |

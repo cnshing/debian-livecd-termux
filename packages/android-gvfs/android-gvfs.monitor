@@ -1,0 +1,5 @@
+[RemoteVolumeMonitor]
+Name=GProxyAndroidVolumeMonitor
+DBusName=org.gtk.vfs.AndroidVolumeMonitor
+IsNative=false
+NativePriority=0

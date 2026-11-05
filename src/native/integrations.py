@@ -77,19 +77,19 @@ class Integrations:
             return False
 
     def bluetooth_state(self):
-        return json.loads(self.command('livecd-mic-bluetooth', 'status', timeout=5))
+        return json.loads(self.command('android-pulseaudio-bluetooth', 'status', timeout=5))
 
     def microphone(self):
-        if not self.enabled('microphone', 'livecd-mic'):
+        if not self.enabled('microphone', 'android-pulseaudio-mic'):
             self.report('bluetooth', 'disabled', 'Microphone integration is disabled or not installed')
             return
         try:
-            current = json.loads(self.command('livecd-mic', 'status', timeout=5))
+            current = json.loads(self.command('android-pulseaudio-mic', 'status', timeout=5))
             if current['microphone'] != 'off':
                 self.report('microphone', 'reused')
                 self.report('bluetooth', 'skipped', 'A microphone is already enabled')
                 return
-            if self.enabled('bluetooth', 'livecd-mic-bluetooth'):
+            if self.enabled('bluetooth', 'android-pulseaudio-bluetooth'):
                 try:
                     if self.bluetooth_state().get('active'):
                         self.report('bluetooth', 'reused')
@@ -102,8 +102,8 @@ class Integrations:
                 except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as error:
                     self.report('bluetooth', 'unavailable', str(error))
             if not self.stopping.is_set():
-                self.cleanup.append(('microphone', lambda: self.command('livecd-mic', 'off', timeout=5)))
-                self.command('livecd-mic', 'on', timeout=15)
+                self.cleanup.append(('microphone', lambda: self.command('android-pulseaudio-mic', 'off', timeout=5)))
+                self.command('android-pulseaudio-mic', 'on', timeout=15)
                 self.report('microphone', 'started')
         except (OSError, ValueError, KeyError, RuntimeError, subprocess.SubprocessError) as error:
             self.report('microphone', 'unavailable', str(error))
@@ -113,14 +113,14 @@ class Integrations:
         # OpenSL refuse a new engine (error 12) for a few seconds.
         for attempt in range(3):
             try:
-                return self.command('livecd-mic-bluetooth', 'on', '--default', timeout=55)
+                return self.command('android-pulseaudio-bluetooth', 'on', '--default', timeout=55)
             except RuntimeError:
                 if attempt == 2 or self.stopping.wait(5):
                     raise
 
     def stop_bluetooth(self):
         if self.owns(self.bluetooth_state().get('controller_pid')):
-            self.command('livecd-mic-bluetooth', 'off', timeout=25)
+            self.command('android-pulseaudio-bluetooth', 'off', timeout=25)
 
     def service(self, name, command, *arguments):
         if not self.enabled(name, command):
@@ -151,11 +151,11 @@ class Integrations:
                     if not isinstance(self.options, dict):
                         raise ValueError('Expected an object in ' + str(path))
                 self.microphone()
-                self.service('audio', 'livecd-audio', '--pulse-server', self.env['PULSE_SERVER'])
-                self.service('gsconnect', 'livecd-gsconnect')
-                if self.enabled('resources', 'livecd-resources-setup'):
+                self.service('audio', 'easyeffects-bridge', '--pulse-server', self.env['PULSE_SERVER'])
+                self.service('gsconnect', 'gsconnect')
+                if self.enabled('resources', 'android-procfs-setup'):
                     try:
-                        self.command('livecd-resources-setup', timeout=20)
+                        self.command('android-procfs-setup', timeout=20)
                         self.report('resources', 'staged')
                     except (OSError, RuntimeError, subprocess.SubprocessError) as error:
                         self.report('resources', 'unavailable', str(error))

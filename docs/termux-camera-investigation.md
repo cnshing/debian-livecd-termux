@@ -283,7 +283,7 @@ reopened on the next stream. This phone does not stream both to an app at once.
 | `openat` relative to an open `/dev` directory | Not handled; none seen |
 
 GNOME Shell builds with `-Dcamera_monitor=false`
-([build.sh:19](../packages/livecd-gnome-shell/build.sh#L19)), which would
+([build.sh:19](../packages/gnome-48-shell/build.sh#L19)), which would
 otherwise show an indicator while a `media.role=Camera` node runs
 ([source][shell-monitor]). Android 11 shows none of its own. Chromium no longer
 needs a PipeWire rebuild for camera use; its V4L2 path works.

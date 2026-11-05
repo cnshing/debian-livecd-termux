@@ -29,7 +29,7 @@ def ssh(command):
 
 
 uid = int(ssh('id -u'))
-directory = f'/data/local/tmp/livecd-resources-{uid}'
+directory = f'/data/local/tmp/android-procfs-{uid}'
 reader = directory + '/stat-reader-v1'
 disabled = directory + '/reader.test-disabled'
 pids = adb('pidof stat-reader-v1').split()

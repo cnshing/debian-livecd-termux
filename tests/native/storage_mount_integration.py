@@ -39,7 +39,7 @@ fixture=stage/'fixture.json'
 monitor=Gio.VolumeMonitor.get()
 def mounts():
     return {m.get_root().get_uri():m for m in monitor.get_mounts()
-            if (m.get_uuid() or '').startswith('livecd-storage-')}
+            if (m.get_uuid() or '').startswith('android-gvfs-')}
 def wait_for(predicate):
     if predicate():return
     loop=GLib.MainLoop()
@@ -93,11 +93,11 @@ def integration(source):
         (stage / 'fixture.json').write_text(json.dumps({(stage / 'internal').as_uri(): 'Internal storage'}))
         (stage / 'provider.py').write_text(PROVIDER)
         (stage / 'client.py').write_text(CLIENT)
-        (stage / 'monitors/livecd-storage.monitor').write_bytes((source / 'livecd-storage.monitor').read_bytes())
-        service = ('[D-BUS Service]\nName=org.gtk.vfs.LivecdStorageVolumeMonitor\nExec=' + sys.executable +
+        (stage / 'monitors/android-gvfs.monitor').write_bytes((source / 'android-gvfs.monitor').read_bytes())
+        service = ('[D-BUS Service]\nName=org.gtk.vfs.AndroidVolumeMonitor\nExec=' + sys.executable +
                    ' ' + str(stage / 'provider.py') + ' ' + str(source) + ' ' + str(stage / 'fixture.json') +
                    ' ' + str(stage / 'counter') + '\n')
-        (stage / 'share/dbus-1/services/org.gtk.vfs.LivecdStorageVolumeMonitor.service').write_text(service)
+        (stage / 'share/dbus-1/services/org.gtk.vfs.AndroidVolumeMonitor.service').write_text(service)
         env = {**os.environ, 'LIVECD_NATIVE_SESSION': 'storage-test', 'GVFS_DISABLE_FUSE': '1',
                'GVFS_MONITOR_DIR': str(stage / 'monitors'), 'XDG_CONFIG_HOME': str(stage / 'config'),
                'XDG_DATA_DIRS': str(stage / 'share') + ':' + os.environ.get('XDG_DATA_DIRS', '/usr/local/share:/usr/share')}

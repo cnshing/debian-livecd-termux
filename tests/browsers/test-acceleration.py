@@ -279,7 +279,7 @@ def main():
     from graphics import apply_renderer
     # The resource preload is unrelated to GPU/video. Do not run its health
     # probe or inherit a live session ownership marker in this private test.
-    os.environ['LIVECD_RESOURCES_COMPAT'] = '0'
+    os.environ['ANDROID_PROCFS_COMPAT'] = '0'
     env = environment('zink')
     for key in ('LIVECD_NATIVE_SESSION', 'XAUTHORITY', 'PULSE_SERVER'):
         env.pop(key, None)

@@ -63,5 +63,5 @@ termux_step_make_install() {
 
 termux_step_create_debscripts() {
 	source "$TERMUX_PKG_BUILDER_DIR/gnome.sh"
-	livecd_gnome_debscripts
+	gnome_48_debscripts
 }

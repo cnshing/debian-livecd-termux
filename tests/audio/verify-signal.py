@@ -1,7 +1,7 @@
 #!/data/data/com.termux/files/usr/bin/python
 """Measure native EQ through the backend monitor using quiet 100/1000 Hz tones.
 
-Requires a disposable running livecd-audio session. The existing backend's
+Requires a disposable running easyeffects-bridge session. The existing backend's
 default monitor is observed; no physical output is selected or changed.
 """
 import array
@@ -18,7 +18,7 @@ from autoeq import convert
 
 
 def main():
-    record = json.loads((Path.home() / ".local/state/livecd-audio/session.json").read_text())
+    record = json.loads((Path.home() / ".local/state/easyeffects-bridge/session.json").read_text())
     env = dict(os.environ, **record["env"])
     backend = dict(os.environ, PULSE_SERVER=record["backend"])
 

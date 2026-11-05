@@ -22,13 +22,13 @@ peer on the LAN ⇄ TLS, TCP/UDP 1716 ⇄ GSConnect daemon (cjs) on a private D-
 
 GSConnect is GJS JavaScript, and official Termux publishes no `gjs` package. It does publish
 `cjs`, Cinnamon's maintained GJS fork, built against the same `spidermonkey` 140. GSConnect
-62 runs on it with [the Termux source patch](../../packages/livecd-gsconnect/0001-termux.patch). The recipe now builds the verified upstream source archive with Meson and retains Debian's identity-validation fix. No native
+62 runs on it with [the Termux source patch](../../packages/gnome-shell-extension-gsconnect/0001-termux.patch). The recipe now builds the verified upstream source archive with Meson and retains Debian's identity-validation fix. No native
 GJS is built by this GSConnect recipe. The separate native desktop packages use their own GJS 1.84.2;
 GSConnect remains on CJS to preserve its independently tested runtime.
 
 ## Build and install
 
-[The recipe](../../packages/livecd-gsconnect/build.sh) downloads the hash-verified upstream source archive,
+[The recipe](../../packages/gnome-shell-extension-gsconnect/build.sh) downloads the hash-verified upstream source archive,
 applies Debian's security fix and the Termux patch, and builds the resources with Meson. GitHub Actions builds it with the other packages.
 To install it from the local apt repository, run this in native Termux:
 
@@ -42,21 +42,21 @@ It needs an X server. The running Termux desktop's Termux:X11 display works, or
 start `termux-x11 :0` first. `DISPLAY` defaults to `:0`.
 
 ```sh
-livecd-gsconnect start                # also: start --name 'My phone'
-livecd-gsconnect status
-livecd-gsconnect ui                   # settings window; starts the daemon if needed
-livecd-gsconnect pair DEVICE_ID       # request pairing, or accept a pending request
-livecd-gsconnect unpair DEVICE_ID
-livecd-gsconnect connect HOST[:PORT]  # contact a peer without relying on broadcasts
-livecd-gsconnect exec -- COMMAND ...  # run on the private bus, such as the daemon's own CLI
-livecd-gsconnect stop
+gsconnect start                # also: start --name 'My phone'
+gsconnect status
+gsconnect ui                   # settings window; starts the daemon if needed
+gsconnect pair DEVICE_ID       # request pairing, or accept a pending request
+gsconnect unpair DEVICE_ID
+gsconnect connect HOST[:PORT]  # contact a peer without relying on broadcasts
+gsconnect exec -- COMMAND ...  # run on the private bus, such as the daemon's own CLI
+gsconnect stop
 ```
 
 The controller owns the daemon and its private session bus, which is separate from the PRoot
 desktop's. `stop` ends all of it. **While it runs, the phone listens on TCP and UDP 1716 on
 the LAN**. The [native desktop](../native/README.md#session-integrations) starts this controller
 automatically when installed, and stops its owned instance with the desktop. That hook can be
-disabled independently. Logs are in `~/.local/state/livecd-gsconnect/session.log`.
+disabled independently. Logs are in `~/.local/state/gsconnect/session.log`.
 
 Compare the **verification key** on both devices before accepting a pair request. Files arrive
 in `~/Downloads`; a per-device setting can change that, for example to `~/storage/downloads`
@@ -75,7 +75,7 @@ and similar tools that Android lacks, so replace them with commands that work he
 | Run Command | Works, using Termux's `sh` |
 | Remote pointer | Pointer motion works through AT-SPI. Clicks and keys were not tested |
 | Shell panel menu and Nautilus integration | **Not available here**: tested without a native Shell or Nautilus, and the daemon's bus is private |
-| Native desktop menu entry | The separate [native desktop port](../native) launches `livecd-gsconnect ui` from its menu. Not tested here |
+| Native desktop menu entry | The separate [native desktop port](../native) launches `gsconnect ui` from its menu. Not tested here |
 | Forwarding desktop notifications to the peer | **Disabled**; see the patch table |
 | Exposing a peer's media players locally | **Disabled**; see the patch table |
 | Volume control | **Unavailable**: needs GNOME Shell's private `Gvc` library |
@@ -96,7 +96,7 @@ and similar tools that Android lacks, so replace them with commands that work he
 
 ## Termux changes to GSConnect
 
-[`gsconnect-termux.patch`](../../packages/livecd-gsconnect/0001-termux.patch) is the complete list:
+[`gsconnect-termux.patch`](../../packages/gnome-shell-extension-gsconnect/0001-termux.patch) is the complete list:
 
 | Change | Reason |
 | --- | --- |
@@ -141,8 +141,8 @@ Do not assume these runs are invisible on the PC either: a notification from the
 ## Remove
 
 ```sh
-livecd-gsconnect stop
-apt remove livecd-gsconnect
+gsconnect stop
+apt remove gnome-shell-extension-gsconnect
 ```
 
 The certificate in `~/.config/gsconnect`, settings in `~/.config/dconf`, received files, logs

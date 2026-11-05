@@ -12,8 +12,8 @@ is then downloaded and run on that machine, and tests the remote extension host.
 built from this editor's commit: validation stays strict. Everything on that machine stops,
 and the scratch folder goes, however the test ends.
 
-To run this while the installed liblivecd-proc.so still aborts Node.js programs (see
-docs/code-oss/VERIFICATION.md), set LIVECD_RESOURCES_COMPAT=0.
+To run this while the installed libandroid-procfs.so still aborts Node.js programs (see
+docs/code-oss/VERIFICATION.md), set ANDROID_PROCFS_COMPAT=0.
 """
 import argparse
 import base64
@@ -299,7 +299,7 @@ class Fixture:
                 if int(proc.name) not in ours and int(proc.name) != self.bus.pid and marker in (proc / 'environ').read_bytes().split(b'\0'):
                     command = (proc / 'cmdline').read_bytes().replace(b'\0', b' ').decode(errors='replace')[:240]
                     # The resource preload starts its long-lived broker, which is not the session's.
-                    if 'livecd-resources/broker' in command:
+                    if 'android-procfs/broker' in command:
                         self.brokers.add(int(proc.name))
                     else:
                         found[int(proc.name)] = command

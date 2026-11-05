@@ -12,7 +12,7 @@ import unittest
 from unittest import mock
 
 spec = importlib.util.spec_from_file_location("bluetooth",
-        Path(__file__).resolve().parents[2] / "packages/livecd-mic/bluetooth.py")
+        Path(__file__).resolve().parents[2] / "packages/android-pulseaudio-mic/bluetooth.py")
 bluetooth = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(bluetooth)
 
@@ -48,7 +48,7 @@ class SessionTests(unittest.TestCase):
 
     def test_does_not_take_over_an_existing_microphone(self):
         with mock.patch.object(bluetooth, "microphone", return_value={"microphone": "idle"}):
-            with self.assertRaisesRegex(bluetooth.RouteError, "livecd-mic off"):
+            with self.assertRaisesRegex(bluetooth.RouteError, "android-pulseaudio-mic off"):
                 bluetooth.call_session(self.bridge, 49, ())
         self.bridge.send.assert_not_called()
 

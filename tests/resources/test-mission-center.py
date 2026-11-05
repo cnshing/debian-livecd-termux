@@ -7,7 +7,7 @@ import signal
 import subprocess
 import time
 
-cache = Path.home() / '.cache/livecd-resources'
+cache = Path.home() / '.cache/android-procfs'
 cache.mkdir(parents=True, exist_ok=True)
 reader, writer = os.pipe()
 server = subprocess.Popen(['Xvfb', '-displayfd', str(writer), '-screen', '0', '1280x900x24', '-nolisten', 'tcp'],
@@ -22,7 +22,7 @@ try:
     # Mission Center uses the shared library directly. Exercise it without the
     # compatibility shim so failures cannot be hidden by intercepted file reads.
     preload = env.get('LD_PRELOAD', '')
-    env['LD_PRELOAD'] = ':'.join(item for item in preload.replace(' ', ':').split(':') if item and 'liblivecd-proc.so' not in item)
+    env['LD_PRELOAD'] = ':'.join(item for item in preload.replace(' ', ':').split(':') if item and 'libandroid-procfs.so' not in item)
     log = cache / 'mission-center-gui.txt'
     with log.open('w') as output:
         client = subprocess.Popen(['dbus-run-session', '--', 'missioncenter'], env=env,

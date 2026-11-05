@@ -1,7 +1,0 @@
-[Desktop Entry]
-Type=Application
-Name=Network Discovery
-Exec=livecd-network-discovery
-TryExec=livecd-network-discovery
-NoDisplay=true
-X-GNOME-Autostart-Phase=Applications

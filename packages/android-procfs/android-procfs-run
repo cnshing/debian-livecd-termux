@@ -1,0 +1,10 @@
+#!/data/data/com.termux/files/usr/bin/bash
+set -euo pipefail
+prefix=${PREFIX:-/data/data/com.termux/files/usr}
+if test "$#" = 0; then echo 'Usage: android-procfs-run COMMAND [ARGUMENT...]' >&2; exit 2; fi
+export LD_PRELOAD="$prefix/lib/libandroid-procfs.so${LD_PRELOAD:+:$LD_PRELOAD}"
+case "$1" in
+    top) shift; exec "$prefix/libexec/android-procfs/exec-system" /system/bin/top "$@";;
+    /system/bin/*|/apex/*) exec "$prefix/libexec/android-procfs/exec-system" "$@";;
+esac
+exec "$@"

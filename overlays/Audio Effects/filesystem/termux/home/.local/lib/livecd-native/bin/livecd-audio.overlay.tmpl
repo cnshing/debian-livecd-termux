@@ -1,3 +1,0 @@
-#!@TERMUX_PREFIX@/bin/python
-import os,sys
-os.execv('@TERMUX_PREFIX@/bin/python', ['@TERMUX_PREFIX@/bin/python', '@TERMUX_HOME@/.local/lib/livecd-native/component.py', 'livecd-audio', *sys.argv[1:]])

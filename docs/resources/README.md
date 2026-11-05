@@ -16,7 +16,7 @@ For CPU and processes, the common Linux interface is primarily the kernel's
 Replacing one desktop library would help only its consumers. It would not fix
 ordinary programs such as `top` and `htop` that read the files themselves.
 
-`livecd-resources` now owns the reader and transport. Mission Center links its
+`android-procfs` now owns the reader and transport. Mission Center links its
 shared library, and dynamically linked native applications can use a compatibility
 layer at the libc file interface. Those applications keep their ordinary paths
 and parsers. Android's kernel permissions remain intact.
@@ -26,20 +26,20 @@ and parsers. Android's kernel permissions remain intact.
 In native Termux, with the existing Shizuku installation running and Termux authorized:
 
 ```sh
-bash tools/build-packages.sh --install livecd-resources
-# Compatibility entry point: bash packages/livecd-resources/build-on-device.sh
+bash tools/build-packages.sh --install android-procfs
+# Compatibility entry point: bash packages/android-procfs/build-on-device.sh
 # Export rish and its DEX from Shizuku into ~/.local/lib/shizuku first.
-livecd-resources-setup
+android-procfs-setup
 
-livecd-resources-run top
-livecd-resources-run htop
-livecd-resources-run ps -A -o pid,ppid,user,comm
-livecd-resources-run head -3 /proc/stat
+android-procfs-run top
+android-procfs-run htop
+android-procfs-run ps -A -o pid,ppid,user,comm
+android-procfs-run head -3 /proc/stat
 ```
 
 Setup stages one fixed executable in the shell-owned
-`/data/local/tmp/livecd-resources-UID/` directory. It does not start a sampler.
-Repeat setup after updating the reader. `LIVECD_RESOURCES_RISH` selects another
+`/data/local/tmp/android-procfs-UID/` directory. It does not start a sampler.
+Repeat setup after updating the reader. `ANDROID_PROCFS_RISH` selects another
 rish export; `MC_RISH` is retained as a fallback. The first client to start the
 broker supplies its environment, so stop idle broker processes before changing
 that setting.
@@ -47,10 +47,10 @@ that setting.
 The [native desktop startup hook](../native/README.md#session-integrations) runs
 this same setup command automatically when installed. It adds no background sampler.
 
-`livecd-desktop` depends on the corrected `livecd-resources` package, version
+`livecd-desktop` depends on the corrected `android-procfs` package, version
 `1.0.0-1` or later. Mission Center also depends on it. The desktop controller uses
-the APT-owned `$PREFIX/lib/liblivecd-proc.so` and
-`$PREFIX/libexec/livecd-resources/bin/top`. Termux's own `top` launcher clears
+the APT-owned `$PREFIX/lib/libandroid-procfs.so` and
+`$PREFIX/libexec/android-procfs/bin/top`. Termux's own `top` launcher clears
 `LD_PRELOAD`, so the packaged launcher reaches Android's `top` through the native
 exec helper. `tools/build-session-preload.sh` is a compatibility entry point for
 the standard package builder; it no longer builds an isolated copy.
@@ -60,8 +60,8 @@ with Node.js before adding it to the session, using Python if Node.js is absent.
 If that test fails, it leaves the library and `top` override out and reports why.
 Restart the desktop after installing the corrected package and controller.
 The old isolated runtime stays available for rollback. Outside the session use
-`livecd-resources-run`, or set the preload explicitly for compatible Termux programs.
-`LIVECD_RESOURCES_COMPAT=0` disables the controller's automatic preload; Mission Center's
+`android-procfs-run`, or set the preload explicitly for compatible Termux programs.
+`ANDROID_PROCFS_COMPAT=0` disables the controller's automatic preload; Mission Center's
 direct library access continues to work.
 
 The earlier library aborted Node.js programs when preloaded. The recipe retains
@@ -99,7 +99,7 @@ sequenceDiagram
 ```
 
 The broker activates on demand through a private Unix socket below
-`~/.cache/livecd-resources/run`. Its directory is mode 0700, and both ends check
+`~/.cache/android-procfs/run`. Its directory is mode 0700, and both ends check
 the peer UID. All clients share one shell reader. A 256-bit random token
 authenticates its initial loopback connection; the listener then closes. The
 reader scrubs its token from its command line. Shizuku's Java client is reaped
@@ -143,9 +143,9 @@ away from the real file. See the upstream Termux recipes for
 and [`libgtop`](https://github.com/termux/termux-packages/blob/master/packages/libgtop/build.sh).
 Their installed sample files are not overwritten.
 
-The library also exposes `livecd_resources_snapshot()` and
-`livecd_resources_free()` in `livecd-resources.h`, discoverable through
-`pkg-config livecd-resources`. Mission Center uses this API directly and needs no
+The library also exposes `android_procfs_snapshot()` and
+`android_procfs_free()` in `android-procfs.h`, discoverable through
+`pkg-config android-procfs`. Mission Center uses this API directly and needs no
 preload. Its remaining Android adapter parses data into Magpie's application
 model; it no longer launches Shizuku or implements privileged transport.
 

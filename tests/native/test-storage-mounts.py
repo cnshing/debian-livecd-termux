@@ -8,7 +8,7 @@ import unittest
 from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[2]
-SOURCE = Path(os.environ.get('LIVECD_STORAGE_SOURCE', str(ROOT / 'packages/livecd-storage'))) / 'storage.py'
+SOURCE = Path(os.environ.get('LIVECD_STORAGE_SOURCE', str(ROOT / 'packages/android-gvfs'))) / 'storage.py'
 spec = importlib.util.spec_from_file_location('android_storage', SOURCE)
 storage = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(storage)
@@ -85,12 +85,12 @@ class Migration(unittest.TestCase):
             base = home / '.local/lib/livecd-native'
             (base / 'autostart').mkdir(parents=True)
             (base / 'storage-bookmarks.py').touch()
-            (base / 'autostart/livecd-storage-bookmarks.desktop').touch()
+            (base / 'autostart/android-gvfs-bookmarks.desktop').touch()
             module.retire_bookmarks(config, state, home)
             self.assertEqual(bookmarks.read_text(), user)
             self.assertFalse((state / 'storage-bookmarks.json').exists())
             self.assertFalse((base / 'storage-bookmarks.py').exists())
-            self.assertFalse((base / 'autostart/livecd-storage-bookmarks.desktop').exists())
+            self.assertFalse((base / 'autostart/android-gvfs-bookmarks.desktop').exists())
             # Re-running setup must preserve the user's existing bookmark file.
             before = bookmarks.stat().st_mtime_ns
             module.retire_bookmarks(config, state, home)

@@ -1,0 +1,15 @@
+[package]
+name = "android-procfs"
+version = "1.0.0"
+edition = "2021"
+license = "MIT"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+libc = "=0.2.187"
+
+[[bin]]
+name = "android-procfs-broker"
+path = "src/broker.rs"

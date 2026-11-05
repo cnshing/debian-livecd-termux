@@ -56,9 +56,9 @@ selection and per-user profile data stay separate from package ownership.
 The source archives and patches come from the independently tested native
 source port. Its successful device results do not establish that the new package
 recipes cross-compile or that installation of the new release passes acceptance.
-See [the package source contract](../../packages/livecd-gnome-runtime/SOURCES.md).
+See [the package source contract](../../packages/gnome-48-runtime/SOURCES.md).
 
-`livecd-desktop` owns the session controller and commands. `livecd-gnome-runtime`
+`livecd-desktop` owns the session controller and commands. `gnome-48-runtime`
 supplies the session and additional schemas; `livecd-gnome-data` and its font
 subpackage supply portable assets. GJS, GIR/typelibs and the X11 frame client
 are built with their matching sources. The default installer no longer uses the
@@ -105,7 +105,7 @@ private bus. Native terminals never enter Debian.
 [EasyEffects/AutoEq](../audio/README.md) and [GSConnect](../gsconnect/README.md)
 remain separately installed opt-in native components. Their existing launchers
 use the original native component profiles and shared Termux libraries, avoiding
-CJS/GJS library mixing. `livecd-audio exec -- APPLICATION` preserves the native
+CJS/GJS library mixing. `easyeffects-bridge exec -- APPLICATION` preserves the native
 desktop's settings and session bus while selecting the effects audio endpoint.
 Opening a settings window does not route every application through
 the effects graph or establish GSConnect Shell-panel integration.
@@ -120,17 +120,17 @@ through their existing commands after GNOME is ready:
 
 | Integration | Startup action |
 | --- | --- |
-| Microphone / Bluetooth | Try `livecd-mic-bluetooth on --default`; if unavailable, use `livecd-mic on` |
-| EasyEffects | `livecd-audio start` against the desktop's PulseAudio socket |
-| GSConnect | `livecd-gsconnect start` on its existing private bus |
-| Whole-device resources | `livecd-resources-setup` stages the existing Shizuku reader; clients activate it on demand |
+| Microphone / Bluetooth | Try `android-pulseaudio-bluetooth on --default`; if unavailable, use `android-pulseaudio-mic on` |
+| EasyEffects | `easyeffects-bridge start` against the desktop's PulseAudio socket |
+| GSConnect | `gsconnect start` on its existing private bus |
+| Whole-device resources | `android-procfs-setup` stages the existing Shizuku reader; clients activate it on demand |
 
 The packages, Android microphone permission and Shizuku authorization must already
 be installed/configured. Connect the headset in Android with **Calls** enabled
 before startup. Bluetooth is tried up to three times, five seconds apart, while Android
 releases a previous session's call audio; reconnecting later uses the existing manual commands. An already enabled microphone is preserved.
 GSConnect starts listening on the LAN, using its existing pairing settings.
-EasyEffects keeps its existing behavior: use `livecd-audio exec -- APPLICATION`
+EasyEffects keeps its existing behavior: use `easyeffects-bridge exec -- APPLICATION`
 to send an application through the graph. Starting it does not redirect all applications.
 Battery/UPower and saved graphics/video acceleration already follow the desktop's
 existing startup path; no new acceleration settings are selected.
@@ -153,7 +153,7 @@ Installed integrations start by default. To disable individual hooks, create
 Supported keys are `microphone`, `bluetooth`, `audio`, `gsconnect`, and `resources`.
 Disabling `microphone` also disables Bluetooth microphone startup; disabling only
 `bluetooth` leaves ordinary microphone startup enabled. The `resources` key
-controls reader staging; `LIVECD_RESOURCES_COMPAT=0` still controls the existing
+controls reader staging; `ANDROID_PROCFS_COMPAT=0` still controls the existing
 session preload. Restart the desktop to apply changes.
 
 ## Icons
@@ -169,7 +169,7 @@ run with them.** The measurements after "Generic dock icon" were taken before th
 
 | What you see | Cause | What to do |
 | --- | --- | --- |
-| A generic gear icon in the dock, beside the application's pinned launcher | GNOME Shell could not match the window to a desktop entry | Fixed for windows started from the panel or menu by [a Shell patch](../../packages/livecd-gnome-shell/0205-retain-startup-apps.patch), below |
+| A generic gear icon in the dock, beside the application's pinned launcher | GNOME Shell could not match the window to a desktop entry | Fixed for windows started from the panel or menu by [a Shell patch](../../packages/gnome-48-shell/0205-retain-startup-apps.patch), below |
 | Placeholder glyphs inside a window, such as a page with a warning sign on its buttons | The application started outside the desktop's environment, so it cannot find the theme | Start it through the menu or `livecd-native exec` |
 | No icons on the desktop | DING crashes at startup: its code calls `GLib.unix_signal_add`, and the session log shows `TypeError: GLib.unix_signal_add is not a function` | Fixed by [a DING patch](../../prebuilt/gnome-runtime/patches/gnome-shell-extension-desktop-icons-ng/0003-glib-2.90.patch) |
 | Missing icons in ArcMenu, and a `C` from the theme as its button | Debian's package leaves out the `icons/` directory the extension loads from | [`prepare.py`](../../prebuilt/gnome-runtime/prepare.py) restores them from ArcMenu's source |
@@ -182,7 +182,7 @@ and its window group. A window that matches none of these gets the generic icon.
 
 The startup ID ties a window to its launcher whatever its class is. Shell compares it only with active
 startup records, though, and Firefox and LibreOffice Base end theirs before their visible window appears.
-[`0205-retain-startup-apps.patch`](../../packages/livecd-gnome-shell/0205-retain-startup-apps.patch)
+[`0205-retain-startup-apps.patch`](../../packages/gnome-48-shell/0205-retain-startup-apps.patch)
 keeps the launcher behind each ID for the rest of the session, which fixes this for every application
 without any per-application data. With it and no per-application entries, all 23 menu entries
 tested (`temp/docs/evidence/native/window-tracker-census.txt`) avoided the generic icon: 21 landed on their own
@@ -370,10 +370,10 @@ shared Termux package upgrades.
 ## System resource access
 
 The System Monitor overlay installs the [shared resource backend](../resources/README.md).
-With this controller version installed, after `livecd-resources-setup` and a desktop restart, native session applications inherit its
+With this controller version installed, after `android-procfs-setup` and a desktop restart, native session applications inherit its
 on-demand `/proc` and supported `/sys` compatibility layer. This enables whole-device CPU
 and Android process data in ordinary monitors, including `top`, `htop` and libgtop clients.
 The reader has no sampling timer. To disable interception for a session, start it with
-`LIVECD_RESOURCES_COMPAT=0`; Mission Center can still use the shared library directly.
+`ANDROID_PROCFS_COMPAT=0`; Mission Center can still use the shared library directly.
 The source changes have been tested with standalone clients; the complete desktop startup
 with interception enabled has not been run.

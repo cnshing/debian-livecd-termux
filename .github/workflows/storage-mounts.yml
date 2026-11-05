@@ -5,14 +5,14 @@ on:
   push:
     paths:
     - .github/workflows/storage-mounts.yml
-    - packages/livecd-storage/**
+    - packages/android-gvfs/**
     - overlays/File Manager/hooks/termux/7100-storage-mounts.py
     - tests/native/storage_mount_integration.py
     - tests/native/test-storage-mounts.py
   pull_request:
     paths:
     - .github/workflows/storage-mounts.yml
-    - packages/livecd-storage/**
+    - packages/android-gvfs/**
     - overlays/File Manager/hooks/termux/7100-storage-mounts.py
     - tests/native/storage_mount_integration.py
     - tests/native/test-storage-mounts.py

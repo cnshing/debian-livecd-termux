@@ -30,7 +30,7 @@ the helper's prompt before rebuilding that directory.
 
 ## Files sidebar mounts
 
-The File Manager overlay installs `livecd-storage`. GVfs activates its volume
+The File Manager overlay installs `android-gvfs`. GVfs activates its volume
 monitor on the native desktop's session bus when an application asks GIO for
 mounts. It exposes **Internal storage**, **SD card**, and accessible **USB drive**
 locations as `GMount` objects whose roots are Android's existing directories.

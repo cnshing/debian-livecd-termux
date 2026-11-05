@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Protocol-level checks of a running livecd-gsconnect, from a PC on the same LAN.
+"""Protocol-level checks of a running gsconnect, from a PC on the same LAN.
 
 Acts as a disposable KDE Connect peer with a throwaway certificate, so the phone's
 behaviour can be asserted packet by packet without any desktop on the PC side. It pairs
@@ -29,7 +29,7 @@ def check(name, passed, detail=""):
 
 
 def on_phone(command, check_exit=True):
-    wrapped = f"livecd-gsconnect exec -- sh -c {shlex.quote(command)}"
+    wrapped = f"gsconnect exec -- sh -c {shlex.quote(command)}"
     return subprocess.run(["ssh", ssh_host, wrapped], capture_output=True, text=True, timeout=60,
                           check=check_exit).stdout.strip()
 
@@ -134,9 +134,9 @@ def clipboard_write(text):
 
 
 def main():
-    log = "$HOME/.local/state/livecd-gsconnect/session.log"
+    log = "$HOME/.local/state/gsconnect/session.log"
     criticals_before = int(on_phone(f"grep -ac CRITICAL {log} || true"))
-    marker = f"$TMPDIR/livecd-gsconnect-probe-{device_id}"
+    marker = f"$TMPDIR/gsconnect-probe-{device_id}"
     command_list = ("{'probe': <{'name': <'probe'>, 'command': <'echo ran > " + marker + "'>}>}")
     on_phone(f"dconf write {dconf_path('plugin/runcommand/command-list')} {shlex.quote(command_list)}")
     with tempfile.TemporaryDirectory() as temporary:
@@ -157,10 +157,10 @@ def main():
         channel = Channel(cert, key)
         channel.packet("kdeconnect.pair", pair=True, timestamp=int(time.time()))
         time.sleep(2)
-        on_phone(f"$PREFIX/bin/livecd-gsconnect pair {device_id}")
+        on_phone(f"$PREFIX/bin/gsconnect pair {device_id}")
         reply = channel.receive(lambda p: p["type"] == "kdeconnect.pair")
         check("Pairing accepted through the CLI", bool(reply and reply["body"].get("pair")))
-        listed = on_phone(f"$PREFIX/bin/livecd-gsconnect devices | grep {device_id}")
+        listed = on_phone(f"$PREFIX/bin/gsconnect devices | grep {device_id}")
         check("Phone records the peer as paired", listed.endswith("true\ttrue"), listed)
 
         channel.packet("kdeconnect.battery.request", request=True)
@@ -210,7 +210,7 @@ def main():
 
         channel.packet("kdeconnect.pair", pair=False)
         time.sleep(1)
-        listed = on_phone(f"$PREFIX/bin/livecd-gsconnect devices | grep {device_id} || echo gone")
+        listed = on_phone(f"$PREFIX/bin/gsconnect devices | grep {device_id} || echo gone")
         check("Peer's unpair request is honoured", listed == "gone" or listed.endswith("false"), listed)
         channel.close()
 
@@ -219,7 +219,7 @@ def main():
         channel = Channel(cert, key)
         channel.packet("kdeconnect.pair", pair=True, timestamp=int(time.time()))
         time.sleep(2)
-        on_phone(f"$PREFIX/bin/livecd-gsconnect pair {device_id}")
+        on_phone(f"$PREFIX/bin/gsconnect pair {device_id}")
         channel.receive(lambda p: p["type"] == "kdeconnect.pair")
         channel.close()
         time.sleep(1)
@@ -235,12 +235,12 @@ def main():
         ran = on_phone(f"test -e {marker} && echo yes || echo no")
         check("Wrong certificate for a paired ID cannot run commands", ran == "no",
               "connection refused" if rejected else "connected but ignored")
-        listed = on_phone(f"$PREFIX/bin/livecd-gsconnect devices | grep {device_id} || echo gone")
+        listed = on_phone(f"$PREFIX/bin/gsconnect devices | grep {device_id} || echo gone")
         check("Wrong certificate drops the pairing, as upstream intends", not listed.endswith("true\ttrue"), listed)
 
     criticals = int(on_phone(f"grep -ac CRITICAL {log} || true")) - criticals_before
     check("No new GLib/CJS criticals in the daemon log", criticals == 0, f"{criticals} new")
-    on_phone(f"$PREFIX/bin/livecd-gsconnect unpair {device_id}; dconf reset -f {dconf_path('')}", check_exit=False)
+    on_phone(f"$PREFIX/bin/gsconnect unpair {device_id}; dconf reset -f {dconf_path('')}", check_exit=False)
     print(f"\n{sum(results)}/{len(results)} checks passed")
     sys.exit(0 if all(results) else 1)
 

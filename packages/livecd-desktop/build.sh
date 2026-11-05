@@ -7,7 +7,7 @@ TERMUX_PKG_REVISION=4
 TERMUX_PKG_SKIP_SRC_EXTRACT=true
 TERMUX_PKG_PLATFORM_INDEPENDENT=true
 TERMUX_PKG_BUILD_IN_SRC=true
-TERMUX_PKG_DEPENDS="dbus, livecd-gnome-runtime, livecd-resources (>= 1.0.0-1), pulseaudio, python, pygobject, termux-x11-nightly, xdotool, xorg-xdpyinfo, xorg-xprop, xorg-xrandr, xorg-xsetroot, xsettingsd"
+TERMUX_PKG_DEPENDS="dbus, gnome-48-runtime, android-procfs (>= 1.0.0-1), pulseaudio, python, pygobject, termux-x11-nightly, xdotool, xorg-xdpyinfo, xorg-xprop, xorg-xrandr, xorg-xsetroot, xsettingsd"
 
 termux_step_post_get_source() {
 	cp "$TERMUX_PKG_BUILDER_DIR/LICENSE" LICENSE

@@ -13,8 +13,8 @@ The Linux-visible endpoints are:
 
 | PulseAudio name | Application-visible description | Backing path |
 | --- | --- | --- |
-| `livecd_bluetooth_input` | WI-C310 Microphone | Native OpenSL recorder, 48 kHz mono |
-| `livecd_bluetooth_output` | WI-C310 Headphones | PulseAudio FIFO → native OpenSL voice player, 16 kHz mono |
+| `android_bluetooth_input` | WI-C310 Microphone | Native OpenSL recorder, 48 kHz mono |
+| `android_bluetooth_output` | WI-C310 Headphones | PulseAudio FIFO → native OpenSL voice player, 16 kHz mono |
 
 These are ordinary PulseAudio devices. Applications select them through their normal audio
 settings, `pavucontrol`, or `PULSE_SOURCE`/`PULSE_SINK`; they do not access a Linux Bluetooth adapter.
@@ -29,13 +29,13 @@ Channel count: 1
 Standby: no
 ```
 
-The initial native `livecd_microphone` delivered 576,000 samples in a 12-second capture. The test retained
+The initial native `android_microphone` delivered 576,000 samples in a 12-second capture. The test retained
 only levels, not audio. Android reported `SCO_STATE_ACTIVE_EXTERNAL` during the capture and
-`SCO_STATE_INACTIVE` afterwards. PulseAudio returned to `livecd_no_microphone`; the helper and
+`SCO_STATE_INACTIVE` afterwards. PulseAudio returned to `android_no_microphone`; the helper and
 its staged DEX directory exited/removed themselves.
 
-The later named-device test captured 288,000 samples from `livecd_bluetooth_input` while
-`pacat` played a generated tone through `livecd_bluetooth_output`. AudioFlinger simultaneously
+The later named-device test captured 288,000 samples from `android_bluetooth_input` while
+`pacat` played a generated tone through `android_bluetooth_output`. AudioFlinger simultaneously
 reported `AUDIO_DEVICE_IN_BLUETOOTH_SCO_HEADSET` and
 `AUDIO_DEVICE_OUT_BLUETOOTH_SCO_HEADSET`. The user confirmed hearing the repeated tone in the
 headset. The native player selects `SL_ANDROID_STREAM_VOICE`; desktop media playback is not used
@@ -44,7 +44,7 @@ as a substitute for the voice output.
 The application-facing PCM rates do not establish the headset codec's actual bandwidth or
 speech quality. A real voice call was not tested.
 
-The built `livecd-mic` **0.1.0-1** package was then installed through APT on the rig. Its installed
+The built `android-pulseaudio-mic` **0.1.0-1** package was then installed through APT on the rig. Its installed
 commands passed three additional checks: an invalid device was rejected without opening capture;
 a four-second native capture delivered 192,000 samples and cleaned up on child exit; SIGTERM
 returned the microphone to silence and released SCO. The final Android mode was normal. Host
@@ -102,7 +102,7 @@ Relevant primary sources:
 ## Native integration and lifecycle
 
 ```text
-livecd-mic-bluetooth (Termux Python controller)
+android-pulseaudio-bluetooth (Termux Python controller)
   ├─ Shizuku/rish → shell app_process → Bluetooth/AudioManager routing only
   ├─ Android microphone → module-sles-source → named input → Linux applications
   └─ Linux applications → named pipe sink → native OpenSL voice player → Android output
@@ -151,7 +151,7 @@ only while the session is active. Newer Android uses listeners.
 - SIGKILL cannot run the controller's endpoint cleanup. A later explicit `off` also removes orphaned
   endpoints and closes their playback pipe. A killed route helper may also leave
   legacy voice-recognition SCO active because that API has no per-client Binder ownership.
-  Recover with `livecd-mic-bluetooth off` and disconnect/reconnect the headset if needed.
+  Recover with `android-pulseaudio-bluetooth off` and disconnect/reconnect the headset if needed.
 - Output is currently a mono 16 kHz voice stream, even if the headset also supports higher-quality
   A2DP or LE Audio. High-fidelity Bluetooth media profiles are outside this call-audio bridge.
 - No acoustic speech-quality comparison, controlled headset disconnect, real incoming phone call,

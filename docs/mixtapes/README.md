@@ -15,7 +15,7 @@ Mixtapes (Bionic) ─ GTK4, libadwaita, WebKitGTK ─ Termux:X11
 
 ## Build and install
 
-GitHub Actions builds the package from [its recipe](../../packages/livecd-mixtapes/build.sh), which downloads
+GitHub Actions builds the package from [its recipe](../../packages/mixtapes/build.sh), which downloads
 a pinned upstream commit, verifies its SHA-256 and applies the patches. To install it from the local apt
 repository, run this in native Termux:
 
@@ -101,14 +101,14 @@ the [v0.1.2 release](https://codeberg.org/ThetaDev/rustypipe-botguard/releases/t
 ## Termux changes to Mixtapes
 
 Rust targets `aarch64-linux-android` on Termux, so code gated on `target_os = "linux"` is left out.
-[`0001-termux.patch`](../../packages/livecd-mixtapes/0001-termux.patch) and the two smaller patches beside it are the complete list:
+[`0001-termux.patch`](../../packages/mixtapes/0001-termux.patch) and the two smaller patches beside it are the complete list:
 
 | Change | Reason |
 | --- | --- |
 | MPRIS built on Android | Upstream gates it on `linux`, which would select the Windows media-control code's stub |
 | PO tokens from a helper program instead of linked V8 | `rusty_v8` publishes no Android library. Upstream's Windows build already works this way |
 | Helper's install path | Termux's prefix |
-| `rustls-platform-verifier` from a local copy | Its Android module needs a JVM to reach Android's trust store. [`0002-rustls-verifier-no-jvm.patch`](../../packages/livecd-mixtapes/0002-rustls-verifier-no-jvm.patch) disables that `cfg`, which selects the Unix module and Termux's CA bundle |
+| `rustls-platform-verifier` from a local copy | Its Android module needs a JVM to reach Android's trust store. [`0002-rustls-verifier-no-jvm.patch`](../../packages/mixtapes/0002-rustls-verifier-no-jvm.patch) disables that `cfg`, which selects the Unix module and Termux's CA bundle |
 | Menu entry runs `mixtapes` | The program is installed as `mixtapes`, not `muse` |
 | HTTP/2 header limit raised to 64 KB | **A bug, not a port issue**, below |
 
@@ -119,7 +119,7 @@ this commit too, though only Termux was built here. It is worth reporting upstre
 
 **PO tokens.** Only uploaded songs and gated formats need them. If the glibc packages are missing, the
 helper fails, the app logs it, and everything else still plays. Without V8 linked in, tokens come from
-[a small wrapper](../../packages/livecd-mixtapes/rustypipe-botguard) around upstream's arm64 glibc program.
+[a small wrapper](../../packages/mixtapes/rustypipe-botguard) around upstream's arm64 glibc program.
 
 **GStreamer's HTTP source.** `souphttpsrc` cannot load here, because its loader only asks for
 `libsoup-3.0.so.0` and Termux ships `libsoup-3.0.so`. Playback uses `curlhttpsrc` from `gst-plugins-bad`,
@@ -146,7 +146,7 @@ sound left the speaker.
 ## Remove
 
 ```sh
-apt remove livecd-mixtapes
+apt remove mixtapes
 ```
 
 Your session, preferences, cache and downloads are kept, in `~/.local/share/livecd-native/muse`,

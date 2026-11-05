@@ -30,7 +30,7 @@ libei
 libcolord
 startup-notification
 libxkbfile
-livecd-upower
+android-upower
 gsettings-desktop-schemas
 gnome-themes-extra
 adwaita-icon-theme
@@ -49,5 +49,5 @@ otf-noto-sans-cjk
 fontconfig-utils
 xsettingsd
 gnome-session
-livecd-gi-paths
+gnome-48-gi-paths
 mutter-x11-frames

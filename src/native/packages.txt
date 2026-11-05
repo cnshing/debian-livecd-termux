@@ -29,7 +29,7 @@ libei
 libcolord
 startup-notification
 libxkbfile
-livecd-upower
+android-upower
 gsettings-desktop-schemas
 gnome-themes-extra
 adwaita-icon-theme

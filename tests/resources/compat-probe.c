@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: MIT
- * Run through livecd-resources-run on the Android rig with Shizuku authorized.
+ * Run through android-procfs-run on the Android rig with Shizuku authorized.
  */
 #define _GNU_SOURCE
 #include <assert.h>

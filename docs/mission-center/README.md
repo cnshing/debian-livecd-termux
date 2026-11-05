@@ -23,7 +23,7 @@ bash tools/build-packages.sh --install mission-center
 # Compatibility entry point: bash packages/mission-center/build-on-device.sh
 ```
 
-The helper uses the pinned `termux-packages` checkout, builds `livecd-resources`
+The helper uses the pinned `termux-packages` checkout, builds `android-procfs`
 first, and installs the resulting `.deb` files with APT. Sources and build output
 are managed by Termux's builder. `LIVECD_TERMUX_BUILDER` selects an existing
 checkout at the pinned revision. See [package building](../structure.md#building-packages).
@@ -32,11 +32,11 @@ Shizuku must be running and Termux must be authorized. Export `rish` and its DEX
 into `~/.local/lib/shizuku/`, then run:
 
 ```sh
-livecd-resources-setup
+android-procfs-setup
 livecd-native exec -- missioncenter
 ```
 
-For another rish location, set `LIVECD_RESOURCES_RISH` for setup and the first client
+For another rish location, set `ANDROID_PROCFS_RISH` for setup and the first client
 that starts the broker. `MC_RISH` remains a fallback for older configurations.
 `missioncenter-shizuku-setup` is a compatibility alias. Setup installs
 the fixed reader into a private, shell-owned directory under `/data/local/tmp`.

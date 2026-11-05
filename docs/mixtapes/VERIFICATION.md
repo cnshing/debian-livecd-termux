@@ -4,7 +4,7 @@ Raw capture paths beginning with `temp/` refer to local files excluded from Git.
 See the [privacy notes](../privacy.md).
 
 > Tested with a binary built on the phone by an earlier script, since removed. This repository's
-> [recipe](../../packages/livecd-mixtapes/build.sh) uses the same source and patches, but it cross-compiles and
+> [recipe](../../packages/mixtapes/build.sh) uses the same source and patches, but it cross-compiles and
 > has not been built yet. Paths here were updated.
 
 Tested on the established rig: Galaxy Note10+ (SM-N975U1),

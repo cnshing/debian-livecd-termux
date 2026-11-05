@@ -20,7 +20,7 @@ PipeWire-to-Termux-PulseAudio tunnel. No native GNOME installation was needed.
 
 | Check | Result / evidence |
 | --- | --- |
-| Native package installation | `easyeffects` 7.2.5-1, `lsp-plugins-lv2` 1.2.35-1, `livecd-audio` 0.1.0-1; package metadata and hashes (`temp/docs/evidence/audio/packages.json`) |
+| Native package installation | `easyeffects` 7.2.5-1, `lsp-plugins-lv2` 1.2.35-1, `easyeffects-bridge` 0.1.0-1; package metadata and hashes (`temp/docs/evidence/audio/packages.json`) |
 | EasyEffects executable | `easyeffects --version` reports 7.2.5; native loader and libraries, not Debian binaries |
 | Required equalizer plugin | Native `lv2ls` discovers `http://lsp-plug.in/plugins/lv2/para_equalizer_x32_lr` |
 | GUI | Native EasyEffects opens on the existing Termux:X11 display; window capture (`temp/docs/evidence/audio/easyeffects.png`). GUI activation returns success after the included GApplication fix |
@@ -92,5 +92,5 @@ audio graph is stopped at handoff; the existing desktop/PulseAudio service
 remains running. Temporary correction presets were removed and the output
 plugin list was returned to empty. No headphone correction is selected for the
 user. Source archives, build results, packages and logs remain in
-`~/.cache/livecd-audio-build` on the phone. Copies of the three packages are in
+`~/.cache/easyeffects-bridge-build` on the phone. Copies of the three packages are in
 this workspace's ignored `repo/incoming/` directory.

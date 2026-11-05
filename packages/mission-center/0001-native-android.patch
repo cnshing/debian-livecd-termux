@@ -365,7 +365,7 @@ index d1f8afb..e4f5a62 100644
 +            Ok(snapshot) => { info.sample_error = None; snapshot }
 +            Err(e) => {
 +                log::error!("CPU counters unavailable: {e}");
-+                info.sample_error = Some(format!("CPU counters unavailable: {e}. Check Shizuku and run livecd-resources-setup."));
++                info.sample_error = Some(format!("CPU counters unavailable: {e}. Check Shizuku and run android-procfs-setup."));
 +                info.total_usage_percent = 0.;
 +                info.kernel_usage_percent = 0.;
 +                per_core_usage.fill(0.);

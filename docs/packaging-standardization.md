@@ -5,12 +5,12 @@ handled in a separate session and were excluded from this change.
 
 ## Package ownership
 
-- `livecd-mozjs-128`, `livecd-gjs`, `livecd-mutter` and
-  `livecd-gnome-shell` build the GNOME source port's versions and patches with
+- `gnome-48-mozjs`, `gnome-48-gjs`, `gnome-48-mutter` and
+  `gnome-48-shell` build the GNOME source port's versions and patches with
   Termux's toolchain and package lifecycle. Their matching libraries stay under
   `$PREFIX/opt/gnome-48`. Meson can use bundled subprojects from the verified
   source archive, but cannot download additional wraps.
-- `livecd-gnome-runtime` installs the native session and extra schemas.
+- `gnome-48-runtime` installs the native session and extra schemas.
   `livecd-gnome-data` packages portable extension/font/cursor assets; Noto fonts
   have a separate subpackage. Every input's attribution is retained, and the
   data installer rejects ELF files.
@@ -19,7 +19,7 @@ handled in a separate session and were excluded from this change.
   preserves replaced paths in `~/.local/state/livecd-native/runtime-backups`.
   The default installer does not fetch or rewrite a GNOME executable. Missing
   backend selections now fall back to native; explicit Debian selections remain.
-- `livecd-gsconnect` builds its verified source archive using Meson, retaining
+- `gsconnect` builds its verified source archive using Meson, retaining
   Debian's identity-validation security fix and the native CJS changes.
 - The Code OSS recipe resolves its menu-entry tokens during packaging. Its
   overlay only selects the desktop profile wrapper and extensions. Staging
@@ -44,7 +44,7 @@ bash tools/build-packages.sh --install PACKAGE
 The compatibility `build-on-device.sh` scripts now use this same builder and
 install generated packages with APT, including declared subpackages. They do not
 copy over installed package files or add APT holds. An old UPower hold is removed
-when replacing it with `livecd-upower`. The shared helper assumes a configured
+when replacing it with `android-upower`. The shared helper assumes a configured
 Termux build environment; Linux hosts use Docker. Native builds default to two
 jobs and take the normal desktop session lock.
 
@@ -83,5 +83,5 @@ builder targets Linux machines, and the optional Mixtapes token helper remains
 upstream's glibc binary. The legacy PRoot profile has been removed.
 Specialized browser/video standardization belongs to the separate session.
 The proc-stat handoff's fixed session preload is now integrated with the
-`livecd-resources` package and desktop dependency. Its old isolated device copy
+`android-procfs` package and desktop dependency. Its old isolated device copy
 remains available for rollback; see [the audit](resources/PROC-STAT-AUDIT.md).

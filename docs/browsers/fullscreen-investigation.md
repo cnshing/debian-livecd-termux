@@ -52,7 +52,7 @@ fixed pixmap dimensions. Fullscreen transitions can leave damage describing a
 larger area than the current pixmap. The trace confirms this size mismatch;
 the precise ordering of the contributing XDamage/Configure events was not traced.
 
-The [candidate patch](../../packages/livecd-mutter/0010-clip-pixmap-damage.patch) intersects accumulated
+The [candidate patch](../../packages/gnome-48-mutter/0010-clip-pixmap-damage.patch) intersects accumulated
 damage with `(0, 0, texture_width, texture_height)` before any fallback read or
 upload. Empty intersections clear the pending damage and return. It addresses
 the read bounds rather than suppressing X errors.

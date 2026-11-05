@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Native Termux integration: plain tools under livecd-resources-run, no GUI needed."""
+"""Native Termux integration: plain tools under android-procfs-run, no GUI needed."""
 import fcntl
 import json
 import os
@@ -13,10 +13,10 @@ import tempfile
 import termios
 import time
 
-cache = Path.home() / '.cache/livecd-resources'
+cache = Path.home() / '.cache/android-procfs'
 cache.mkdir(parents=True, exist_ok=True)
 
-result = subprocess.run(['livecd-resources-run', 'ps', '-A', '-o', 'pid,ppid,user,comm'],
+result = subprocess.run(['android-procfs-run', 'ps', '-A', '-o', 'pid,ppid,user,comm'],
                         capture_output=True, text=True, timeout=30, check=True)
 assert re.search(r'^\s*1\s+0\s+root\s+', result.stdout, re.M)
 assert 'system_server' in result.stdout
@@ -24,7 +24,7 @@ processes = len(result.stdout.splitlines()) - 1
 assert processes > 100
 print(f'PASS stock procps ps: {processes} processes, init and system_server', flush=True)
 
-result = subprocess.run(['livecd-resources-run', 'top', '-b', '-n', '2', '-d', '1'],
+result = subprocess.run(['android-procfs-run', 'top', '-b', '-n', '2', '-d', '1'],
                         capture_output=True, text=True, timeout=40, check=True)
 totals = re.findall(r'Tasks:\s+(\d+) total', result.stdout)
 assert len(totals) >= 2 and all(int(value) > 100 for value in totals)
@@ -37,7 +37,7 @@ with tempfile.TemporaryDirectory(prefix='resources-htop-') as config:
     master, slave = pty.openpty()
     fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack('HHHH', 40, 140, 0, 0))
     env = dict(os.environ, TERM='xterm-256color', XDG_CONFIG_HOME=config)
-    child = subprocess.Popen(['livecd-resources-run', 'htop', '-d', '10'],
+    child = subprocess.Popen(['android-procfs-run', 'htop', '-d', '10'],
                              stdin=slave, stdout=slave, stderr=slave, env=env)
     os.close(slave)
     output = bytearray()

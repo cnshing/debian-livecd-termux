@@ -18,7 +18,7 @@ TERMUX_PKG_SHA256=(
 	e487986e7b1f165d92280e44b02ad57113fe44e7969483951cd10027feab7e81
 	074cbd4898a104de43835299f5c5c0edc6f901ad00ff89a469a66d4fab8353de
 )
-TERMUX_PKG_DEPENDS="dconf, gettext, glib, gtk4 (>= 4.22), hicolor-icon-theme, libadwaita (>= 1.9), libandroid-spawn, libc++, libiconv, livecd-resources, openssl"
+TERMUX_PKG_DEPENDS="dconf, gettext, glib, gtk4 (>= 4.22), hicolor-icon-theme, libadwaita (>= 1.9), libandroid-spawn, libc++, libiconv, android-procfs, openssl"
 TERMUX_PKG_BUILD_DEPENDS="blueprint-compiler, glib-cross"
 TERMUX_PKG_BUILD_IN_SRC=true
 

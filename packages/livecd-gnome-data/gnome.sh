@@ -1,1 +1,1 @@
-../livecd-gnome-runtime/gnome.sh
+../gnome-48-runtime/gnome.sh

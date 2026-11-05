@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: MIT
  * Forks while signals whose handler writes keep arriving, as GLib's child watch does when VTE respawns a
  * shell. Under a preload that locks inside write, a signal during fork used to wait on its own thread.
- * Run with LD_PRELOAD naming liblivecd-proc.so and a timeout: it prints "ok" or never returns.
+ * Run with LD_PRELOAD naming libandroid-procfs.so and a timeout: it prints "ok" or never returns.
  */
 #define _GNU_SOURCE
 #include <fcntl.h>

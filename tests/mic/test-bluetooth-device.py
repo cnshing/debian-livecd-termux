@@ -16,8 +16,8 @@ import time
 
 
 PREFIX = Path(os.environ.get("PREFIX", "/data/data/com.termux/files/usr"))
-MIC = str(PREFIX / "bin/livecd-mic")
-BLUETOOTH = str(PREFIX / "bin/livecd-mic-bluetooth")
+MIC = str(PREFIX / "bin/android-pulseaudio-mic")
+BLUETOOTH = str(PREFIX / "bin/android-pulseaudio-bluetooth")
 
 
 def run(*arguments, check=True):
@@ -30,7 +30,7 @@ def run(*arguments, check=True):
 def microphone_off():
     state = json.loads(run(MIC, "status").stdout)
     assert state["microphone"] == "off", state
-    assert state["default_source"] == "livecd_no_microphone", state
+    assert state["default_source"] == "android_no_microphone", state
 
 
 def route_off():
@@ -54,7 +54,7 @@ def main():
     capture = run(BLUETOOTH, "call", "--", MIC, "test", "--seconds", "4")
     messages = [json.loads(line) for line in capture.stdout.splitlines()]
     assert messages[0]["event"] == "ready", messages
-    assert messages[1]["source"] == "livecd_bluetooth_input", messages
+    assert messages[1]["source"] == "android_bluetooth_input", messages
     assert messages[1]["samples"] == 192000, messages
     microphone_off()
     route_off()
@@ -88,8 +88,8 @@ def main():
     defaults = {kind: run("pactl", f"get-default-{kind}").stdout.strip() for kind in ("source", "sink")}
     try:
         enabled = json.loads(run(BLUETOOTH, "on").stdout)
-        assert enabled["active"] and enabled["input"] == "livecd_bluetooth_input", enabled
-        assert enabled["output"] == "livecd_bluetooth_output", enabled
+        assert enabled["active"] and enabled["input"] == "android_bluetooth_input", enabled
+        assert enabled["output"] == "android_bluetooth_output", enabled
         sources = json.loads(run("pactl", "--format=json", "list", "sources").stdout)
         sinks = json.loads(run("pactl", "--format=json", "list", "sinks").stdout)
         source = next(item for item in sources if item["name"] == enabled["input"])
@@ -110,8 +110,8 @@ def main():
         run(BLUETOOTH, "off")
     for kind in ("source", "sink"):
         assert run("pactl", f"get-default-{kind}").stdout.strip() == defaults[kind]
-    assert "livecd_bluetooth_output" not in run("pactl", "list", "short", "sinks").stdout
-    assert "livecd_bluetooth_input" not in run("pactl", "list", "short", "sources").stdout
+    assert "android_bluetooth_output" not in run("pactl", "list", "short", "sinks").stdout
+    assert "android_bluetooth_input" not in run("pactl", "list", "short", "sources").stdout
     route_off()
     print(json.dumps({"check": "background-off-restores-defaults", "passed": True}), flush=True)
 
@@ -133,8 +133,8 @@ def main():
             time.sleep(0.1)
     finally:
         run(BLUETOOTH, "off")
-    assert "livecd_bluetooth_output" not in run("pactl", "list", "short", "sinks").stdout
-    assert "livecd_bluetooth_input" not in run("pactl", "list", "short", "sources").stdout
+    assert "android_bluetooth_output" not in run("pactl", "list", "short", "sinks").stdout
+    assert "android_bluetooth_input" not in run("pactl", "list", "short", "sources").stdout
     route_off()
     print(json.dumps({"check": "explicit-off-after-sigkill", "passed": True}), flush=True)
 

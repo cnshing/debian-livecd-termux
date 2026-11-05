@@ -68,10 +68,10 @@ phone, from the checkout (the C probes assume this eight-core rig):
 ```sh
 cargo test --locked --manifest-path tests/mission-center/source/Cargo.toml
 clang -O2 tests/resources/compat-probe.c -o "$TMPDIR/resource-compat-probe"
-livecd-resources-run "$TMPDIR/resource-compat-probe"
+android-procfs-run "$TMPDIR/resource-compat-probe"
 clang -O2 tests/resources/gtop-probe.c $(pkg-config --cflags --libs libgtop-2.0) \
   -o "$TMPDIR/resource-gtop-probe"
-livecd-resources-run "$TMPDIR/resource-gtop-probe"
+android-procfs-run "$TMPDIR/resource-gtop-probe"
 python tests/resources/test-apps.py
 python tests/resources/test-mission-center.py
 ```

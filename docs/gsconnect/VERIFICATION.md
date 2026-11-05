@@ -133,7 +133,7 @@ The last fix was re-tested on the final package: see [Final package](#final-pack
 - Native GNOME Shell: the extension's panel UI has not run natively. No native Shell existed during
   these tests. A separate port ([`docs/native/`](../native)) has since started one on the phone;
   the daemon's private bus would need joining to its session.
-- The menu entry that port adds for `livecd-gsconnect ui`.
+- The menu entry that port adds for `gsconnect ui`.
 - Mouse clicks and key injection. Only pointer motion was tried, to avoid typing into a focused window.
 - Android's own clipboard, as distinct from the X clipboard; whether Termux:X11 bridges them.
 - Long sessions, Doze, reboot, network changes, battery cost, and Android 12+ process limits.
@@ -156,12 +156,12 @@ generates a new certificate. Termux gained `cjs`, `spidermonkey`, `gobject-intro
 
 ## Final package
 
-The final `livecd-gsconnect` `62-1+deb13u1+termux1` was built from an empty cache, so Debian's
+The final `gsconnect` `62-1+deb13u1+termux1` was built from an empty cache, so Debian's
 package was downloaded again and its checksum verified, then installed with APT.
 
 | Check | Result |
 | --- | --- |
-| `DISPLAY=:77 livecd-gsconnect start`, no X server there | Exit 1 after 2 s with a clear message; no process left behind |
+| `DISPLAY=:77 gsconnect start`, no X server there | Exit 1 after 2 s with a clear message; no process left behind |
 | Normal `start` | Exit 0 after 1 s; a second `start` reports it is already running |
 | `test-protocol.py` | 14 of 14 passed; 0 criticals in the whole session log |
 | `stop` | No process left behind; TCP 1716 refused from the PC |
@@ -174,7 +174,7 @@ putting more unpaired identities on the LAN. A readiness check tried in between 
 a healthy daemon, because `gapplication list-actions` printed nothing; the final check uses
 `org.gtk.Actions.List`, compared against both a healthy and a no-X daemon first.
 
-`livecd-gsconnect` is left installed and **stopped** on the phone, so nothing is listening. Nothing
+`gsconnect` is left installed and **stopped** on the phone, so nothing is listening. Nothing
 starts it automatically. Nothing is committed.
 
 **One later change is not in the installed package.** `ui` now starts the daemon if needed, for

@@ -5,7 +5,7 @@ from pathlib import Path
 
 from desktop import PREFIX, environment
 
-path = PREFIX / 'libexec/livecd-storage/migrate.py'
+path = PREFIX / 'libexec/android-gvfs/migrate.py'
 spec = importlib.util.spec_from_file_location('storage_migration', path)
 migration = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(migration)

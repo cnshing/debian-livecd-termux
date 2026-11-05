@@ -18,7 +18,7 @@ export PULSE_SERVER=unix:$T/s
     export PULSE_RUNTIME_PATH=$T/rt PULSE_STATE_PATH=$T/st PULSE_CONFIG_PATH=$T/cfg HOME=$T/home
     unset PULSE_SERVER
     exec pulseaudio --daemonize=no --exit-idle-time=-1 --use-pid-file=no -n --load=module-sles-sink \
-        '--load=module-null-source source_name=livecd_no_microphone format=s16le rate=48000 channels=1 description="No microphone"' \
+        '--load=module-null-source source_name=android_no_microphone format=s16le rate=48000 channels=1 description="No microphone"' \
         "--load=module-native-protocol-unix socket=$T/s auth-anonymous=1"
 ) >"$T/pa.log" 2>&1 </dev/null &
 pa=$!
@@ -37,7 +37,7 @@ echo; echo "=== 2. Raw capture: loudness during and between vibration pulses"
 RISH_APPLICATION_ID=com.termux python3 -I - "$rish" <<'PY'
 import array, math, subprocess, sys, threading, time
 rish = sys.argv[1]
-capture = subprocess.Popen(["parec", "--device=livecd_microphone", "--raw", "--format=s16le", "--rate=48000", "--channels=1"],
+capture = subprocess.Popen(["parec", "--device=android_microphone", "--raw", "--format=s16le", "--rate=48000", "--channels=1"],
                            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL)
 frames = []
 def read():
@@ -52,7 +52,7 @@ time.sleep(1.5)
 pulses = []
 for _ in range(4):
     pulses.append(time.monotonic())
-    subprocess.Popen([rish, "-c", "cmd vibrator vibrate -f 1500 livecd-mic-test"], stdin=subprocess.DEVNULL,
+    subprocess.Popen([rish, "-c", "cmd vibrator vibrate -f 1500 android-pulseaudio-mic-test"], stdin=subprocess.DEVNULL,
                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     time.sleep(3)
 capture.terminate()
@@ -68,7 +68,7 @@ echo; echo "=== 3. Serein's engine: 2 s pulses starting at about t=3, 7 and 11"
 (
     sleep 2
     for _ in 1 2 3; do
-        RISH_APPLICATION_ID=com.termux timeout 5 "$rish" -c 'cmd vibrator vibrate -f 2000 livecd-mic-test' </dev/null >/dev/null 2>&1
+        RISH_APPLICATION_ID=com.termux timeout 5 "$rish" -c 'cmd vibrator vibrate -f 2000 android-pulseaudio-mic-test' </dev/null >/dev/null 2>&1
         sleep 4
     done
 ) & pulses=$!

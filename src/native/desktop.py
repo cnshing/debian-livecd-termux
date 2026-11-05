@@ -22,8 +22,8 @@ from integrations import Integrations
 PREFIX = Path('/data/data/com.termux/files/usr')
 BASE = Path.home() / '.local/lib/livecd-native'
 ROOT = Path.home() / '.local/opt/livecd-native/gnome-48'
-RESOURCE_PRELOAD = PREFIX / 'lib/liblivecd-proc.so'
-RESOURCE_COMMANDS = PREFIX / 'libexec/livecd-resources/bin'
+RESOURCE_PRELOAD = PREFIX / 'lib/libandroid-procfs.so'
+RESOURCE_COMMANDS = PREFIX / 'libexec/android-procfs/bin'
 ACCELERATION = Path.home() / '.local/opt/livecd-native/acceleration'
 STATE = Path.home() / '.local/state/livecd-native'
 DATA = Path.home() / '.local/share/livecd-native'
@@ -98,7 +98,7 @@ def environment(renderer='software'):
     library = RESOURCE_PRELOAD
     preload = [item for item in env.get('LD_PRELOAD', '').replace(':', ' ').split()
                if Path(item).name != library.name]
-    if env.get('LIVECD_RESOURCES_COMPAT') != '0' and library.exists() and preload_works(library, preload):
+    if env.get('ANDROID_PROCFS_COMPAT') != '0' and library.exists() and preload_works(library, preload):
         preload.insert(0, str(library))
         env['PATH'] = f'{RESOURCE_COMMANDS}:' + env['PATH']
     native_encode(env, preload)
@@ -342,7 +342,7 @@ def run(safe, renderer='software'):
         children.append(subprocess.Popen(['pulseaudio', '--daemonize=no', '--exit-idle-time=-1',
             '--use-pid-file=no', '-n', '--load=module-sles-sink',
             # Otherwise the default source is the speaker monitor, which clients record as a microphone.
-            '--load=module-null-source source_name=livecd_no_microphone format=s16le rate=48000 channels=1 description="No microphone"',
+            '--load=module-null-source source_name=android_no_microphone format=s16le rate=48000 channels=1 description="No microphone"',
             '--load=module-native-protocol-unix socket=' + str(pulse) + ' auth-anonymous=1'], env=audio_env, start_new_session=True))
         deadline = time.monotonic() + 10
         while subprocess.run(['pactl', 'info'], env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode:

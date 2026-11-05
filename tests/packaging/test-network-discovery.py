@@ -18,14 +18,14 @@ def load(name, relative):
 
 
 recipes = load('network_recipes', 'tools/recipes.py')
-discovery = load('network_discovery', 'packages/livecd-avahi/discovery.py')
+discovery = load('network_discovery', 'packages/avahi/discovery.py')
 
 
 class NetworkDiscovery(unittest.TestCase):
     def test_requested_set_has_one_job_and_only_its_local_dependencies(self):
         jobs = recipes.plan(['gvfs'])['include']
         self.assertEqual(len(jobs), 1)
-        self.assertEqual(jobs[0]['packages'], 'livecd-avahi gvfs')
+        self.assertEqual(jobs[0]['packages'], 'avahi gvfs')
         self.assertFalse(jobs[0]['exact'])
 
     def test_discovery_requires_the_desktop_system_bus(self):

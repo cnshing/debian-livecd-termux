@@ -9,12 +9,12 @@
 # unpaired devices switches off its own discovery and saves that; check `discoverable` after.
 # An unexplained notification was also reported on the PC during testing; see VERIFICATION.md.
 set -euo pipefail
-dir=${LIVECD_GSCONNECT_PEER_DIR:-${XDG_RUNTIME_DIR:-/tmp}/livecd-gsconnect-peer}
+dir=${GSCONNECT_PEER_DIR:-${XDG_RUNTIME_DIR:-/tmp}/gsconnect-peer}
 daemon=/usr/share/gnome-shell/extensions/gsconnect@andyholmes.github.io/service/daemon.js
 
 isolated() {
     env -i PATH="$PATH" HOME="$dir/home" LANG=C.UTF-8 DISPLAY="${DISPLAY:-:0}" GDK_BACKEND=x11 \
-        LIVECD_GSCONNECT_PEER_DIR="$dir" \
+        GSCONNECT_PEER_DIR="$dir" \
         XAUTHORITY="${XAUTHORITY:-$HOME/.Xauthority}" XDG_CONFIG_HOME="$dir/config" \
         XDG_CACHE_HOME="$dir/cache" XDG_DATA_HOME="$dir/data" XDG_RUNTIME_DIR="$dir/run" \
         GNOME_SETUP_DISPLAY="${DISPLAY:-:0}" "$@"

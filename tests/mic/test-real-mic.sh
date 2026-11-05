@@ -19,7 +19,7 @@ start_pa() {
         export PULSE_RUNTIME_PATH=$T/rt PULSE_STATE_PATH=$T/st PULSE_CONFIG_PATH=$T/cfg HOME=$T/home
         unset PULSE_SERVER
         exec pulseaudio --daemonize=no --exit-idle-time=-1 --use-pid-file=no -n --load=module-sles-sink \
-            '--load=module-null-source source_name=livecd_no_microphone format=s16le rate=48000 channels=1 description="No microphone"' \
+            '--load=module-null-source source_name=android_no_microphone format=s16le rate=48000 channels=1 description="No microphone"' \
             "--load=module-native-protocol-unix socket=$T/s auth-anonymous=1"
     ) >"$T/pa.log" 2>&1 </dev/null &
     pa=$!
@@ -92,14 +92,14 @@ pactl list short sources </dev/null | cut -f2,4,5
 android_recording
 
 echo; echo "=== 4. Ambient capture, then the speaker tone through the air (needs media volume above 0)"
-analyse 3 livecd_microphone
+analyse 3 android_microphone
 tone 5 & tone_pid=$!
 sleep 1
-analyse 3 livecd_microphone
+analyse 3 android_microphone
 wait "$tone_pid"
 
 echo; echo "=== 5. While something records: Android recorder"
-timeout 4 parec --device=livecd_microphone --raw </dev/null >/dev/null 2>&1 & rec=$!
+timeout 4 parec --device=android_microphone --raw </dev/null >/dev/null 2>&1 & rec=$!
 sleep 2
 pactl list short sources </dev/null | cut -f2,5
 android_recording

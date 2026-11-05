@@ -129,9 +129,9 @@ def main():
     text = text.replace('@INDEX_RECURSIVE_DIRS@', '').replace('@INDEX_SINGLE_DIRS@', '')
     (ROOT / 'share/glib-2.0/schemas/org.freedesktop.Tracker3.Miner.Files.gschema.xml').write_text(text)
     subprocess.run(['glib-compile-schemas', '--strict', str(ROOT / 'share/glib-2.0/schemas')], check=True)
-    # The livecd-gi-paths package supplies the adapter this replaces libgirepository with.
+    # The gnome-48-gi-paths package supplies the adapter this replaces libgirepository with.
     subprocess.run(['patchelf', '--replace-needed', 'libgirepository-1.0.so',
-        'liblivecd-gi-paths.so', str(ROOT / 'bin/gnome-shell')], check=True)
+        'libgnome-48-gi-paths.so', str(ROOT / 'bin/gnome-shell')], check=True)
     # The bundle omits Mutter's GTK frame client. The mutter-x11-frames package installs it at
     # the path this libmutter runs it from, so neither the library nor the prefix needs relocating.
     # The tracked GIR was updated for GioUnix.DesktopAppInfo, but the bundled

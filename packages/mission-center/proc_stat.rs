@@ -5,14 +5,14 @@ use std::ffi::{c_char, CString};
 use std::io;
 
 #[cfg(target_os = "android")]
-#[link(name = "livecd_resources")]
+#[link(name = "android_procfs")]
 unsafe extern "C" {
-    fn livecd_resources_snapshot(
+    fn android_procfs_snapshot(
         category: *const c_char,
         data: *mut *mut c_char,
         length: *mut usize,
     ) -> libc::c_int;
-    fn livecd_resources_free(data: *mut c_char);
+    fn android_procfs_free(data: *mut c_char);
 }
 
 fn invalid(message: impl Into<String>) -> io::Error {
@@ -39,7 +39,7 @@ pub fn request(kind: &str) -> io::Result<String> {
     let category = CString::new(kind).map_err(|_| invalid("invalid resource category"))?;
     let mut data = std::ptr::null_mut();
     let mut length = 0;
-    let error = unsafe { livecd_resources_snapshot(category.as_ptr(), &mut data, &mut length) };
+    let error = unsafe { android_procfs_snapshot(category.as_ptr(), &mut data, &mut length) };
     if error != 0 {
         return Err(io::Error::from_raw_os_error(error));
     }
@@ -48,7 +48,7 @@ pub fn request(kind: &str) -> io::Result<String> {
         .map(str::to_owned)
         .map_err(|_| invalid("non-UTF8 resource snapshot"));
     unsafe {
-        livecd_resources_free(data);
+        android_procfs_free(data);
     }
     result
 }

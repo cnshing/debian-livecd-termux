@@ -68,8 +68,8 @@ Wellbeing edits `org.gnome.desktop.break-reminders` and
 break manager uses Mutter's idle monitor, and it reports the schedule state on
 `org.gnome.Shell.ScreenTime`.
 
-Screen-time accounting requires `livecd-gnome-shell` and
-`livecd-gnome-runtime` **48.8-1 or later**. Earlier builds wait indefinitely for
+Screen-time accounting requires `gnome-48-shell` and
+`gnome-48-runtime` **48.8-1 or later**. Earlier builds wait indefinitely for
 logind's user proxy, count idle time as active and never apply daily limits.
 
 The native Shell adapter supplies only session activity to the time-limits
@@ -182,20 +182,20 @@ JPEG preview decoding.
 
 Sound uses PulseAudio's existing source notifications, including cardless OpenSL
 and Bluetooth bridge devices. It does not pair or discover Android Bluetooth
-hardware itself. The existing Microphone overlay supplies `livecd-mic` and
-`livecd-mic-bluetooth`; these must publish a source before Sound can list it.
-`livecd_no_microphone` is an intentional silent fallback, not the phone's microphone.
+hardware itself. The existing Microphone overlay supplies `android-pulseaudio-mic` and
+`android-pulseaudio-bluetooth`; these must publish a source before Sound can list it.
+`android_no_microphone` is an intentional silent fallback, not the phone's microphone.
 
 The current desktop controller starts installed microphone integrations in normal
 sessions: it tries any Android-reported Bluetooth call headset, then falls back
 to the phone microphone. Both hooks can be disabled in the integration settings.
 Older manually staged desktop controllers lack this startup integration. Discovery
-runs at desktop startup or when `livecd-mic-bluetooth on --default` is invoked;
+runs at desktop startup or when `android-pulseaudio-bluetooth on --default` is invoked;
 there is no continuous headset-connect/reconnect watcher. Pair and enable Calls in
 Android. The bridge has no WI-C310-specific device filter. See
 [the microphone guide](../mic/README.md) for permission and Shizuku requirements.
 
-On the phone, enabling `livecd-mic` produced a visible **Microphone** input and
+On the phone, enabling `android-pulseaudio-mic` produced a visible **Microphone** input and
 level meter in Sound. With an Android-connected WI-C310, the bridge produced
 visible **WI-C310 Headphones** and **WI-C310 Microphone** controls in Sound.
 The Bluetooth source also delivered 96,000 samples in a two-second capture probe;
@@ -230,7 +230,7 @@ The planner produces exactly one build set, `gnome-control-center`. Runtime
 the Settings package does not require replacing or unholding the phone's UPower.
 The packaged GNOME runtime is recommended, rather than a build dependency, so the
 Settings set does not rebuild Shell, Mutter or GJS. The Shell/runtime change
-has a separate GNOME runtime build set; select `livecd-gnome-runtime` to build it.
+has a separate GNOME runtime build set; select `gnome-48-runtime` to build it.
 
 In the running native session:
 

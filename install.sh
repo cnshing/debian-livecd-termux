@@ -131,7 +131,7 @@ fi
 dpkg --configure -a
 "${apt[@]}" install x11-repo
 apt-get update
-# An on-device UPower build holds upower, which would stop livecd-upower replacing it.
+# An on-device UPower build holds upower, which would stop android-upower replacing it.
 if dpkg -s upower >/dev/null 2>&1; then apt-mark unhold upower; fi
 mapfile -t packages < "$repo/src/native/packages.txt"
 "${apt[@]}" install --no-install-recommends "${packages[@]}"

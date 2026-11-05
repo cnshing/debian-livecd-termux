@@ -90,7 +90,7 @@ else
 fi
 if $install_packages; then
     case " ${packages[*]} " in
-        *' livecd-upower '*)
+        *' android-upower '*)
             if dpkg -s upower >/dev/null 2>&1; then apt-mark unhold upower; fi;;
     esac
     "$python" "$repo/tools/recipes.py" install-output "$builder/output" "${packages[@]}"

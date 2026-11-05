@@ -85,7 +85,7 @@ Video should look normal. A green and purple picture with shifted copies is a fa
 | [Bionilux](https://github.com/theonuverse/bionilux) `4152b47`, [patched](../../overlays/Browser+Chromium/browsers/bionilux-0.5.0-browser.patch) | Built on the phone | Starts glibc Chrome and every glibc child, and keeps glibc's libraries away from Bionic programs |
 | [Mesa for Android Container](https://github.com/lfdevs/mesa-for-android-container) 27.0.0-devel-20261025 | Hash-pinned archive | glibc Turnip for Vulkan |
 | [19 Debian libraries](../../overlays/Browser+Chromium/browsers/chrome-gpu-libs.lock.json) | Hash-pinned, signed index | What that Mesa needs beyond Chrome's own libraries |
-| [Mutter patch 0010](../../packages/livecd-mutter/0010-clip-pixmap-damage.patch) | This repository | The [fullscreen crash](fullscreen-investigation.md) fix |
+| [Mutter patch 0010](../../packages/gnome-48-mutter/0010-clip-pixmap-damage.patch) | This repository | The [fullscreen crash](fullscreen-investigation.md) fix |
 | [Termux:VA](https://github.com/lfdevs/termux-va) `ae14813` | Built on the phone | Opt-in hardware video only: daemon that owns Android's MediaCodec |
 | ION adapter `bf39f8bd…` | Explicitly applied tested glibc binary | Supplies a shared NV12 dma-buf through ION when `/dev/dma_heap/system` is absent |
 | [Hardware video extension](../../overlays/Browser+Chromium/browsers/hardware-video/) | This repository | Tells YouTube AV1 is unavailable. Meant for hardware video, but stays installed |

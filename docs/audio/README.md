@@ -1,11 +1,9 @@
 # Native Termux EasyEffects and AutoEq prototype
 
-This is an **opt-in Android/Bionic port**, independent of the Debian/PRoot
-desktop and of the proposed native GNOME migration. It builds local Termux
-packages named `easyeffects`, `lsp-plugins-lv2`, and `livecd-audio`.
-EasyEffects is not in the phone's configured official main/X11 package indexes;
-`pkg install easyeffects` alone will not obtain this port. No repository was
-published or added to the phone.
+An Android/Bionic port of EasyEffects 7.2.5, installed by default through the Audio Effects
+overlay as upstream's live CD does. This project builds three packages: `easyeffects`, which
+includes the `easyeffects-bridge` command described below; `easyeffects-autoeq`, the AutoEq
+preset importer; and `lsp-plugins-lv2`. Termux's own repositories have no EasyEffects.
 
 The playback path is:
 
@@ -22,16 +20,16 @@ provides that connection.
 
 ## Build and install
 
-GitHub Actions cross-compiles the three packages from their recipes,
-[`easyeffects`](../../packages/easyeffects/build.sh), [`lsp-plugins-lv2`](../../packages/lsp-plugins-lv2/build.sh)
-and [`livecd-audio`](../../packages/livecd-audio/build.sh), which check both source archive hashes and apply
-the included patches. To install them from the local apt repository, run this in native Termux:
+GitHub Actions cross-compiles them from two recipes,
+[`easyeffects`](../../packages/easyeffects/build.sh), whose `easyeffects-autoeq` subpackage holds the
+importer, and [`lsp-plugins-lv2`](../../packages/lsp-plugins-lv2/build.sh). Both check their source
+archive hashes and apply the included patches. `install.sh` installs them; on an existing installation:
 
 ```sh
-python src/apply-overlays.py "Audio Effects"
+livecd-pkg install easyeffects
 ```
 
-That overlay also hides the stock EasyEffects launcher, which would bypass the bridge's private bus.
+The overlay also hides the stock EasyEffects launcher, which would bypass the bridge's private bus.
 Run the conversion tests with `python tests/audio/test-autoeq.py`. CI runs them too. The sorting test,
 [`test-sort.cpp`](../../tests/audio/test-sort.cpp), needs Bionic, so compile it on the phone against
 LSP's patched `stdlib.cpp`.
@@ -50,7 +48,7 @@ collections are outside this prototype's acceptance.
 
 The [native desktop](../native/README.md#session-integrations) starts this existing
 graph automatically when installed and stops its owned graph on desktop shutdown.
-Applications still use `livecd-audio exec` or the audio environment to select it.
+Applications still use `easyeffects-bridge exec` or the audio environment to select it.
 The commands below also work independently of that startup hook.
 
 Start the existing Termux desktop, or start Termux PulseAudio normally. With
@@ -58,23 +56,23 @@ Termux:X11 running on `:0`:
 
 ```sh
 # The current desktop's native Unix PulseAudio socket is recognized automatically.
-livecd-audio start
-livecd-audio ui
+easyeffects-bridge start
+easyeffects-bridge ui
 
 # Launch native audio clients through the private graph.
-livecd-audio exec firefox
+easyeffects-bridge exec firefox
 # Or apply only the audio endpoint variables to a native desktop launcher:
-eval "$(livecd-audio env)"
+eval "$(easyeffects-bridge env)"
 
-livecd-audio status
-livecd-audio stop
+easyeffects-bridge status
+easyeffects-bridge stop
 ```
 
 An independent Termux session can use `pulseaudio --start --exit-idle-time=-1`
 first. To specify an existing logical server explicitly:
 
 ```sh
-livecd-audio start --pulse-server unix:/path/to/pulse.sock
+easyeffects-bridge start --pulse-server unix:/path/to/pulse.sock
 # A cookie-authenticated TCP server also accepts --pulse-cookie /path/to/cookie.
 ```
 
@@ -88,16 +86,24 @@ with `exec` or the audio environment exports.
 Only clients sent to this graph are processed. This does not capture audio from
 unrelated Android apps or retroactively redirect the running PRoot desktop.
 There is no microphone processing path in this implementation. Logs are in
-`~/.local/state/livecd-audio/session.log`.
+`~/.local/state/easyeffects-bridge/session.log`.
 
 ## AutoEq presets
 
-At [autoeq.app](https://autoeq.app/), select your headphones and export
+The Audio Effects overlay installs the OPRA catalogue of AutoEq presets, as upstream's live CD does:
+upstream's [`opra2ee.py`](../../overlays/Audio%20Effects/lb/hooks/normal/scripts/opra2ee.py) converts
+[OPRA's consumer mirror](https://github.com/opra-project/OPRA/blob/main/docs/CONSUMING.md) of the
+database into about 6,200 EasyEffects output presets for Harman targets, under
+`$PREFIX/share/easyeffects/output/OPRA`. Preset names retain the EQ author's credit. In EasyEffects,
+import a chosen community preset locally to save or associate it. The catalogue is downloaded when
+the overlay is applied, not pinned, and not every preset was tested.
+
+For headphones outside the catalogue, at [autoeq.app](https://autoeq.app/), select your headphones and export
 **EqualizerAPO ParametricEq**. Import and select that file explicitly:
 
 ```sh
-livecd-autoeq "$HOME/storage/downloads/My headphones ParametricEQ.txt" --name 'My headphones'
-livecd-audio preset 'My headphones'
+easyeffects-autoeq "$HOME/storage/downloads/My headphones ParametricEQ.txt" --name 'My headphones'
+easyeffects-bridge preset 'My headphones'
 ```
 
 The importer creates a local EasyEffects output preset, preserving the preamp
@@ -105,22 +111,8 @@ and both channels' peak/low-shelf/high-shelf filters in `APO (DR)` mode. It reje
 unsupported syntax, out-of-range parameters, and more than 32 bands. It refuses
 to overwrite existing presets unless `--replace` is supplied. It does not install
 AutoEq's scientific Python optimizer; it consumes the presets AutoEq generates.
-No headphone model is selected automatically or enabled by the installer.
-
-The live CD's existing OPRA converter also generates the same EasyEffects 7
-community-preset format. To install that catalogue optionally, from the repo:
-
-```sh
-curl -fL https://opra.roonlabs.net/database_v1.jsonl -o "$TMPDIR/opra.jsonl"
-python 'overlays/Audio Effects/lb/hooks/normal/scripts/opra2ee.py' \
-    "$TMPDIR/opra.jsonl" "$PREFIX/share/easyeffects/output/OPRA"
-rm "$TMPDIR/opra.jsonl"
-```
-
-This optional data download uses [OPRA's consumer mirror](https://github.com/opra-project/OPRA/blob/main/docs/CONSUMING.md).
-It is not part of the pinned package build or a claim that the entire catalogue
-was tested. In EasyEffects, import a chosen community preset locally to save or
-associate it. Preset names retain the EQ author's credit, as in the live CD.
+No headphone model is selected automatically. EasyEffects' own equalizer can also load such a
+file with **Import APO**; `easyeffects-autoeq` saves it as a named preset in one step.
 
 ## Status and scope
 
@@ -135,8 +127,8 @@ workflow. No trivial packaged GUI replacement was established.
 To remove the prototype after stopping it:
 
 ```sh
-livecd-audio stop
-apt remove livecd-audio easyeffects lsp-plugins-lv2
+easyeffects-bridge stop
+apt remove easyeffects easyeffects-autoeq lsp-plugins-lv2
 ```
 
 User presets, settings, logs, downloaded sources and the build cache are retained.

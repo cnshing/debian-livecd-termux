@@ -32,16 +32,16 @@ desktop = module('packaged_desktop', 'src/native/desktop.py')
 class Packaging(unittest.TestCase):
     def test_runtime_dependencies_are_built_before_consumers(self):
         order = recipes.build_order(['livecd-desktop'])
-        for dependency, consumer in [('livecd-mozjs-128', 'livecd-gjs'),
-                                     ('livecd-gjs', 'livecd-gnome-shell'),
-                                     ('livecd-mutter', 'livecd-gnome-shell'),
-                                     ('livecd-upower', 'livecd-gnome-shell'),
-                                     ('livecd-gnome-shell', 'livecd-gnome-runtime'),
-                                     ('livecd-resources', 'livecd-desktop'),
-                                     ('livecd-gnome-runtime', 'livecd-desktop')]:
+        for dependency, consumer in [('gnome-48-mozjs', 'gnome-48-gjs'),
+                                     ('gnome-48-gjs', 'gnome-48-shell'),
+                                     ('gnome-48-mutter', 'gnome-48-shell'),
+                                     ('android-upower', 'gnome-48-shell'),
+                                     ('gnome-48-shell', 'gnome-48-runtime'),
+                                     ('android-procfs', 'livecd-desktop'),
+                                     ('gnome-48-runtime', 'livecd-desktop')]:
             self.assertLess(order.index(dependency), order.index(consumer))
         self.assertEqual(len(order), len(set(order)))
-        self.assertNotIn('livecd-gi-paths', order)
+        self.assertNotIn('gnome-48-gi-paths', order)
         self.assertNotIn('mutter-x11-frames', order)
 
     def test_chromium_builds_alone_with_its_dependencies_and_longest_timeout(self):
@@ -49,10 +49,10 @@ class Packaging(unittest.TestCase):
         self.assertEqual(jobs['chromium']['packages'], 'libva chromium')
         self.assertEqual(jobs['chromium']['timeout'], 360)
         self.assertTrue(jobs['chromium']['exact'])
-        self.assertEqual(jobs['libva_livecd-gst-va']['packages'], 'libva livecd-gst-va')
-        self.assertEqual(jobs['libva_livecd-gst-va']['timeout'], 350)
-        self.assertFalse(jobs['libva_livecd-gst-va']['exact'])
-        self.assertEqual(jobs['easyeffects_livecd-audio_lsp-plugins-lv2']['host_packages'],
+        self.assertEqual(jobs['gst-plugins-va_libva']['packages'], 'libva gst-plugins-va')
+        self.assertEqual(jobs['gst-plugins-va_libva']['timeout'], 350)
+        self.assertFalse(jobs['gst-plugins-va_libva']['exact'])
+        self.assertEqual(jobs['easyeffects_lsp-plugins-lv2']['host_packages'],
                          'libcairo2-dev libsndfile1-dev')
         self.assertEqual(jobs['chromium']['host_packages'], '')
         built = [package for job in jobs.values() for package in job['packages'].split()]
@@ -63,18 +63,18 @@ class Packaging(unittest.TestCase):
     def test_session_preload_uses_package_files_and_preserves_termux_exec(self):
         with tempfile.TemporaryDirectory() as temporary:
             prefix = Path(temporary)
-            library = prefix / 'lib/liblivecd-proc.so'
+            library = prefix / 'lib/libandroid-procfs.so'
             library.parent.mkdir()
             library.touch()
-            commands = prefix / 'libexec/livecd-resources/bin'
+            commands = prefix / 'libexec/android-procfs/bin'
             termux_exec = str(prefix / 'lib/libtermux-exec-ld-preload.so')
-            isolated = '/old/session-preload/liblivecd-proc.so'
+            isolated = '/old/session-preload/libandroid-procfs.so'
             for accepted, disabled in [(True, False), (False, False), (True, True)]:
                 with self.subTest(accepted=accepted, disabled=disabled), \
                         mock.patch.multiple(desktop, PREFIX=prefix, RESOURCE_PRELOAD=library,
                                             RESOURCE_COMMANDS=commands), \
                         mock.patch.dict(os.environ, {'LD_PRELOAD': isolated + ':' + termux_exec,
-                                                     'LIVECD_RESOURCES_COMPAT': '0' if disabled else '1'}, clear=True), \
+                                                     'ANDROID_PROCFS_COMPAT': '0' if disabled else '1'}, clear=True), \
                         mock.patch.object(desktop, 'probe_preload', return_value=accepted) as probe, \
                         mock.patch.object(desktop, 'apply_renderer', side_effect=lambda env, renderer: env), \
                         contextlib.redirect_stderr(io.StringIO()):

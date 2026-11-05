@@ -6,27 +6,27 @@ This follows `CLAUDE-HANDOFF-PROC-STAT.md`; that handoff remains historical.
 ## Applied to the package flow
 
 The working fix is `-fno-emulated-tls` when compiling `proc-compat.c`. The
-`livecd-resources` recipe already had that flag. Its revision is now `1.0.0-1`,
+`android-procfs` recipe already had that flag. Its revision is now `1.0.0-1`,
 so APT can upgrade the older `1.0.0` build, and packaging fails unless the
 resulting library contains an ELF TLS segment. The check deliberately allows
 the harmless `__emutls_unregister_key` symbol mentioned in the handoff.
 
 `livecd-desktop` requires the corrected resource package and uses its
-`$PREFIX/lib/liblivecd-proc.so` and packaged `top` launcher. The session builder
+`$PREFIX/lib/libandroid-procfs.so` and packaged `top` launcher. The session builder
 compatibility command now invokes the standard Termux package builder and APT.
 It no longer compiles a second copy under the user's home directory.
 
 The controller's Node.js compatibility probe, timeout, failure handling and
 Python fallback are unchanged, verified by comparing their Python syntax trees.
 It retains the Termux exec preload, removes a stale inherited copy of the
-resource preload, and supports `LIVECD_RESOURCES_COMPAT=0`. A host integration
+resource preload, and supports `ANDROID_PROCFS_COMPAT=0`. A host integration
 test covers accepting the packaged library, rejecting it and explicitly
 disabling it, including the corresponding `PATH` selection.
 
 ## Observed on the running phone
 
 - The session owner uses the isolated fixed library and its `top` launcher.
-  The installed `$PREFIX/lib/liblivecd-proc.so` is still the earlier build.
+  The installed `$PREFIX/lib/libandroid-procfs.so` is still the earlier build.
 - The fixed library has a `PT_TLS` segment; the old one does not. The exact
   package check accepts the fixed library and rejects the old one.
 - The phone's C source and header match this checkout byte for byte.

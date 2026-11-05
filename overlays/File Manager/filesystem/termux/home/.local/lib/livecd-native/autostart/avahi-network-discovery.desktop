@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=Network Discovery
+Exec=avahi-network-discovery
+TryExec=avahi-network-discovery
+NoDisplay=true
+X-GNOME-Autostart-Phase=Applications

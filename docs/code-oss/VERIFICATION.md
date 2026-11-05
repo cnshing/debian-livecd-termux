@@ -118,7 +118,7 @@ The server was reachable only through a private `sshd` and a web server, both on
 
 ## Resource preload
 
-The earlier build of [`liblivecd-proc.so`](../resources/README.md) **aborts every Node.js program it is preloaded
+The earlier build of [`libandroid-procfs.so`](../resources/README.md) **aborts every Node.js program it is preloaded
 into**, every time, with `Pointer tag for … was truncated`. That includes the editor's launcher, so the editor
 never opens. `src/native/desktop.py` preloads it once it is installed. The phone's installed controller did not yet.
 
@@ -136,7 +136,7 @@ In native Termux, with the desktop stopped, from this checkout:
 ```sh
 python src/apply-overlays.py "Text Editor+Code OSS"
 # Set this while the installed resource library is older than the fix.
-export LIVECD_RESOURCES_COMPAT=0
+export ANDROID_PROCFS_COMPAT=0
 python tests/code-oss/test-code-oss.py
 
 # Also on another machine over SSH. The folder must not exist: the test deletes it afterwards.

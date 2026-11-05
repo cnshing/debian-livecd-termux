@@ -10,9 +10,9 @@ def main(directory):
     packages = {}
     for path in Path(directory).glob('*.deb'):
         name = subprocess.check_output(['dpkg-deb', '-f', str(path), 'Package'], text=True).strip()
-        if name in ('gvfs', 'livecd-avahi'):
+        if name in ('gvfs', 'avahi'):
             packages[name] = path
-    assert set(packages) == {'gvfs', 'livecd-avahi'}, 'Missing network package artifact'
+    assert set(packages) == {'gvfs', 'avahi'}, 'Missing network package artifact'
     prefix = Path('data/data/com.termux/files/usr')
     with tempfile.TemporaryDirectory() as directory:
         root = Path(directory)
@@ -33,7 +33,7 @@ def main(directory):
             assert '/system/bin/linker64' in headers, relative
         for name in ('smb.mount', 'smb-browse.mount', 'dns-sd.mount'):
             assert (root / prefix / 'share/gvfs/mounts' / name).is_file(), name
-        assert (root / prefix / 'bin/livecd-network-discovery').is_file()
+        assert (root / prefix / 'bin/avahi-network-discovery').is_file()
     print('PASS: aarch64 Android backends, linked dependencies and mount definitions')
 
 

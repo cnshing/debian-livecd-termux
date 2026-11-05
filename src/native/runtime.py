@@ -32,7 +32,7 @@ def main():
         raise RuntimeError('Run in native Termux')
     runtime = PREFIX / 'opt/gnome-48'
     if not (runtime / 'bin/gnome-shell').is_file():
-        raise RuntimeError('Install livecd-gnome-runtime first')
+        raise RuntimeError('Install gnome-48-runtime first')
     stamp = datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%dT%H%M%S%fZ')
     backup = STATE / 'runtime-backups' / stamp
     connect(runtime, ROOT, backup)

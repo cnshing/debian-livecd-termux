@@ -2,7 +2,7 @@
 
 ## Project package follow-up
 
-The project's `gvfs` and `livecd-avahi` package set now enables SMB and DNS-SD.
+The project's `gvfs` and `avahi` package set now enables SMB and DNS-SD.
 The Actions-built packages passed direct share browsing, discovery of the same
 server, opening its discovered address, and Network enumeration on the Android
 11 rig. The discovery daemon runs rootless on the desktop's private system bus;

@@ -107,9 +107,9 @@ was not tried, and Termux packages no `tailscale` command.
 - **Start it as `code-oss` from inside the desktop, or from the menu.** Both use this overlay's launcher, without which the
   editor exits at once and silently there. A terminal open since before installing must open a new one, or run `hash -r`.
 - **The editor freezes while a keyring prompt is open,** until you answer it. Check for a prompt if it stops responding.
-- **A `livecd-resources` library built before the compatibility fix stops the editor from opening**, once the desktop controller
+- **A `android-procfs` library built before the compatibility fix stops the editor from opening**, once the desktop controller
   preloads it, and stops every other Node.js program too. [Rebuild it](../resources/README.md), or set
-  `LIVECD_RESOURCES_COMPAT=0`. Details (`temp/docs/evidence/code-oss/preload-abort.txt`).
+  `ANDROID_PROCFS_COMPAT=0`. Details (`temp/docs/evidence/code-oss/preload-abort.txt`).
 - Copilot's first-run prompt is turned off with `chat.disableAIFeatures`, since this build has no Copilot to sign in to.
 - `gh` keeps its token in the keyring when one is running, and otherwise in a plain file under `~/.config/gh`. Android's
   app sandbox is then the only protection.

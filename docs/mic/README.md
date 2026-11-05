@@ -14,7 +14,7 @@ With no microphone, PulseAudio's default source is the speaker monitor. An appli
 "the default microphone" then captures whatever the phone is playing, and in a call it would send
 that to the other people. If a microphone disappears, the default falls back the same way, with no
 warning. The [native desktop](../../src/native/desktop.py) therefore starts PulseAudio with a silent
-`livecd_no_microphone` source, which takes that fallback role. `livecd-mic` also loads it if needed.
+`android_no_microphone` source, which takes that fallback role. `android-pulseaudio-mic` also loads it if needed.
 
 ## Set up
 
@@ -40,10 +40,10 @@ adb shell pm revoke com.termux.api android.permission.RECORD_AUDIO
 ## Use
 
 ```sh
-livecd-mic on       # load the microphone and make it the default source
-livecd-mic status
-livecd-mic test     # report the default source's level; the audio is discarded
-livecd-mic off      # unload it; the silent source becomes the default
+android-pulseaudio-mic on       # load the microphone and make it the default source
+android-pulseaudio-mic status
+android-pulseaudio-mic test     # report the default source's level; the audio is discarded
+android-pulseaudio-mic off      # unload it; the silent source becomes the default
 ```
 
 The native desktop now calls the existing microphone controllers on startup when installed:
@@ -55,7 +55,7 @@ as `pavucontrol` on its Input Devices tab, so close it when finished.
 
 ## Android-managed Bluetooth audio devices
 
-`livecd-mic-bluetooth` requests Android's Bluetooth call-audio connection through the existing
+`android-pulseaudio-bluetooth` requests Android's Bluetooth call-audio connection through the existing
 authorized Shizuku/rish export. Termux, Termux:API and Linux applications need no APK changes.
 Linux applications see a named PulseAudio output and microphone, such as **WI-C310 Headphones**
 and **WI-C310 Microphone**. Android manages pairing, connections and the active headset.
@@ -67,28 +67,28 @@ tested headset and limitations.
 With Shizuku running, Termux authorized, and `rish` exported into `~/.local/lib/shizuku`:
 
 ```sh
-livecd-mic-bluetooth devices
-livecd-mic off
-livecd-mic-bluetooth on               # publish the devices; existing desktop defaults stay selected
-livecd-mic-bluetooth status
+android-pulseaudio-bluetooth devices
+android-pulseaudio-mic off
+android-pulseaudio-bluetooth on               # publish the devices; existing desktop defaults stay selected
+android-pulseaudio-bluetooth status
 # Select the named Headphones and Microphone in the application's audio settings or pavucontrol.
-livecd-mic-bluetooth off              # remove the devices and release SCO; leave Bluetooth connected
+android-pulseaudio-bluetooth off              # remove the devices and release SCO; leave Bluetooth connected
 
 # Make both devices the desktop defaults instead:
-livecd-mic-bluetooth on --default
+android-pulseaudio-bluetooth on --default
 # Or scope the default devices to a foreground session/application:
-livecd-mic-bluetooth call -- YOUR_CALL_APPLICATION
+android-pulseaudio-bluetooth call -- YOUR_CALL_APPLICATION
 ```
 
 Connect the headset in Android first, with **Calls** enabled. `--device ID` selects an ID from
-`devices`; IDs can change after reconnecting. `LIVECD_MIC_RISH` selects another `rish` export.
+`devices`; IDs can change after reconnecting. `ANDROID_PULSEAUDIO_RISH` selects another `rish` export.
 `on` keeps the devices available after the command exits, until `off`, route loss or a controller
 error. The microphone suspends while no application records. `call` holds the same devices in the
 foreground, makes them defaults for its duration, and ends on application exit or Ctrl-C.
 Defaults are restored on cleanup unless the user changed them in the meantime.
 
-An application can also select the stable PulseAudio names `livecd_bluetooth_output` and
-`livecd_bluetooth_input`, including through `PULSE_SINK` and `PULSE_SOURCE` in a desktop terminal.
+An application can also select the stable PulseAudio names `android_bluetooth_output` and
+`android_bluetooth_input`, including through `PULSE_SINK` and `PULSE_SOURCE` in a desktop terminal.
 Applications need the desktop's usual `PULSE_SERVER`, just as with other native audio.
 
 Input and output were exercised together on the Android 11 rig, and the user confirmed hearing
@@ -107,7 +107,7 @@ the separate [full-client package](../serein/README.md) records its own build an
 - **Block size:** cpal 0.18.2 limits a record stream's queue to one fragment, and Serein asks for
   20 ms. PulseAudio discards larger blocks, so `play()` waits forever and neither the microphone nor
   the speakers start, with no error. A sink monitor and `module-sles-source`'s default 125 ms blocks
-  both trigger this, so `livecd-mic` loads the microphone with 20 ms blocks.
+  both trigger this, so `android-pulseaudio-mic` loads the microphone with 20 ms blocks.
 - **Vendored cpal:** [`cpal-record-queue.patch`](../../tests/mic/serein-probe/cpal-record-queue.patch) removes the
   stall for every source. A port should carry it, and must keep the silent source too: with the
   stall gone, a monitor default sends speaker audio into the call.
@@ -119,7 +119,7 @@ the separate [full-client package](../serein/README.md) records its own build an
 
 | File | Purpose |
 | --- | --- |
-| `mic.py` | The `livecd-mic` command |
+| `mic.py` | The `android-pulseaudio-mic` command |
 | `bluetooth.py`, `java/org/livecd/mic/AudioRoute.java`, `sco-output.c` | Named Linux audio devices, Shizuku routing and native voice playback |
 | `test-bluetooth.py` | Host checks for session failure, ownership and capture cleanup |
 | `test-mic.sh` | The command against a private PulseAudio |

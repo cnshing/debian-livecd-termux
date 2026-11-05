@@ -239,7 +239,7 @@ jobs:
       run: python3 tests/packaging/check-network-artifacts.py "$PACKAGES_OUTPUT"
 
     - name: Check the Android storage provider artifact
-      if: steps.build.outcome == 'success' && contains(format(' {0} ', matrix.packages), ' livecd-storage ')
+      if: steps.build.outcome == 'success' && contains(format(' {0} ', matrix.packages), ' android-gvfs ')
       run: python3 tests/packaging/check-storage-artifact.py termux-packages/output
 
     # Saved only after a successful build. An entry can never be replaced, so one saved by a job that

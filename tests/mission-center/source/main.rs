@@ -1,4 +1,4 @@
-#[path = "../../../packages/livecd-resources/src/source.rs"]
+#[path = "../../../packages/android-procfs/src/source.rs"]
 mod proc_stat;
 
 fn main() -> std::io::Result<()> {

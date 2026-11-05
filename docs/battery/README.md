@@ -10,7 +10,7 @@ needs a small Magpie fix, which is part of its recipe.
 
 Termux's own `upower` package is close but not enough. It reports the percentage
 as Wh, always shows 0 W, and has no voltage, cycle count, health or history.
-[`livecd-upower`](../../packages/livecd-upower) replaces that backend, and uses
+[`android-upower`](../../packages/android-upower) replaces that backend, and uses
 UPower's ordinary system bus instead of moving it to the session bus.
 
 ## How it stays current without polling
@@ -71,7 +71,7 @@ Nothing has to be patched for a program to get this backend. There is one daemon
 binary and one library on the native side, and the private GNOME tree carries no copy
 of either. Each way of reaching UPower ends up here:
 
-| A program that | Reaches `livecd-upower` because |
+| A program that | Reaches `android-upower` because |
 |---|---|
 | Uses D-Bus on the system bus, such as Shell, Mutter, Chromium, Electron and Magpie | The controller's daemon owns that bus name |
 | Is patched by Termux to use the session bus, such as `kf6-solid`, `lxqt-powermanagement`, `mate-power-manager` and `xfce4-power-manager` | The activation file starts this daemon on that bus when asked. It costs nothing until then |
@@ -80,8 +80,8 @@ of either. Each way of reaching UPower ends up here:
 
 apt is the one route that could bring upstream back. On its own, `Conflicts` and
 `Provides` do not stop that: for `apt install upower`, or a dependency newer than the
-version provided, apt removes `livecd-upower` and installs upstream.
-[`apt-preferences`](../../packages/livecd-upower/apt-preferences) forbids the upstream
+version provided, apt removes `android-upower` and installs upstream.
+[`apt-preferences`](../../packages/android-upower/apt-preferences) forbids the upstream
 package, so those requests resolve to this one or fail instead. No package in Termux
 today needs a specific `upower` version.
 
@@ -98,12 +98,12 @@ To replace Termux's package on a phone without a release, run this in native Ter
 and restart the desktop:
 
 ```sh
-bash tools/build-packages.sh --install livecd-upower
-# Compatibility entry point: bash packages/livecd-upower/build-on-device.sh
+bash tools/build-packages.sh --install android-upower
+# Compatibility entry point: bash packages/android-upower/build-on-device.sh
 ```
 
 The helper builds the ordinary Termux recipe and installs its `.deb` with APT.
-`livecd-upower` replaces `upower`, so development and release builds use the same
+`android-upower` replaces `upower`, so development and release builds use the same
 ownership and upgrade rules. An old `upower` hold from the earlier direct-copy
 helper is lifted before installation. No new hold is added.
 
@@ -111,7 +111,7 @@ helper is lifted before installation. No new hold is added.
 Center must be started inside the session, for example with
 `livecd-native exec -- missioncenter`, or it cannot see the bus.
 
-To go back to Termux's package, remove `livecd-upower` and install `upower` with APT.
+To go back to Termux's package, remove `android-upower` and install `upower` with APT.
 The Battery page then returns with the false values described above.
 
 ## Verification

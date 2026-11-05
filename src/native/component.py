@@ -13,7 +13,7 @@ def component_environment(component, arguments=(), inherited=None):
     # use their existing native profiles and shared Termux libraries, which their
     # RUNPATH finds. Naming $PREFIX/lib in LD_LIBRARY_PATH would instead put
     # libandroid-stub's libOpenSLES.so and libmediandk.so ahead of Android's.
-    if not (component == 'livecd-audio' and list(arguments[:1]) == ['exec']):
+    if not (component == 'easyeffects-bridge' and list(arguments[:1]) == ['exec']):
         for key in ('GI_TYPELIB_PATH', 'GJS_PATH', 'GSETTINGS_SCHEMA_DIR', 'DCONF_PROFILE',
                     'GNOME_SHELL_DATADIR', 'GNOME_SHELL_LIBDIR'):
             env.pop(key, None)
@@ -26,7 +26,7 @@ def component_environment(component, arguments=(), inherited=None):
 
 def main():
     component, *arguments = sys.argv[1:]
-    if component not in ('livecd-gsconnect', 'livecd-audio', 'livecd-autoeq'):
+    if component not in ('gsconnect', 'easyeffects-bridge', 'easyeffects-autoeq'):
         raise SystemExit('Unknown optional native component')
     command = str(PREFIX / 'bin' / component)
     os.execve(command, [command, *arguments], component_environment(component, arguments))

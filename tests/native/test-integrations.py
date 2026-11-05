@@ -26,7 +26,7 @@ class BluetoothStart(unittest.TestCase):
 
     def test_retries_while_android_releases_the_previous_route(self):
         self.integration(2).bluetooth_on()
-        self.assertEqual(self.calls, [('livecd-mic-bluetooth', 'on', '--default')] * 3)
+        self.assertEqual(self.calls, [('android-pulseaudio-bluetooth', 'on', '--default')] * 3)
 
     def test_gives_up_after_three_attempts(self):
         with self.assertRaises(RuntimeError):

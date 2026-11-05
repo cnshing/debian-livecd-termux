@@ -28,7 +28,7 @@ describe this original run.
 | Without the permission | Android refuses: `Request requires android.permission.RECORD_AUDIO`. PulseAudio stays up | baseline (`temp/docs/evidence/mic/baseline-no-permission.txt`), controller (`temp/docs/evidence/mic/controller-no-permission.txt`) |
 | After installing Termux:API and granting | `com.termux` reports `granted=true` through the shared UID. Nothing was killed: `com.termux` and `sshd` kept their uptimes of over a day | run (`temp/docs/evidence/mic/real-mic.txt`) |
 | Capture rate | 144,000 samples in 3.03 s, with Termux:X11 in the foreground. Android logs `rec start … src:VOICE_RECOGNITION pack:com.termux` | run (`temp/docs/evidence/mic/real-mic.txt`) |
-| Desktop default source | `livecd_no_microphone` in the started session | session (`temp/docs/evidence/mic/desktop-session.txt`) |
+| Desktop default source | `android_no_microphone` in the started session | session (`temp/docs/evidence/mic/desktop-session.txt`) |
 | X11 mixer, microphone on | `pavucontrol` lists `Microphone`, marked default, and `No microphone` | screenshot (`temp/docs/evidence/mic/desktop-2-on.png`) |
 | X11 mixer, while recording | Recording tab shows `cpal-pulseaudio-27567 … from Microphone` | screenshot (`temp/docs/evidence/mic/desktop-4-recording-tab.png`) |
 | X11 mixer, microphone off | Only `No microphone` remains, marked default | screenshot (`temp/docs/evidence/mic/desktop-5-off-again.png`) |
@@ -59,7 +59,7 @@ Source selection, with a -30 dBFS tone playing through the sink:
 | Silent source added | -100 dB | -100 dB |
 | Stand-in microphone removed mid-call, monitor remaining | Stalled from the start | **Switches to the monitor, -34 dB, `microphone_unavailable=false`** |
 | Same, silent source present | Reaches the silent source, -100 dB | Reaches the silent source, -100 dB |
-| Real microphone turned off mid-call with `livecd-mic off` | Not run | -100 dB within two seconds |
+| Real microphone turned off mid-call with `android-pulseaudio-mic off` | Not run | -100 dB within two seconds |
 
 Evidence: stock (`temp/docs/evidence/mic/serein-scenes-stock-cpal.txt`), patched (`temp/docs/evidence/mic/serein-scenes-patched-cpal.txt`),
 real microphone (`temp/docs/evidence/mic/real-mic.txt`).

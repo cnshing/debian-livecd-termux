@@ -210,7 +210,7 @@ def main(rig):
     rig.stop()
 
     # Termux's own packages ask on the session bus, which must reach this same daemon.
-    source = Path(__file__).resolve().parents[2] / 'packages/livecd-upower/org.freedesktop.UPower.service'
+    source = Path(__file__).resolve().parents[2] / 'packages/android-upower/org.freedesktop.UPower.service'
     services = rig.root / 'services'
     services.mkdir()
     (services / source.name).write_text(source.read_text().replace('@TERMUX_PREFIX@/libexec/upowerd', upowerd)

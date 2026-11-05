@@ -1,5 +1,5 @@
 #!/data/data/com.termux/files/usr/bin/bash
-# Exercises livecd-mic against a private PulseAudio started the way the native desktop starts it.
+# Exercises android-pulseaudio-mic against a private PulseAudio started the way the native desktop starts it.
 # Usage: test-mic.sh MIC_PY
 set -u
 mic=${1:?Usage: test-mic.sh MIC_PY}
@@ -12,7 +12,7 @@ export PULSE_SERVER=unix:$T/s
     export PULSE_RUNTIME_PATH=$T/rt PULSE_STATE_PATH=$T/st PULSE_CONFIG_PATH=$T/cfg HOME=$T/home
     unset PULSE_SERVER
     exec pulseaudio --daemonize=no --exit-idle-time=-1 --use-pid-file=no -n --load=module-sles-sink \
-        '--load=module-null-source source_name=livecd_no_microphone format=s16le rate=48000 channels=1 description="No microphone"' \
+        '--load=module-null-source source_name=android_no_microphone format=s16le rate=48000 channels=1 description="No microphone"' \
         "--load=module-native-protocol-unix socket=$T/s auth-anonymous=1"
 ) >"$T/pa.log" 2>&1 </dev/null &
 pa=$!

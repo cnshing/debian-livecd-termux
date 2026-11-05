@@ -41,13 +41,13 @@ tone 6 & "$probe" 5 </dev/null; wait $!
 stop_pa
 
 start_pa
-pactl load-module module-null-source source_name=livecd_no_microphone rate=48000 channels=1 >/dev/null </dev/null
+pactl load-module module-null-source source_name=android_no_microphone rate=48000 channels=1 >/dev/null </dev/null
 scene "B. A silent source added, same tone playing"
 tone 6 & "$probe" 5 </dev/null; wait $!
 stop_pa
 
 start_pa
-pactl load-module module-null-source source_name=livecd_no_microphone rate=48000 channels=1 >/dev/null </dev/null
+pactl load-module module-null-source source_name=android_no_microphone rate=48000 channels=1 >/dev/null </dev/null
 pactl load-module module-sine-source source_name=stand_in_mic rate=48000 frequency=440 >/dev/null </dev/null
 pactl set-default-source stand_in_mic </dev/null
 scene "C. A stand-in microphone as default, no speaker output"
@@ -67,7 +67,7 @@ wait "$probe_pid"; wait "$tone_pid"
 stop_pa
 
 start_pa
-pactl load-module module-null-source source_name=livecd_no_microphone rate=48000 channels=1 >/dev/null </dev/null
+pactl load-module module-null-source source_name=android_no_microphone rate=48000 channels=1 >/dev/null </dev/null
 module=$(pactl load-module module-sine-source source_name=stand_in_mic rate=48000 frequency=440 </dev/null)
 pactl set-default-source stand_in_mic </dev/null
 scene "E. Microphone removed mid-call, silent source present: speaker tone playing"

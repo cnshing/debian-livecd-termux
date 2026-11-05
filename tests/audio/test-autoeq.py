@@ -4,7 +4,7 @@ import importlib.util
 from pathlib import Path
 import unittest
 
-spec = importlib.util.spec_from_file_location("autoeq", Path(__file__).resolve().parents[2] / "packages/livecd-audio/autoeq.py")
+spec = importlib.util.spec_from_file_location("autoeq", Path(__file__).resolve().parents[2] / "packages/easyeffects/easyeffects-autoeq.py")
 autoeq = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(autoeq)
 

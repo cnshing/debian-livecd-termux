@@ -2,3 +2,8 @@
 - gnome-screenshot
 # GNOME Settings, as in upstream's GNOME task.
 - gnome-control-center
+# Upstream's gnomeshell.yaml.
+- gnome-shell-extension-arc-menu
+- gnome-shell-extension-dash-to-panel
+- gnome-shell-extension-appindicator
+- gnome-shell-extension-desktop-icons-ng

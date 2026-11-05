@@ -1,0 +1,9 @@
+# Upstream's tweaks.yaml and fonts.yaml. Termux's otf-noto-sans-cjk and ttf-dejavu, from the base
+# installation, cover upstream's fonts-noto CJK fonts and fonts-dejavu.
+- gnome-shell-extension-user-theme
+- gnome-shell-extension-no-annoyance
+- fonts-noto-core
+- fonts-noto-extra
+- fonts-noto-color-emoji
+- fonts-unifont
+- fonts-hanazono

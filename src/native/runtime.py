@@ -43,7 +43,12 @@ def main():
         connect(PREFIX / 'bin' / name, Path.home() / '.local/bin' / name, backup)
     for name in ('fonts', 'icons', 'gnome-shell/extensions'):
         directory = PREFIX / 'share/livecd-native' / name
-        for source in directory.iterdir():
+        # Fonts, icons and extensions now come from ordinary packages in Termux's own directories.
+        # Drop the links earlier installations made to the old bundle once it is gone.
+        for link in (DATA / name).glob('*') if (DATA / name).is_dir() else ():
+            if link.is_symlink() and not link.exists() and str(link.readlink()).startswith(str(directory)):
+                link.unlink()
+        for source in directory.iterdir() if directory.is_dir() else ():
             connect(source, DATA / name / source.name, backup)
     subprocess.run([str(PREFIX / 'bin/glib-compile-schemas'), '--strict',
                     str(runtime / 'share/glib-2.0/schemas')], check=True)

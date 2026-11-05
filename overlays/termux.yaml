@@ -10,6 +10,7 @@ overlays:
 - Desktop Environment+Shell
 - Desktop Environment+Phone Sync
 - Desktop Environment+Tweaks
+- Desktop Environment+Window Tiling
 - Desktop Environment+Theming
 - Desktop Environment+Thumbnailers
 - Terminal

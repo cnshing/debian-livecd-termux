@@ -11,9 +11,9 @@ handled in a separate session and were excluded from this change.
   `$PREFIX/opt/gnome-48`. Meson can use bundled subprojects from the verified
   source archive, but cannot download additional wraps.
 - `gnome-48-runtime` installs the native session and extra schemas.
-  `livecd-gnome-data` packages portable extension/font/cursor assets; Noto fonts
-  have a separate subpackage. Every input's attribution is retained, and the
-  data installer rejects ELF files.
+  Each GNOME Shell extension and font is its own package under Debian's name,
+  repackaged from Debian's architecture-independent archive with its copyright
+  file. The cursors come from Termux's `adwaita-icon-theme`.
 - `livecd-desktop` owns controller code and the `livecd`/`livecd-native`
   commands. Setup connects the existing per-user paths to package files and
   preserves replaced paths in `~/.local/state/livecd-native/runtime-backups`.

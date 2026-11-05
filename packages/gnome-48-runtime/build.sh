@@ -13,7 +13,7 @@ TERMUX_PKG_SHA256=(
 	3860a2ea214dcbcb6600ae7a1e3358a5389215087bc3e4a47cee3f87baee062e
 	6d8d5ff2a2320632e2cd14ef5a9c6a57d67430ac71d36428a257404a81dcf943
 )
-TERMUX_PKG_DEPENDS="gnome-session, gnome-48-shell (= 48.8-1), livecd-gnome-data"
+TERMUX_PKG_DEPENDS="gnome-session, gnome-48-shell (= 48.8-1), fonts-cantarell"
 # Renamed from livecd-gnome-runtime.
 TERMUX_PKG_CONFLICTS="gnome-48-gi-paths, mutter-x11-frames, livecd-gnome-runtime, livecd-gi-paths"
 TERMUX_PKG_REPLACES="livecd-gnome-runtime"

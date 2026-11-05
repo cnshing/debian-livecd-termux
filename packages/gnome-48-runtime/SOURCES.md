@@ -17,11 +17,10 @@ native builds use the target's introspection tooling. Source patches retain
 their upstream licenses and explanatory headers.
 
 `gnome-48-runtime` supplies the session and readable schemas required from
-GNOME Settings Daemon and LocalSearch. `livecd-gnome-data` packages the pinned
-portable Debian font/extension assets and their attributions, with Noto fonts
-split into `livecd-gnome-extra-fonts`. It excludes ELF payloads and maintainer
-scripts. This preserves the tested profile data without importing a binary
-GNOME runtime. It is not a rebuild of each font or extension's original sources.
+GNOME Settings Daemon and LocalSearch. Fonts and GNOME Shell extensions are separate
+`fonts-*` and `gnome-shell-extension-*` packages, repackaged from Debian's pinned
+architecture-independent archives with their copyright files. They are not rebuilds of each
+font or extension's original sources.
 
 The new package build and installation path needs complete Termux builds and
 fresh device acceptance. The original source port's device results are not a

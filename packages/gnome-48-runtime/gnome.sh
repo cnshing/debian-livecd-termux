@@ -26,4 +26,11 @@ gnome_48_debscripts() {
 			"$TERMUX_PREFIX/bin/glib-compile-schemas" "$TERMUX_PREFIX/opt/gnome-48/share/glib-2.0/schemas"
 		fi
 	EOF
+	# Removing a package that ships schemas, such as an extension, must drop them from the compiled set.
+	cat > postrm <<-EOF
+		#!$TERMUX_PREFIX/bin/sh
+		if test -d "$TERMUX_PREFIX/opt/gnome-48/share/glib-2.0/schemas" && test -x "$TERMUX_PREFIX/bin/glib-compile-schemas"; then
+			"$TERMUX_PREFIX/bin/glib-compile-schemas" "$TERMUX_PREFIX/opt/gnome-48/share/glib-2.0/schemas" || true
+		fi
+	EOF
 }

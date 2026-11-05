@@ -44,11 +44,10 @@ Use these placeholders in patches instead of hardcoding Termux's prefix or home 
 as required by the [Termux patch guidelines](https://github.com/termux/termux-packages/wiki/Coding-guideline#patches).
 Standalone build helpers that apply recipe patches must expand the placeholders too.
 
-ArcMenu and DING patches live in
-[`packages/livecd-gnome-data/`](../packages/livecd-gnome-data) and apply during the
-package build. WhiteSur's installer is profile-specific, so its
-[`overlay patches`](../overlays/Desktop%20Environment+Theming/patches/whitesur)
-still apply on the phone, using the same placeholders.
+ArcMenu and DING patches live in their extension recipes, such as
+[`packages/gnome-shell-extension-arc-menu/`](../packages/gnome-shell-extension-arc-menu), and apply
+during the package build, as does [WhiteSur's](../packages/whitesur-gtk-theme). The Theming overlay
+then runs the packaged WhiteSur installer on the phone for upstream's own variants.
 
 The normal GNOME installation builds mozjs-128, GJS 1.84.2, Mutter 48.8 and
 Shell 48.8 from verified source archives. The four recipes install into
@@ -63,11 +62,10 @@ used for cross-compilation of introspection data. The old binary bootstrap in
 `prebuilt/gnome-runtime/` remains for historical reproduction and is not called by
 `install.sh`. Normal setup does not fetch or rewrite a GNOME executable.
 
-`livecd-gnome-data` deliberately keeps pinned, architecture-independent Debian
-archives as inputs for readable extension JavaScript, fonts and cursors. It
-preserves attribution and excludes ELF files and Debian package scripts. These
-assets are now packaged and upgraded by APT; this is not a rebuild of every font
-or every extension's original source release. GSConnect, which has its own build
+The font and extension packages (`fonts-*`, `gnome-shell-extension-*`) keep pinned,
+architecture-independent Debian archives as inputs, with Debian's copyright files, and do not
+install Debian's package scripts. They follow upstream's package lists in the overlays that list
+them; this is not a rebuild of every font or extension's original source release. GSConnect, which has its own build
 system, now builds its source archive with Meson and retains Debian's security fix.
 
 Code OSS's generic desktop metadata repair is in its package recipe. Its profile

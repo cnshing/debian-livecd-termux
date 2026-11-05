@@ -59,8 +59,8 @@ recipes cross-compile or that installation of the new release passes acceptance.
 See [the package source contract](../../packages/gnome-48-runtime/SOURCES.md).
 
 `livecd-desktop` owns the session controller and commands. `gnome-48-runtime`
-supplies the session and additional schemas; `livecd-gnome-data` and its font
-subpackage supply portable assets. GJS, GIR/typelibs and the X11 frame client
+supplies the session and additional schemas. Fonts, GNOME Shell extensions and the
+WhiteSur and Colloid themes are separate packages that the overlays install. GJS, GIR/typelibs and the X11 frame client
 are built with their matching sources. The default installer no longer uses the
 GI adapter, frame-only replacement, GNOME-Termux executable bundle, `patchelf`
 repair or generated-typelib repair.

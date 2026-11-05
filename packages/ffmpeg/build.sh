@@ -4,7 +4,7 @@ TERMUX_PKG_LICENSE="GPL-3.0"
 TERMUX_PKG_MAINTAINER="@termux"
 # Please align version with `ffplay` package.
 TERMUX_PKG_VERSION="9.0.2"
-# Termux's ffmpeg with VA-API, so mpv, Firefox, the ffmpeg command and OBS can decode and encode
+# Termux's ffmpeg with VA-API and V4L2 capture (the desktop's /dev/videoN cameras), so mpv, Firefox, the ffmpeg command and OBS can decode and encode
 # through android-vaapi. A revision of its own: at Termux's 9.0.2-1, APT would keep Termux's build.
 TERMUX_PKG_REVISION=100
 TERMUX_PKG_SRCURL="https://www.ffmpeg.org/releases/ffmpeg-${TERMUX_PKG_VERSION}.tar.xz"
@@ -86,6 +86,7 @@ termux_step_configure() {
 		--disable-outdevs \
 		--enable-indev=lavfi \
 		--enable-indev=xcbgrab \
+		--enable-indev=v4l2 \
 		--disable-static \
 		--disable-symver \
 		--enable-cross-compile \

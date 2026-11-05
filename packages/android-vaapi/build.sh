@@ -7,12 +7,15 @@ TERMUX_PKG_VERSION="27.0.0~devel20261029"
 TERMUX_PKG_SRCURL=https://codeload.github.com/lfdevs/mesa-for-android-container/tar.gz/eb3e7fd4f009cab04b1482aad4843c0bde28a786
 TERMUX_PKG_SHA256=123af0b3b2f7c83273a51f28367a64054201d524cbfa52f99ba76696e619927a
 TERMUX_PKG_AUTO_UPDATE=false
-TERMUX_PKG_DEPENDS="libandroid-shmem, libc++, libdrm, libva, libwayland, libx11, libxcb, libxext, libxfixes, libxshmfence, termux-va, vulkan-loader, zlib, zstd"
-TERMUX_PKG_BUILD_DEPENDS="libwayland-cross-scanner, libwayland-protocols, vulkan-headers, xorgproto"
+TERMUX_PKG_DEPENDS="libandroid-shmem, libarchive, libc++, libdrm, libva, libwayland, libx11, libxcb, libxext, libxfixes, libxshmfence, termux-va, vulkan-loader, zlib, zstd"
+TERMUX_PKG_BUILD_DEPENDS="libarchive, libwayland-cross-scanner, libwayland-protocols, vulkan-headers, xorgproto"
 # lfdevs' Mesa fork carries the Termux:VA bridge: a VA-API frontend that hands decoding and encoding
 # to the termux-va daemon. Only its VA-API driver is packaged. Termux's own Mesa keeps OpenGL,
 # EGL and GBM.
+# Build against Termux's libraries only, as the phone builds did: a bundled fallback such as
+# libarchive's needs posix_spawn, which Android API 24 lacks.
 TERMUX_PKG_EXTRA_CONFIGURE_ARGS="
+--wrap-mode=nodownload
 -Dauto_features=disabled
 -Dplatforms=x11,wayland
 -Dgallium-drivers=freedreno,zink,softpipe

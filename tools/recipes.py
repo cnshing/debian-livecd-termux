@@ -138,7 +138,12 @@ def plan(names):
         exact = bool(group[name] & EXACT_DEPENDENCIES)
         hosts = host_packages(ordered)
         inputs = json.dumps([BUILD_EPOCH, revision, exact, hosts, directory_hash(ordered)])
-        include.append({'name': '_'.join(sorted(group[name])), 'packages': ' '.join(ordered),
+        members = sorted(group[name])
+        label = '_'.join(members)
+        # The cache keys include this name, and GitHub rejects keys over 512 characters.
+        if len(label) > 100:
+            label = '{}_and_{}_more'.format(members[0], len(members) - 1)
+        include.append({'name': label, 'packages': ' '.join(ordered),
                         'hash': directory_hash(ordered), 'large': bool(group[name] & LARGE),
                         'timeout': SEPARATE_TIMEOUT if separate else TIMEOUT,
                         'exact': exact, 'host_packages': ' '.join(hosts),

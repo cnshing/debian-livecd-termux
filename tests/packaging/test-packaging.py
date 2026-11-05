@@ -55,6 +55,8 @@ class Packaging(unittest.TestCase):
         self.assertEqual(jobs['easyeffects_lsp-plugins-lv2']['host_packages'],
                          'libcairo2-dev libsndfile1-dev')
         self.assertEqual(jobs['chromium']['host_packages'], '')
+        # Job names go into cache keys, which GitHub caps at 512 characters.
+        self.assertTrue(all(len(name) <= 100 for name in jobs), [name for name in jobs if len(name) > 100])
         built = [package for job in jobs.values() for package in job['packages'].split()]
         self.assertEqual(sorted(set(built)), recipes.all_names())
         alone = recipes.plan(['chromium'])['include']

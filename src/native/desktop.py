@@ -118,13 +118,15 @@ def acceleration_settings():
 
 
 def native_encode(env, preload):
-    """Offer the hardware encoder to every program, as Linux does: the GPU
-    appears as /dev/dri/renderD128 through the stack's preload and libva finds
-    the driver beside it. Decoders stay hidden unless chosen separately, since
-    hardware decoding is opt-in. See prebuilt/native-video/README.md."""
-    if acceleration_settings().get('native_encode') is not True:
+    """Offer hardware encoding and decoding to every program, as Linux does: the GPU
+    appears as /dev/dri/renderD128 through the stack's preload and libva finds the
+    driver beside it. Both are on unless acceleration.json turns them off."""
+    if acceleration_settings().get('native_encode') is False:
         return
+    # A selected development stack comes first, then the android-vaapi package.
     stack = (ACCELERATION / 'bionic').resolve()
+    if not (stack / 'manifest.json').is_file():
+        stack = PREFIX / 'lib/android-vaapi'
     try:
         manifest = json.loads((stack / 'manifest.json').read_text())
         library = stack / manifest['session_preload']
@@ -136,14 +138,14 @@ def native_encode(env, preload):
         return
     preload.append(str(library))
     env['LIBVA_DRIVERS_PATH'] = str(drivers)
-    if acceleration_settings().get('native_decode') is not True:
+    if acceleration_settings().get('native_decode') is False:
         env['TERMUX_VA_DECODE'] = '0'
 
 
 def start_video_daemon(env):
     # The shared Termux:VA daemon serves both encoding and opt-in decoding. A
     # running one is reused; none is ever stopped here.
-    if acceleration_settings().get('native_encode') is not True:
+    if acceleration_settings().get('native_encode') is False:
         return
     try:
         sys.path.insert(0, str(BASE))

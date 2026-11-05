@@ -366,5 +366,37 @@ class NegativeControls(unittest.TestCase):
         self.assertFalse(suite.cogl_negative_passes(after_fullscreen, 1, '/original.so', 'unrelated crash'))
 
 
+class Defaults(unittest.TestCase):
+    def load(self):
+        sys.path.insert(0, str(ROOT / 'src/native'))
+        try:
+            return load('acceleration', ROOT / 'src/native/acceleration.py')
+        finally:
+            sys.path.pop(0)
+
+    def test_hardware_video_is_on_unless_turned_off(self):
+        module = self.load()
+        with patch.dict(os.environ, {}, clear=True):
+            self.assertTrue(module.enabled('firefox', {}))
+            self.assertFalse(module.enabled('firefox', {'hardware_video': False}))
+        with patch.dict(os.environ, {'LIVECD_FIREFOX_HARDWARE_VIDEO': '0'}, clear=True):
+            self.assertFalse(module.enabled('firefox', {}))
+
+    def test_packaged_stack_serves_when_none_is_selected(self):
+        module = self.load()
+        with tempfile.TemporaryDirectory() as temporary:
+            packaged = Path(temporary) / 'android-vaapi'
+            (packaged / 'dri').mkdir(parents=True)
+            (packaged / 'dri/termuxva_drv_video.so').write_bytes(b'')
+            (packaged / 'shim.so').write_bytes(b'')
+            (packaged / 'manifest.json').write_text(json.dumps({'format': 1, 'abi': 'bionic', 'libraries': [],
+                'driver_directory': 'dri', 'preloads': ['shim.so']}))
+            module.ROOT = Path(temporary) / 'nothing-selected'
+            module.PACKAGED = {'bionic': packaged, 'glibc': Path(temporary) / 'absent'}
+            root, manifest = module.stack('bionic')
+            self.assertEqual(root, packaged.resolve())
+            self.assertIsNone(module.stack('glibc'))
+
+
 if __name__ == '__main__':
     unittest.main()

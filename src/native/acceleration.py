@@ -24,6 +24,8 @@ from graphics import apply_renderer, preferred_renderer
 
 PREFIX = Path('/data/data/com.termux/files/usr')
 ROOT = Path.home() / '.local/opt/livecd-native/acceleration'
+# The android-vaapi packages. A stack selected under ROOT, such as a development build, comes first.
+PACKAGED = {'bionic': PREFIX / 'lib/android-vaapi', 'glibc': PREFIX / 'lib/android-vaapi-glibc'}
 CONFIG = Path.home() / '.config/livecd-native/acceleration.json'
 RECEIPT = Path.home() / '.local/opt/livecd-native/gnome-48/share/doc/mutter/build-source.json'
 
@@ -60,7 +62,14 @@ def chromium_has_vaapi(profile='chromium', abi='bionic'):
 
 
 def stack(abi):
-    root = (ROOT / abi).resolve()
+    for candidate in (ROOT / abi, PACKAGED[abi]):
+        selected = checked_stack(candidate.resolve(), abi)
+        if selected:
+            return selected
+    return None
+
+
+def checked_stack(root, abi):
     try:
         manifest = json.loads((root / 'manifest.json').read_text())
         if manifest['format'] != 1 or manifest['abi'] != abi:
@@ -88,7 +97,8 @@ def enabled(profile, config):
     legacy = Path.home() / '.config/livecd-native/chrome-hardware-video'
     if profile == 'chrome' and legacy.is_file():
         return legacy.read_text().strip() == '1'
-    return config.get('hardware_video', False) is True
+    # Hardware video is on unless turned off.
+    return config.get('hardware_video', True) is not False
 
 
 def gpu_enabled(profile):

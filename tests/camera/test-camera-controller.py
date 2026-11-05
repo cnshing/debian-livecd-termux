@@ -98,8 +98,8 @@ class DesktopWiring(unittest.TestCase):
         self.patches.stop()
         self.temporary.cleanup()
 
-    def preload(self, accepted=True):
-        with mock.patch.dict(os.environ, {'LD_PRELOAD': '/lib/libtermux-exec.so'}, clear=True), \
+    def preload(self, accepted=True, inherited='/lib/libtermux-exec.so'):
+        with mock.patch.dict(os.environ, {'LD_PRELOAD': inherited}, clear=True), \
                 mock.patch.object(desktop, 'probe_preload', return_value=accepted), \
                 mock.patch.object(desktop, 'apply_renderer', side_effect=lambda env, renderer: env), \
                 contextlib.redirect_stderr(io.StringIO()):
@@ -107,6 +107,10 @@ class DesktopWiring(unittest.TestCase):
 
     def test_session_preloads_the_camera_last(self):
         self.assertEqual(self.preload(), ['/lib/libtermux-exec.so', str(self.library)])
+
+    def test_a_session_program_asking_again_gets_the_camera_once(self):
+        inside = f'/lib/libtermux-exec.so:{self.library}'
+        self.assertEqual(self.preload(inherited=inside), ['/lib/libtermux-exec.so', str(self.library)])
 
     def test_camera_stays_out_when_disabled_or_rejected(self):
         self.assertEqual(self.preload(accepted=False), ['/lib/libtermux-exec.so'])

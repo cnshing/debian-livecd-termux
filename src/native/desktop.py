@@ -99,7 +99,7 @@ def environment(renderer='software'):
         PULSE_SERVER='unix:' + str(RUNTIME / 'pulse.sock'))
     library = RESOURCE_PRELOAD
     preload = [item for item in env.get('LD_PRELOAD', '').replace(':', ' ').split()
-               if Path(item).name != library.name]
+               if Path(item).name not in (library.name, CAMERA_PRELOAD.name)]
     if env.get('ANDROID_PROCFS_COMPAT') != '0' and library.exists() and preload_works(library, preload):
         preload.insert(0, str(library))
         env['PATH'] = f'{RESOURCE_COMMANDS}:' + env['PATH']

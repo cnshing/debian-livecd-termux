@@ -125,6 +125,29 @@ class DesktopWiring(unittest.TestCase):
         self.assertEqual(desktop.camera_status(run)['status'], 'stopped')
 
 
+class PermissionNotice(unittest.TestCase):
+    def test_a_refused_camera_stays_reported_until_one_opens(self):
+        with tempfile.TemporaryDirectory() as temporary, mock.patch.object(camera, 'LOGS', Path(temporary) / 'logs'):
+            run = Path(temporary)
+            supervisor = camera.Supervisor(run)
+            supervisor.status['devices'] = camera.choose(NOTE10)
+            for directory in ('dev', 'state'):
+                (run / 'android-v4l2' / directory).mkdir(parents=True)
+            for number in (0, 1):
+                (run / 'android-v4l2/dev' / f'video{number}').touch()
+
+            def after(front_state):
+                (run / 'android-v4l2/state/video0').write_text(front_state + '\n')
+                (run / 'android-v4l2/state/video1').write_text('idle\n')
+                supervisor.refresh()
+                return json.loads((run / 'android-v4l2.json').read_text()).get('detail', '')
+
+            self.assertNotIn('CAMERA', after('idle'))
+            self.assertIn('pm grant com.termux.api android.permission.CAMERA', after('waiting permission-denied'))
+            self.assertIn('CAMERA', after('idle'))
+            self.assertNotIn('CAMERA', after('open'))
+
+
 STAND_INS = {
     'pipewire': '''
         touch "$PIPEWIRE_RUNTIME_DIR/pipewire-0"

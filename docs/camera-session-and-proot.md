@@ -1,8 +1,8 @@
 # Camera session integration and PRoot assessment
 
-The existing camera bridge works in its isolated test environment. The native
-desktop still needs that bridge packaged and started. PRoot path translation
-alone cannot supply the missing camera implementation.
+This audit preceded the desktop integration, which the [camera guide](camera/README.md)
+now describes; the "Running desktop audit" below is the state before it. PRoot
+path translation alone cannot supply a camera implementation.
 
 **Selected approach:** native preloads plus PipeWire and the camera portal.
 PRoot is excluded from implementation. The PRoot discussion and measurements
@@ -261,34 +261,6 @@ For an unpacked Termux package, also set `PROOT_LOADER` to its extracted
 
 ## Implementation direction
 
-First package `camnode`, the Bionic discovery preload and patched `pw-v4l2`.
-Have the session own the camera services' startup, readiness, crash reporting
-and shutdown. All clients and producers must agree on the PipeWire socket and
-marker directory. The separate audio-effects PipeWire does not automatically
-make camera nodes available to desktop clients; choose an explicit shared
-endpoint or a session-owned video service, and verify operation with audio
-effects both enabled and disabled.
-
-Add the camera preload to the Bionic session environment before launching apps.
-Then test the actual installed Firefox capture process and each GNOME camera
-application through its selected backend. Portal clients additionally need a
-working camera portal. GNOME Shell's `camera_monitor=false` build option
-disables its usage indicator; it does not implement or disable the producer.
-Enable and test the indicator when camera support ships.
-
-The glibc browser launch path deliberately removes Bionic `LD_PRELOAD` and
-library paths in [`acceleration.py`](../src/native/acceleration.py). It needs
-glibc-compatible camera libraries and launcher wiring, or a tested native
-PipeWire/portal route. A Bionic library cannot cover that ABI. The existing
-preload also has documented gaps for relative `openat`, inline syscalls and
-static programs; filling those gaps is a separate compatibility task.
-
-Proceed with native Bionic/glibc preloads and PipeWire/portal access. PRoot and
-a PRoot-derived compatibility layer are excluded. Record any remaining
-static/inline-syscall client limitations explicitly; exposing a filename alone
-does not establish compatibility with those clients.
-
-Desktop acceptance should launch ordinary apps through their installed
-launchers, without creating a test-only PipeWire or manually injecting a
-preload. Check discovery, actual frames, permissions, camera release, service
-restart, desktop restart and coexistence with the session's other preloads.
+Built as `android-v4l2`; see the [camera guide](camera/README.md) for the
+design, what it covers and what remains. PRoot and a PRoot-derived
+compatibility layer stay excluded.

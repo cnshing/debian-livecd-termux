@@ -73,6 +73,7 @@ the desktop runs, unless the installation would upgrade a library the desktop is
 | Feature | Guide |
 | --- | --- |
 | GNOME desktop and native applications | [Native desktop](docs/native/README.md#install-and-run) |
+| Front and rear cameras as `/dev/video0` and `/dev/video1` | [Cameras](docs/camera/README.md) |
 | Phone microphone and Bluetooth headsets | [Microphone](docs/mic/README.md), [Bluetooth limits](docs/mic/BLUETOOTH.md#android-permission-boundary) |
 | Whole-device CPU, processes and sensors | [Resource access](docs/resources/README.md) |
 | EasyEffects and AutoEq | [Audio effects](docs/audio/README.md), [application routing](docs/audio/README.md#run) |

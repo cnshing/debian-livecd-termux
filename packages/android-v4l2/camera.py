@@ -115,6 +115,7 @@ class Supervisor:
         self.core = []
         self.nodes = {}
         self.core_error = None
+        self.denied = False
         LOGS.mkdir(parents=True, exist_ok=True)
 
     def report(self, status, detail=None):
@@ -195,7 +196,12 @@ class Supervisor:
             else 'starting'
         details = [f'{device["name"]} kept exiting; see {LOGS / ("video%d.log" % device["number"])}'
                    for device in self.status['devices'] if device['state'] == 'failed']
+        # Kept after the stream gives up, until a camera opens: then it was granted.
         if any(device['state'] == 'waiting permission-denied' for device in live):
+            self.denied = True
+        elif any(device['state'] == 'open' for device in live):
+            self.denied = False
+        if self.denied:
             details.append(NO_PERMISSION)
         if status == 'starting' and self.core_error:
             details.append(self.core_error)

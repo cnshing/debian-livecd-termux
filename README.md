@@ -100,7 +100,7 @@ how to add a new one.
 The optional [Serein client package](docs/serein/README.md) carries forward the earlier
 microphone probe work into a full native Termux desktop build.
 
-The GNOME recipes in `packages/` carry the source archives and patches of the GNOME 48 source port that passed device acceptance on the phone; the new packaging path still needs its own full build and device acceptance.
+The GNOME recipes in `packages/` carry the source archives and patches of the GNOME 48 source port that passed device acceptance on the phone; the packaged release was then installed and tested on a freshly wiped phone with `install.sh`.
 
 The [shared resource backend](docs/resources/README.md) provides on-demand whole-device
 CPU, Android processes and supported sensors to Mission Center and ordinary Linux tools.

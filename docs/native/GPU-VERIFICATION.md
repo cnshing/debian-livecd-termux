@@ -21,7 +21,7 @@ desktop on the CPU. Debian remains stopped on disk as optional recovery data.
 
 The official Termux `mesa-vulkan-icd-freedreno` **26.2.6** and `vulkan-tools`
 **1.4.366** packages were downloaded and checked against their APT-index SHA-256
-values. `gpu-sources.lock.json` retains the exact URLs and hashes. Their Bionic
+values. `gpu-setup.py` now takes them through APT at the installed Mesa's version. Their Bionic
 files are staged privately under `~/.local/opt/livecd-native/gpu-26.2.6`, with an
 owned `gpu` selector. The GPU work did not install or replace shared APT packages;
 an unrelated native package download was allowed to continue.

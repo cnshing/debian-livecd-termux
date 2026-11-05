@@ -1,6 +1,12 @@
 #!/data/data/com.termux/files/usr/bin/python
-"""Stage official Bionic Turnip/tools privately; leave shared Mesa under APT."""
+"""Stage official Bionic Turnip/tools privately; leave shared Mesa under APT.
+
+Turnip is taken at the installed Mesa's version, and vulkan-tools at its current version, from
+Termux's signed APT index. Termux keeps only each package's newest release, so a fixed list of
+versions stops downloading as soon as Termux moves on.
+"""
 import fcntl
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -12,7 +18,6 @@ import tempfile
 HERE = Path(__file__).resolve().parent
 sys.path[:0] = [str(HERE.parents[1] / 'src/native'), str(HERE.parent / 'gnome-runtime')]
 from graphics import GPU, PREFIX
-from prepare import fetch
 
 
 def main():
@@ -38,16 +43,28 @@ def main():
             raise RuntimeError('Install native dependencies first: pkg install ' + ' '.join(missing))
         if not (PREFIX / 'lib/dri/zink_dri.so').is_file():
             raise RuntimeError('The installed native Mesa must supply zink_dri.so')
-        sources = json.loads((HERE / 'gpu-sources.lock.json').read_text())
-        destination = GPU.with_name('gpu-' + sources['mesa_version'])
+        mesa = subprocess.check_output(['dpkg-query', '-W', '-f=${Version}', 'mesa'], text=True).strip()
+        destination = GPU.with_name('gpu-' + mesa)
         if GPU.exists() and not GPU.is_symlink():
             raise RuntimeError('The private GPU selector is an unexpected directory')
         GPU.parent.mkdir(parents=True, exist_ok=True)
         with tempfile.TemporaryDirectory(prefix='gpu-staging-', dir=GPU.parent) as temporary:
             staging = Path(temporary)
-            for item in sources['packages']:
-                archive = fetch(item, item['file'])
-                subprocess.run(['dpkg-deb', '-x', str(archive), str(staging)], check=True)
+            downloads = staging / 'downloads'
+            downloads.mkdir()
+            # apt checks each file against the signed index. A missing Turnip build means Mesa
+            # itself is older than Termux's current release.
+            if subprocess.run(['apt-get', 'download', 'mesa-vulkan-icd-freedreno=' + mesa, 'vulkan-tools'],
+                              cwd=downloads).returncode:
+                raise RuntimeError('No Turnip build matches Mesa ' + mesa + '. Run pkg upgrade, then this again.')
+            sources = {'format': 2, 'architecture': 'aarch64', 'mesa_version': mesa, 'packages': []}
+            for archive in sorted(downloads.glob('*.deb')):
+                fields = subprocess.check_output(['dpkg-deb', '-f', str(archive), 'Package', 'Version'], text=True)
+                package, version = (line.split(': ', 1)[1] for line in fields.splitlines())
+                sources['packages'].append({'package': package, 'version': version, 'file': archive.name,
+                                            'sha256': hashlib.sha256(archive.read_bytes()).hexdigest()})
+                subprocess.run(['dpkg-deb', '-x', str(archive), str(staging / 'root')], check=True)
+            staging = staging / 'root'
             prefix = staging / str(PREFIX).lstrip('/')
             icd = prefix / 'share/vulkan/icd.d/freedreno_icd.aarch64.json'
             data = json.loads(icd.read_text())

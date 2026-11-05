@@ -254,9 +254,12 @@ livecd validate
 livecd select
 ```
 
-`gpu-setup.py` verifies the package hashes in `gpu-sources.lock.json` and stages
-the driver and Vulkan tools under `~/.local/opt/livecd-native/gpu-26.2.6`, selected
-by the owned `gpu` symlink. It checks native dependencies and rejects an active
+`gpu-setup.py` downloads Termux's `mesa-vulkan-icd-freedreno` at the installed Mesa's
+version, and the current `vulkan-tools`, through APT, which checks them against the signed
+index. It stages them under `~/.local/opt/livecd-native/gpu-MESA_VERSION`, selected by the
+owned `gpu` symlink, and records the versions and hashes in that directory's `sources.lock.json`.
+Termux keeps only the newest release of each package, so a fixed version list would stop
+downloading. It checks native dependencies and rejects an active
 desktop. Shared Mesa and the system Vulkan configuration remain under APT.
 This private staging also works while an unrelated APT download holds its lock.
 

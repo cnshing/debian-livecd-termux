@@ -7,6 +7,15 @@ Investigated and tested on the connected Galaxy Note10+, Android 11 /
 SDK 30, ARM64, with Termux 0.118.3 (target SDK 28), Termux's PipeWire 1.4.9 and
 `ndk-sysroot` 30. Raw results: `temp/docs/evidence/camera-investigation/`.
 
+**Desktop integration is still missing.** The results below come from a private
+test session that builds the producer and preload itself. The running desktop
+has neither installed, loads no camera preload, and has no camera PipeWire
+endpoint. See the [session audit and PRoot assessment](camera-session-and-proot.md)
+for the device checks, path-translation benchmark and remaining integration work.
+The selected implementation uses native preloads and PipeWire/portal access;
+PRoot is excluded. The follow-up also records the backend's exact buffer and
+ioctl coverage and the broad application acceptance target.
+
 **Question:** can [termux-api#904]'s CameraVideo API, driven through Shizuku or
 ADB, give the native desktop a live camera that any Linux program can use, with
 latency and CPU cost fit for live video?
@@ -279,7 +288,7 @@ reopened on the next stream. This phone does not stream both to an app at once.
 | Portal clients (Snapshot, OBS's PipeWire source) | Untested; need `xdg-desktop-portal` (packaged by Termux, not installed), which lists `media.role=Camera` nodes ([source][portal]) |
 | glibc programs (Google Chrome, ungoogled-chromium, anything run through the desktop's glibc runtime) | **Not covered**: a Bionic preload cannot load into them. Needs glibc builds of the preload and `pw-v4l2` |
 | Programs started without the preload | Not covered until the desktop adds it to the session preload |
-| Statically linked programs, or raw system calls (some Go programs) | Not covered; would need a ptrace launcher |
+| Statically linked programs, or inline kernel system calls (some Go programs) | Outside preload coverage; need a compatible dynamic build or native PipeWire/portal path under the selected approach |
 | `openat` relative to an open `/dev` directory | Not handled; none seen |
 
 GNOME Shell builds with `-Dcamera_monitor=false`

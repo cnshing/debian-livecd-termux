@@ -1,17 +1,20 @@
 #!/usr/bin/env python3
 """Stream from /dev/videoN with plain V4L2 ioctls, as a C webcam program would.
 
-Run it under the livecd-v4l2 preload against camnode:
-    python v4l2-read.py /dev/video0 YUYV 1280 720 150 [frame.raw] [expected-card]
+Run it under the libandroid-v4l2.so preload against camera-node:
+    python v4l2-read.py /dev/video0 YUYV 1280 720 150 [expected-card]
 
-With camnode --stamp, the first 8 bytes of each frame hold the sensor
-timestamp, so this reports exposure-start-to-application latency.
+It reports the last frame only as luma levels (mean, spread, and the share of
+distinct values), never the picture. With camera-node --stamp, the first 8
+bytes of each frame hold the sensor timestamp, so this reports
+exposure-start-to-application latency.
 """
 import ctypes
 import fcntl
 import os
 import resource
 import select
+import statistics
 import struct
 import sys
 import time
@@ -44,7 +47,7 @@ def cpu():
     return usage.ru_utime + usage.ru_stime
 
 
-def main(dev, want, width, height, frames, save=None, expected_card=None):
+def main(dev, want, width, height, frames, expected_card=None):
     fd = os.open(dev, os.O_RDWR)
     cap = bytearray(104)
     fcntl.ioctl(fd, QUERYCAP, cap)
@@ -92,7 +95,7 @@ def main(dev, want, width, height, frames, save=None, expected_card=None):
     fcntl.ioctl(fd, STREAMON, struct.pack("<I", CAPTURE))
     poller = select.poll()
     poller.register(fd, select.POLLIN)
-    latencies, got, first = [], 0, None
+    latencies, got, first, levels = [], 0, None, None
     cpu0 = cpu()
     while got < frames:
         if not poller.poll(5000):
@@ -109,9 +112,11 @@ def main(dev, want, width, height, frames, save=None, expected_card=None):
             latencies.append((now - stamp) / 1e6)
         if first is None:
             first = time.monotonic()
-        if save and got == frames - 1:
-            with open(save, "wb") as out:
-                out.write(ctypes.string_at(maps[index], used))
+        if got == frames - 1:
+            frame = ctypes.string_at(maps[index], used)
+            luma = frame[8:2 * w * h:2] if name(pix) == "YUYV" else frame[8:w * h]
+            sample = luma[::97]
+            levels = (statistics.fmean(sample), statistics.pstdev(sample), len(set(luma)))
         fcntl.ioctl(fd, QBUF, buf)
         got += 1
     elapsed = time.monotonic() - first if first else 0
@@ -124,6 +129,8 @@ def main(dev, want, width, height, frames, save=None, expected_card=None):
         latencies.sort()
         print(f"exposure start to application: median {latencies[len(latencies) // 2]:.1f} ms, "
               f"min {latencies[0]:.1f}, max {latencies[-1]:.1f}")
+    if levels:
+        print(f"luma levels: mean {levels[0]:.1f}, spread {levels[1]:.1f}, {levels[2]} distinct values")
     if elapsed:
         print(f"this process CPU: {100 * used_cpu / elapsed:.1f}% of one core")
     return 0 if got == frames else 1
@@ -131,5 +138,4 @@ def main(dev, want, width, height, frames, save=None, expected_card=None):
 
 if __name__ == "__main__":
     a = sys.argv[1:]
-    sys.exit(main(a[0], a[1], int(a[2]), int(a[3]), int(a[4]), a[5] if len(a) > 5 else None,
-                  a[6] if len(a) > 6 else None))
+    sys.exit(main(a[0], a[1], int(a[2]), int(a[3]), int(a[4]), a[5] if len(a) > 5 else None))

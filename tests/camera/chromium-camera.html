@@ -6,7 +6,7 @@
 // front camera's settings, frame rate, exposure-to-JavaScript latency, the
 // mean color of a wall region, and a small JPEG of the last frame.
 // Frames are read from the track itself, since headless Chromium without a
-// GPU does not render a <video> element. camnode --stamp puts the sensor
+// GPU does not render a <video> element. camera-node --stamp puts the sensor
 // timestamp (CLOCK_BOOTTIME ns) in the first 8 bytes of each frame; the page
 // URL carries ?offset=, wall-clock minus boot-clock in ns.
 const log = (message) => console.log("CAMTEST " + message);
@@ -18,7 +18,7 @@ const offset = BigInt(new URLSearchParams(location.search).get("offset") || "0")
     first.getTracks().forEach((t) => t.stop());
     const cameras = (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === "videoinput");
     log("cameras " + JSON.stringify(cameras.map((d) => d.label)));
-    const front = cameras.find((d) => d.label.includes("Phone camera 1")) || cameras[0];
+    const front = cameras.find((d) => d.label.includes("Front camera")) || cameras[0];
     const stream = await navigator.mediaDevices.getUserMedia({
       video: {deviceId: {exact: front.deviceId}, width: 1280, height: 720, frameRate: 30},
     });

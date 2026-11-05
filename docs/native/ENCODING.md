@@ -158,10 +158,11 @@ GStreamer's `va` plugin in a prefix:
 ```sh
 bash tests/video-encode/run-phone-tests.sh --stack ~/.local/opt/livecd-native/acceleration/bionic \
   --daemon ~/.local/opt/livecd-native/acceleration/service/bin/termux-va \
-  --clients PREFIX --pipewire-src PIPEWIRE_1.4.9_SOURCE --out NEW_DIR </dev/null
+  --clients PREFIX --out NEW_DIR </dev/null
 ```
 
-The camera suite opens the front camera through a private PipeWire; it records
+The camera suite runs when `android-v4l2` is installed, using its
+camera node and V4L2 preload. It opens the front camera through a private PipeWire; it records
 whoever is in front of the phone. It writes those frames under the output
 directory, so delete them after checking. Two harness errors were found on the
 way and fixed:

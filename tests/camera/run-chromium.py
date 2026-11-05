@@ -4,9 +4,8 @@
 Usage: run-chromium.py PAGE OUT_DIR
 Passes when Chromium lists the cameras, streams the front one at 25 fps or
 more, and the wall region is warm (red above blue), as the direct captures
-were. Saves the page's JPEG of the last frame as OUT_DIR/chromium.jpg.
+were. Only those levels are kept; the page's picture of the last frame is not.
 """
-import base64
 import os
 import selectors
 import signal
@@ -56,9 +55,6 @@ finally:
 
 for line in errors[:5]:
     print("chromium log:", line)
-if "jpeg" in results and "," in results["jpeg"]:
-    with open(os.path.join(out, "chromium.jpg"), "wb") as f:
-        f.write(base64.b64decode(results["jpeg"].split(",", 1)[1]))
 try:
     fps = float(results.get("fps", 0))
     r, g, b = (int(x) for x in results.get("wall", "0 0 0").split())

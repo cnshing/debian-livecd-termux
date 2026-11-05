@@ -19,8 +19,8 @@ with the standard `com.termux` prefix; other devices and Android versions need t
    storage, such as `Shizuku/`. The installer finds them there.
 
 Everything else is automatic. `install.sh` asks Android for storage access (accept the prompt), and
-through Shizuku it grants Termux:API's microphone permission, which covers Termux, and exempts Termux
-from battery optimization. It stops with the step to take when an app or permission is missing.
+through Shizuku it grants Termux:API's microphone and camera permissions, which cover Termux, and
+exempts Termux from battery optimization. It stops with the step to take when an app or permission is missing.
 
 ## Install
 

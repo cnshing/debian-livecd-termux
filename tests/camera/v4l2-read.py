@@ -7,7 +7,8 @@ Run it under the libandroid-v4l2.so preload against camera-node:
 It reports the last frame only as luma levels (mean, spread, and the share of
 distinct values), never the picture. With camera-node --stamp, the first 8
 bytes of each frame hold the sensor timestamp, so this reports
-exposure-start-to-application latency.
+exposure-start-to-application latency. V4L2_READ_TIMEOUT is how many seconds
+to wait for a frame, 5 by default.
 """
 import ctypes
 import fcntl
@@ -98,7 +99,7 @@ def main(dev, want, width, height, frames, expected_card=None):
     latencies, got, first, levels = [], 0, None, None
     cpu0 = cpu()
     while got < frames:
-        if not poller.poll(5000):
+        if not poller.poll(int(float(os.environ.get("V4L2_READ_TIMEOUT", "5")) * 1000)):
             print("timed out waiting for a frame")
             break
         buf = bytearray(88)

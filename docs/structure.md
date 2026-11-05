@@ -233,8 +233,7 @@ sources are pinned in `packages/`, beside the patches applied to them.
    - **Ported or repackaged software** takes its upstream or Debian name: `avahi`,
      `gnome-shell-extension-gsconnect`, `fonts-noto-core`, `whitesur-gtk-theme`. Software built
      for the isolated GNOME 48 runtime is `gnome-48-<name>`.
-   - Only what belongs to the live CD itself keeps `livecd-`: `livecd-desktop`, and the
-     `gnome-shell-extension-livecd-appearance` extension.
+   - Only what belongs to the live CD itself keeps `livecd-`, such as `livecd-desktop`.
    A recipe that renames an earlier package lists the old name in `TERMUX_PKG_CONFLICTS` and
    `TERMUX_PKG_REPLACES`. A name that Termux also uses replaces Termux's recipe when staged.
 2. Add patches beside it as `0001-*.patch`, with paths that apply using `-p1` from the source root.

@@ -1,0 +1,14 @@
+--- a/extension.js
++++ b/extension.js
+@@ -72,8 +72,9 @@
+             this._settings.disconnect(this._accentColorChangedId);
+             this._accentColorChangedId = 0;
+         }
+-        if (this._preferences && this._colorSchemeChangedId) {
+-            this._preferences.disconnect(this._colorSchemeChangedId);
++        // The color-scheme handler was connected on _settings, not _preferences
++        if (this._settings && this._colorSchemeChangedId) {
++            this._settings.disconnect(this._colorSchemeChangedId);
+             this._colorSchemeChangedId = 0;
+         }
+         // Clear the iconThemes array

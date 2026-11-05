@@ -296,7 +296,7 @@ Several package details prevent plausible but incorrect substitutions:
 | User Themes | Resolve shell theme from native data paths |
 | NoAnnoyance | Verify focus/window activation on the selected patched Shell |
 | Tiling Assistant | Test actual window placement and shortcuts; extension state alone is insufficient |
-| `livecd-appearance@local` | Update its Shell metadata, native theme paths and GTK4 import ownership; retain user-CSS precedence |
+| Accent GTK/Icons/User Theme | Replaced the interim `livecd-appearance@local` with upstream's three extensions, packaged and patched: GTK4 links it owns instead of copies, `$XDG_CONFIG_HOME`, the icons signal disconnection |
 
 The current custom appearance metadata declares only Shell 48. Do not bypass extension compatibility checks globally to claim GNOME 49 support. Select matching releases or port and test the affected code. The native PR does not include this repository's extension configuration or acceptance evidence.
 

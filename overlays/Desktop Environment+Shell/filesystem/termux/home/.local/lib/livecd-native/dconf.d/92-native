@@ -1,5 +1,5 @@
 [org/gnome/shell]
-enabled-extensions=['arcmenu@arcmenu.com', 'dash-to-panel@jderose9.github.com', 'ding@rastersoft.com', 'ubuntu-appindicators@ubuntu.com', 'user-theme@gnome-shell-extensions.gcampax.github.com', 'noannoyance-fork@vrba.dev', 'tiling-assistant@leleat-on-github', 'livecd-appearance@local']
+enabled-extensions=['arcmenu@arcmenu.com', 'dash-to-panel@jderose9.github.com', 'ding@rastersoft.com', 'ubuntu-appindicators@ubuntu.com', 'user-theme@gnome-shell-extensions.gcampax.github.com', 'noannoyance-fork@vrba.dev', 'tiling-assistant@leleat-on-github', 'accent-user-theme@brgvos', 'accent-gtk-theme@brgvos', 'accent-icons-theme@brgvos']
 favorite-apps=['com.mitchellh.ghostty.desktop', 'org.gnome.Nautilus.desktop', 'code-oss.desktop', 'firefox.desktop']
 [org/gnome/shell/extensions/dash-to-panel]
 extension-version=9999

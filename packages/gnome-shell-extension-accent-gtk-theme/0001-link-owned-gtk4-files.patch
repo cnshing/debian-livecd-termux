@@ -1,0 +1,115 @@
+--- a/extension.js
++++ b/extension.js
+@@ -151,61 +151,68 @@
+         }
+     }
+ 
+-    // Next method create symlinks to user local gtk 4 config
++    // Next method links the user's local gtk 4 config to the theme, for libadwaita applications.
++    // Links rather than copies: nothing is copied on GNOME Shell's thread, and an update cannot race
++    // an asynchronous deletion. Only links this extension made are replaced; a user's own files stay.
++    // Flatpak applications cannot follow such links out of their sandbox.
+     _createFilesDirsLocalGtk4(themeName) {
+         // Get the path where is the theme installed
+         const setPathTheme = this._preferences?.get_string(`set-theme-path`);
+-        // Relative path to directory
+-        const relativePath = '.config/gtk-4.0';
+-        const dirFile = this._createFullPath(relativePath);
+-        const pathRelative = dirFile.get_path();
++        const dirFile = this._localGtk4Dir;
+         //Create directory if not exist
+         this._createDirectoryInHomeDir(dirFile);
+-        // Copy file gtk.css to $HOME/.config/gtk-4.0/gtk.css
+-        const source_1 = setPathTheme+'/'+themeName+'/gtk-4.0/gtk.css';
+-        const destination_1 = pathRelative+'/gtk.css';
+-        this._copyFile(source_1, destination_1);
+-        // Copy file gtk-dark.css to $HOME/.config/gtk-4.0/gtk-dark.css
+-        const source_2 = setPathTheme+'/'+themeName+'/gtk-4.0/gtk-dark.css';
+-        const destination_2 = pathRelative+'/gtk-dark.css';
+-        this._copyFile(source_2, destination_2);
+-        // Copy assests directory to $HOME/.config/gtk-4.0/assets
+-        const source_3 = setPathTheme+'/'+themeName+'/gtk-4.0/assets';
+-        const destination_3 = pathRelative+'/assets';
+-        this._copyRecursive(source_3, destination_3);
+-        // Create symbolic link at $HOME/.config/gtk-4.0/windows-assets for MacTahoe or WhiteSur theme, for Fluent is not needed
+-        const onlyThemeName = themeName.split("-",1); // take  from full name only the name, at the first char "-"
+-        if(onlyThemeName == 'MacTahoe' || onlyThemeName == 'WhiteSur') {
+-            const source_4 = setPathTheme+'/'+themeName+'/gtk-4.0/windows-assets';
+-            const destination_4 = pathRelative+'/windows-assets';
+-            this._copyRecursive(source_4, destination_4);
++        for (const name of this._gtk4Names) {
++            const target = Gio.File.new_for_path(GLib.build_filenamev([setPathTheme, themeName, 'gtk-4.0', name]));
++            const link = dirFile.get_child(name);
++            if (!target.query_exists(null) || (this._existsHere(link) && !this._isOwnedLink(link, name)))
++                continue;
++            if (this._isOwnedLink(link, name))
++                link.delete(null);
++            link.make_symbolic_link(target.get_path(), null);
+         }
+     }
+ 
+-    // Next method remove symlinks from local gtk 4 config
++    // Next method removes the links made above, and nothing else
+     _delFilesDirsLocalGtk4() {
+-        // Relative path to directory
+-        const relativePath = '.config/gtk-4.0';
+-        const dirFile = this._createFullPath(relativePath);
+-        const pathRelative = dirFile.get_path();
+-        // Delete file $HOME/.config/gtk-4.0/gtk.css
+-        const path_1 = pathRelative+'/gtk.css';
+-        this._deleteFile(path_1);
+-        // Delete file $HOME/.config/gtk-4.0/gtk-dark.css
+-        const path_2 = pathRelative+'/gtk-dark.css';
+-        this._deleteFile(path_2);
+-        // Delete directory $HOME/.config/gtk-4.0/assets
+-        const path_3 = pathRelative+'/assets';
+-        //this._deleteFile(path_3);
+-        this._deleteRecursive(path_3);
+-        // Delete directory $HOME/.config/gtk-4.0/windows-assets if exist
+-        const path_4 = pathRelative+'/windows-assets';
+-        const pathWindowsAssets =  Gio.File.new_for_path(path_4);
+-        if (pathWindowsAssets.query_exists(null)) {
+-            this._deleteRecursive(path_4);
++        const dirFile = this._localGtk4Dir;
++        for (const name of this._gtk4Names) {
++            const link = dirFile.get_child(name);
++            if (this._isOwnedLink(link, name))
++                link.delete(null);
+         }
+     }
+-    
++
++    // GTK reads gtk-4.0 from $XDG_CONFIG_HOME, which need not be ~/.config
++    get _localGtk4Dir() {
++        return Gio.File.new_for_path(GLib.build_filenamev([GLib.get_user_config_dir(), 'gtk-4.0']));
++    }
++
++    get _gtk4Names() {
++        // windows-assets exists in MacTahoe and WhiteSur, not in Fluent
++        return ['gtk.css', 'gtk-dark.css', 'assets', 'windows-assets'];
++    }
++
++    // Next method tells whether a path exists, without following a link there
++    _existsHere(file) {
++        try {
++            file.query_info('standard::type', Gio.FileQueryInfoFlags.NOFOLLOW_SYMLINKS, null);
++            return true;
++        } catch (error) {
++            if (error.matches(Gio.IOErrorEnum, Gio.IOErrorEnum.NOT_FOUND))
++                return false;
++            throw error;
++        }
++    }
++
++    // Next method recognises a link made above: it points at a theme's gtk-4.0/NAME
++    _isOwnedLink(file, name) {
++        if (!this._existsHere(file))
++            return false;
++        const info = file.query_info('standard::is-symlink,standard::symlink-target',
++            Gio.FileQueryInfoFlags.NOFOLLOW_SYMLINKS, null);
++        return info.get_is_symlink() && (info.get_symlink_target() ?? '').endsWith(`/gtk-4.0/${name}`);
++    }
++
+     // Next method set the theme
+     _setGtkTheme(themeName) {
+         // Set the gtk theme

@@ -3,4 +3,7 @@
 - librsvg
 - whitesur-gtk-theme
 - colloid-icon-theme
-- gnome-shell-extension-livecd-appearance
+# Upstream bundles these three; here they are packages.
+- gnome-shell-extension-accent-user-theme
+- gnome-shell-extension-accent-gtk-theme
+- gnome-shell-extension-accent-icons-theme

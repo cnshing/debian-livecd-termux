@@ -168,7 +168,10 @@ Thanks to the authors and maintainers of [ArcMenu](https://gitlab.com/arcmenu/Ar
 [AppIndicator](https://github.com/ubuntu/gnome-shell-extension-appindicator),
 [User Themes](https://packages.debian.org/trixie/gnome-shell-extension-user-theme),
 [NoAnnoyance](https://github.com/jirkavrba/noannoyance), and
-[Tiling Assistant](https://packages.debian.org/trixie/gnome-shell-extension-tiling-assistant).
+[Tiling Assistant](https://packages.debian.org/trixie/gnome-shell-extension-tiling-assistant), and of
+florintanasa's [Accent GTK Theme](https://github.com/florintanasa/accent-gtk-theme),
+[Accent Icons Theme](https://github.com/florintanasa/accent-icons-theme) and
+[Accent User Theme](https://github.com/florintanasa/accent-user-theme).
 Their extensions supply much of the desktop's layout and behavior.
 
 [vinceliuice's WhiteSur GTK theme](https://github.com/vinceliuice/WhiteSur-gtk-theme) and

@@ -101,7 +101,7 @@ GSettings policies from working. Lock-screen controls still need validation
 against the port's session-lock support.
 
 Appearance writes the existing GNOME color-scheme, accent and background keys.
-The existing `livecd-appearance@local` extension handles WhiteSur/Colloid changes,
+Upstream's accent extensions (`accent-gtk-theme`, `accent-icons-theme`, `accent-user-theme`) handle WhiteSur/Colloid changes,
 and the XSettings bridge forwards GTK theme/font/icon/cursor preferences to X11
 applications. Arbitrary theme selection is not a stock Appearance feature.
 

@@ -1,17 +1,16 @@
 #!/data/data/com.termux/files/usr/bin/python
 """Build the live CD's WhiteSur variants from the whitesur-gtk-theme package's installer.
 
-The package supplies WhiteSur's prebuilt variants, Colloid comes from colloid-icon-theme, and the
-accent-following extension from gnome-shell-extension-livecd-appearance. This applies upstream's
-own choices on top: Monterey, the Nord scheme and solid opacity, in every accent, with upstream's
-title bar buttons.
+The package supplies WhiteSur's prebuilt variants and Colloid comes from colloid-icon-theme. This
+applies upstream's own choices on top: Monterey, the Nord scheme and solid opacity, in every accent,
+with upstream's title bar buttons. Upstream's accent extensions then select among these variants.
 """
 from pathlib import Path
 import shutil
 import subprocess
 import tempfile
 
-from desktop import DATA, PREFIX, environment
+from desktop import CONFIG, DATA, PREFIX, environment
 from prepare import CACHE
 
 
@@ -38,7 +37,7 @@ def main():
         for old in DATA.glob('.whitesur-*'):
             old.unlink()
         marker.touch()
-    # Earlier installations put Colloid and the appearance extension here. The packaged copies
+    # Earlier installations put Colloid and their own appearance extension here. The packaged copies
     # replace them, and these would otherwise take precedence.
     if (DATA / '.colloid-v2').exists() or (DATA / '.colloid-v1').exists():
         for directory in (DATA / 'icons').glob('Colloid*'):
@@ -46,6 +45,13 @@ def main():
         for old in DATA.glob('.colloid-v*'):
             old.unlink()
     shutil.rmtree(DATA / 'gnome-shell/extensions/livecd-appearance@local', ignore_errors=True)
+    # That extension also linked GTK 4's user CSS to a file of its own. The accent GTK extension
+    # leaves any link it did not make alone, so remove this one.
+    owned = CONFIG / 'livecd/gtk4.css'
+    css = CONFIG / 'gtk-4.0/gtk.css'
+    if css.is_symlink() and css.readlink() == owned:
+        css.unlink()
+    owned.unlink(missing_ok=True)
 
 
 if __name__ == '__main__':

@@ -49,9 +49,11 @@ class Packaging(unittest.TestCase):
         self.assertEqual(jobs['chromium']['packages'], 'libva chromium')
         self.assertEqual(jobs['chromium']['timeout'], 360)
         self.assertTrue(jobs['chromium']['exact'])
-        self.assertEqual(jobs['gst-plugins-va_libva']['packages'], 'libva gst-plugins-va')
-        self.assertEqual(jobs['gst-plugins-va_libva']['timeout'], 350)
-        self.assertFalse(jobs['gst-plugins-va_libva']['exact'])
+        # Other users of libva build it themselves, first, with the ordinary limits.
+        video = next(job for job in jobs.values() if 'gst-plugins-va' in job['packages'].split())
+        self.assertEqual(video['packages'].split()[0], 'libva')
+        self.assertEqual(video['timeout'], 350)
+        self.assertFalse(video['exact'])
         self.assertEqual(jobs['easyeffects_lsp-plugins-lv2']['host_packages'],
                          'libcairo2-dev libsndfile1-dev')
         self.assertEqual(jobs['chromium']['host_packages'], '')

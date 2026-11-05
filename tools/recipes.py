@@ -206,6 +206,10 @@ def prepare_builder(checkout):
                 if hashlib.sha256(pinned).hexdigest() != expected:
                     raise RuntimeError('Pinned upstream removal changed: ' + relative)
                 (checkout / 'x11-packages' / name / path).unlink(missing_ok=True)
+        # The builder rejects two recipes with one name. Ours replaces Termux's, wherever it lives,
+        # as one in x11-packages already is: avahi, for example, is Termux's root-packages recipe.
+        for repository in ('packages', 'root-packages'):
+            shutil.rmtree(checkout / repository / name, ignore_errors=True)
         shutil.copytree(PACKAGES / name, checkout / 'x11-packages' / name, dirs_exist_ok=True)
     print('Staged', len(all_names()), 'recipes at', revision)
 

@@ -224,7 +224,19 @@ sources are pinned in `packages/`, beside the patches applied to them.
 ## Adding a package
 
 1. Create `packages/<name>/build.sh`. A recipe in [termux-packages](https://github.com/termux/termux-packages)
-   is the best starting point.
+   is the best starting point. Name it by these rules, and name its commands, `libexec/` directory
+   and state directory after it:
+   - **Android integrations**, which make an Android function appear natively in Linux, are
+     `android-<linux subsystem>[-<feature>]`: `android-pulseaudio-mic`, `android-upower`,
+     `android-gvfs`, `android-procfs`. A camera bridge would be `android-v4l2`, hardware video
+     `android-vaapi`.
+   - **Ported or repackaged software** takes its upstream or Debian name: `avahi`,
+     `gnome-shell-extension-gsconnect`, `fonts-noto-core`, `whitesur-gtk-theme`. Software built
+     for the isolated GNOME 48 runtime is `gnome-48-<name>`.
+   - Only what belongs to the live CD itself keeps `livecd-`: `livecd-desktop`, and the
+     `gnome-shell-extension-livecd-appearance` extension.
+   A recipe that renames an earlier package lists the old name in `TERMUX_PKG_CONFLICTS` and
+   `TERMUX_PKG_REPLACES`. A name that Termux also uses replaces Termux's recipe when staged.
 2. Add patches beside it as `0001-*.patch`, with paths that apply using `-p1` from the source root.
 3. Run `python3 tools/recipes.py check-patches <name>`.
 4. Add the package to an overlay's `packages/termux.yaml`, or to

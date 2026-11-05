@@ -165,9 +165,14 @@ class Packaging(unittest.TestCase):
             (package / 'helper.py').symlink_to(source)
             config = root / 'config.json'
             config.write_text(json.dumps({'revision': revision}))
+            # Termux's own recipe of the same name elsewhere, as avahi is in root-packages.
+            duplicate = checkout / 'root-packages/example'
+            duplicate.mkdir(parents=True)
+            (duplicate / 'build.sh').write_text('TERMUX_PKG_VERSION=0\n')
             with mock.patch.object(recipes, 'PACKAGES', packages), \
                     mock.patch.object(recipes, 'BUILD_CONFIG', config), contextlib.redirect_stdout(io.StringIO()):
                 recipes.prepare_builder(checkout)
+                self.assertFalse(duplicate.exists())
                 recipes.prepare_builder(checkout)
                 self.assertEqual((upstream / 'original.patch').read_text(), 'retained upstream patch\n')
                 self.assertFalse((upstream / 'helper.py').is_symlink())

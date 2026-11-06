@@ -400,7 +400,9 @@ def run(safe, renderer='software'):
                 raw = subprocess.check_output(['gsettings', 'get', 'org.gnome.shell', 'enabled-extensions'], env=live_env, text=True)
                 expected = ast.literal_eval(raw.removeprefix('@as '))
                 disabled = subprocess.check_output(['gsettings', 'get', 'org.gnome.shell', 'disable-user-extensions'], env=live_env, text=True).strip() == 'true'
-                if safe or disabled or all(states.get(key, {}).get('state') == 1 for key in expected):
+                # Shell ignores an enabled extension that is not installed, and
+                # it would never become active; validate reports it instead.
+                if safe or disabled or all(states[key].get('state') == 1 for key in expected if key in states):
                     # Allow Shell's final layout startup callback to complete
                     # before dismissing its initial overview exactly once.
                     time.sleep(0.5)

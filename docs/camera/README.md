@@ -88,14 +88,15 @@ indicator is built out (`-Dcamera_monitor=false`).
 
 | Programs | Path | State |
 | --- | --- | --- |
-| Bionic programs using V4L2 directly or through `libv4l2` | Preload | Device checks pass in the installed package; streaming tested in the [prototype](../termux-camera-investigation.md#results) |
+| Bionic programs using V4L2 directly or through `libv4l2` | Preload | Stream each camera, switch and share in the installed desktop (see [Results](#results)) |
 | Termux's Chromium (Bionic) | Preload, its V4L2 backend | Streamed in the prototype; not installed on the test phone now |
 | PipeWire clients | The session's PipeWire | Nodes registered with names and device paths |
-| Firefox (Termux, Bionic) | Preload | Not yet tested |
+| Firefox (Termux, Bionic) | Preload | Lists and streams both cameras in the installed desktop, started by its launcher |
+| FFmpeg `-f v4l2` | Preload | Streams both cameras in the installed desktop |
 | glibc programs, including the glibc browsers | — | Not covered: their launchers drop Bionic preloads, and no glibc build of the preload exists |
 | Camera portal clients (Flatpak-style, Snapshot) | — | Not covered: no `xdg-desktop-portal` in the desktop |
 | Static programs, inline system calls, `openat` relative to an open `/dev` | — | Not covered by a preload |
-| GStreamer `v4l2src`/`pipewiresrc`, FFmpeg `-f v4l2` | — | Termux's builds lack these plugins and devices |
+| GStreamer `v4l2src`/`pipewiresrc` | — | Termux's build lacks these plugins |
 
 The V4L2 back end offers memory-mapped capture only. The
 [backend audit](../camera-session-and-proot.md#exact-backend-coverage) lists the
@@ -129,5 +130,24 @@ On the Note10+ (Android 11), with `android-v4l2` 0.1.0 installed and the
 - On stop, the supervisor's PipeWire, WirePlumber and nodes exited and the
   device files were removed, while the audio-effects PipeWire kept running.
 
-The installed-desktop acceptance run, `test-desktop-camera.py --stream`, has not
-been run yet.
+In the installed desktop on the same phone, upgraded from v0.12.0 with
+`install.sh`, `CAMERA` granted, started by `livecd start`:
+
+- `livecd-native status` reported the camera `ready` with `/dev/video0` Front
+  camera and `/dev/video1` Rear camera, both `idle`.
+- `test-desktop-camera.py --stream` passed 15 of 15. Front YUYV 150 frames at
+  29.4 fps, rear NV12 at 28.5 fps, front again at 29.2 fps, both released.
+  Asked for at once, the newer rear stream took its camera at 28.8 fps and the
+  older front stream resumed the same camera afterwards.
+- Firefox, started by the desktop's launcher, listed "Front camera" and "Rear
+  camera" and streamed each at 1280×720, 27.6 and 27.8 fps.
+- `ffmpeg -f v4l2 -video_size 1280x720` read 60 frames from each device at
+  29 and 30 fps.
+- `livecd validate` passed all 29 checks.
+
+Two fixes outside this package were needed. Closing a camera deadlocked under
+the session's `libandroid-procfs.so` preload, whose `close()` held its lock
+while pw-v4l2 waited for threads that close files too; the runs above used the
+fixed preload. Startup on the upgraded install also timed out on a leftover
+`livecd-appearance@local` in the enabled extensions. Both were fixed in
+`android-procfs` 1.0.0-4 and `livecd-desktop` revision 7.

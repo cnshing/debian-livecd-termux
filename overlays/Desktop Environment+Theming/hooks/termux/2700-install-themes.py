@@ -5,6 +5,7 @@ The package supplies WhiteSur's prebuilt variants and Colloid comes from colloid
 applies upstream's own choices on top: Monterey, the Nord scheme and solid opacity, in every accent,
 with upstream's title bar buttons. Upstream's accent extensions then select among these variants.
 """
+import ast
 from pathlib import Path
 import shutil
 import subprocess
@@ -12,6 +13,8 @@ import tempfile
 
 from desktop import CONFIG, DATA, PREFIX, environment
 from prepare import CACHE
+
+ACCENT_EXTENSIONS = ['accent-user-theme@brgvos', 'accent-gtk-theme@brgvos', 'accent-icons-theme@brgvos']
 
 
 def main():
@@ -45,6 +48,16 @@ def main():
         for old in DATA.glob('.colloid-v*'):
             old.unlink()
     shutil.rmtree(DATA / 'gnome-shell/extensions/livecd-appearance@local', ignore_errors=True)
+    # Wherever the extension list became a user setting, it still names that extension instead of
+    # its successors, and the dconf defaults no longer apply. Keep the user's other choices.
+    env = environment()
+    key = '/org/gnome/shell/enabled-extensions'
+    value = subprocess.run(['dconf', 'read', key], env=env, capture_output=True, text=True).stdout.strip()
+    if "'livecd-appearance@local'" in value:
+        enabled = [uuid for uuid in ast.literal_eval(value) if uuid != 'livecd-appearance@local']
+        enabled += [uuid for uuid in ACCENT_EXTENSIONS if uuid not in enabled]
+        subprocess.run(['dbus-run-session', '--', 'dconf', 'write', key, repr(enabled)],
+                       env={**env, 'GIO_USE_VFS': 'local'}, check=True)
     # That extension also linked GTK 4's user CSS to a file of its own. The accent GTK extension
     # leaves any link it did not make alone, so remove this one.
     owned = CONFIG / 'livecd/gtk4.css'

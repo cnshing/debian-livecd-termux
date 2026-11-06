@@ -127,6 +127,8 @@ def native_encode(env, preload):
     stack = (ACCELERATION / 'bionic').resolve()
     if not (stack / 'manifest.json').is_file():
         stack = PREFIX / 'lib/android-vaapi'
+    if not (stack / 'manifest.json').is_file():
+        return  # The android-vaapi package is not installed.
     try:
         manifest = json.loads((stack / 'manifest.json').read_text())
         library = stack / manifest['session_preload']

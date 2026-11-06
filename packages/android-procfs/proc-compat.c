@@ -423,9 +423,10 @@ int __openat_2(int fd, const char *path, int flags) { return open_common(fd, pat
 int close(int fd) {
     if (!next_close) return (int)syscall(SYS_close, fd);
     if (inside) return next_close(fd);
-    inside++; pthread_mutex_lock(&mutex); forget(fd);
-    int result = next_close(fd), error = errno;
-    pthread_mutex_unlock(&mutex); inside--; errno = error; return result;
+    // The next close may wait for threads that close files too, as pw-v4l2's does while it tears
+    // down its stream, so it runs unlocked. The number stays taken until then, so nothing reuses it.
+    inside++; pthread_mutex_lock(&mutex); forget(fd); pthread_mutex_unlock(&mutex); inside--;
+    return next_close(fd);
 }
 
 static int duplicate(int fd, int target, int flags, int kind) {
@@ -509,9 +510,8 @@ FILE *fopen64(const char *path, const char *mode) { return fopen(path, mode); }
 int fclose(FILE *stream) {
     EARLY_RESULT(fclose, (stream), EOF)
     if (inside) return next_fclose(stream);
-    inside++; pthread_mutex_lock(&mutex); forget(fileno(stream));
-    int result = next_fclose(stream), error = errno;
-    pthread_mutex_unlock(&mutex); inside--; errno = error; return result;
+    inside++; pthread_mutex_lock(&mutex); forget(fileno(stream)); pthread_mutex_unlock(&mutex); inside--;
+    return next_fclose(stream);
 }
 static int refresh_stream(FILE *stream, off_t offset, int whence) {
     if (offset || whence != SEEK_SET) return 0;

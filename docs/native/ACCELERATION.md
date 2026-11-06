@@ -9,24 +9,23 @@ drivers and the existing Termux:VA MediaCodec daemon. Native Termux libraries
 remain separate from glibc libraries.
 
 [Hardware encoding](ENCODING.md) offers the same stack's H.264 and HEVC encoders
-to every desktop program as `/dev/dri/renderD128`, without per-program settings;
-it is built and tested on the phone but not yet installed there.
+to every desktop program as `/dev/dri/renderD128`, without per-program settings.
+The Browser and Video Player overlays install it with the `android-vaapi` package.
 
 Installation and successful compilation do not establish correct pixels, smooth
 playback, or hardware decoding in a particular application. The
 [fixes and checks](../browsers/native-acceleration-checks.md) pass Firefox
 VP9/HEVC and mpv VP9/H.264/HEVC hardware decoding, GPU process checks and numbered-frame
-pixel comparisons. The Chromium build was stopped at the user's request; its
-installed stock package still uses software video decoding.
+pixel comparisons. Chromium is this repository's package built with VA-API.
 The earlier fullscreen frame-freshness failure remains unresolved.
 
 ## Applications
 
 | Application | GPU configuration | Video configuration |
 | --- | --- | --- |
-| Google Chrome | Shared glibc Turnip and ANGLE Vulkan | Shared glibc Termux:VA driver and pinned ION adapter; VP9/HEVC enabled by the saved opt-in |
+| Google Chrome | Shared glibc Turnip and ANGLE Vulkan | Shared glibc Termux:VA driver and ION adapter from `android-vaapi-glibc`; VP9/HEVC on by default |
 | Native Firefox | Turnip/Zink and WebRender; private KGSL graphics probe port | VP9/HEVC VA-API, GPU and pixel checks pass with private VA-API-enabled FFmpeg libraries |
-| Native Chromium | Existing Vulkan/ANGLE support | Enabled only when the installed package carries the VA-API build receipt; stock Termux build stays on software video |
+| Native Chromium | Existing Vulkan/ANGLE support | This repository's `chromium` package, built with VA-API; enabled when the installed package carries its VA-API build receipt |
 | Native mpv | Vulkan `gpu-next` / `x11vk` | VP9/H.264/HEVC hardware decoding and pixel checks pass through native MediaCodec |
 | Other applications | Inherited native rendering, or an explicit glibc profile | Standard VA-API available through the shared launcher when the application includes a compatible backend |
 
@@ -53,7 +52,7 @@ livecd-accelerate run --profile mpv --video off -- mpv video.mp4
 ```
 
 `~/.config/livecd-native/acceleration.json` stores `hardware_video` and
-`disabled_va_codecs`. `LIVECD_HARDWARE_VIDEO=0` or `1` overrides the saved common
+`disabled_va_codecs`. Without the file, hardware video is on. `LIVECD_HARDWARE_VIDEO=0` or `1` overrides the saved common
 preference. Existing browser controls (`LIVECD_CHROME_HARDWARE_VIDEO`,
 `LIVECD_CHROMIUM_HARDWARE_VIDEO`, `LIVECD_FIREFOX_HARDWARE_VIDEO`) take precedence
 over that common variable. Chrome also retains its earlier saved opt-in.
@@ -76,8 +75,10 @@ GPU/decode options passed on the command line.
 
 ## Driver and daemon ownership
 
-Driver directories live under `~/.local/opt/livecd-native/acceleration/`, with
-separate `bionic` and `glibc` selectors. A launcher resolves its selector to an
+The packaged stacks are `$PREFIX/lib/android-vaapi` (Bionic) and
+`$PREFIX/lib/android-vaapi-glibc` (glibc). A development stack selected under
+`~/.local/opt/livecd-native/acceleration/`, through its `bionic` or `glibc`
+selector, takes precedence. A launcher resolves its selector to an
 immutable directory before starting a process. Updates therefore keep an
 application on one driver version for its lifetime.
 
@@ -87,7 +88,8 @@ Otherwise startup is serialized, reuses a listening endpoint, and starts the
 daemon directly if absent. It never invokes upstream's process-wide kill helpers
 or runs a decode health probe. There is no global video preload on GNOME Shell.
 
-Setup and build instructions are in [prebuilt/native-video](../../prebuilt/native-video/README.md).
+The packages are built in CI from [packages/](../../packages/). Instructions for building
+a development stack on the phone are in [prebuilt/native-video](../../prebuilt/native-video/README.md).
 The upstream design and application settings are documented in the
 [Termux:VA developer guide](https://github.com/lfdevs/termux-va/blob/main/doc/developer-guide.md)
 and [user guide](https://github.com/lfdevs/termux-va/blob/main/doc/user-guide.md).

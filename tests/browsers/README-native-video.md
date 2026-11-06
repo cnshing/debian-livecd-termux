@@ -215,5 +215,5 @@ library mapped. An introspection startup abort is rejected.
 Remaining qualification includes Firefox/direct/unmodified binary controls,
 real-key fullscreen cycles, playback/fault injection, Bionilux's existing smoke
 failures, clean installs/updates/uninstall, a two-hour soak, performance measurements,
-and Android's actual display. Keep hardware decoding opt-in until those pass and
-the user agrees to the displayed result.
+and Android's actual display. On 2026-11-05 the user made hardware decoding the
+default for Firefox, Chromium and Chrome; these checks still apply to that default.

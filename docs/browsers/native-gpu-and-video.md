@@ -5,6 +5,18 @@ See the [privacy notes](../privacy.md).
 
 Tested on the Note10+ (SM-N975U1, Android 11, Adreno 640).
 
+**Current state, 2026-11-05.** Firefox, Chromium and Google Chrome are installed by default
+by the `Browser+Chromium` overlay, and all three use the GPU and Android's hardware video unless
+`~/.config/livecd-native/acceleration.json` turns it off. Nothing is compiled on the phone any
+more: Chrome's glibc stack is the [`android-vaapi-glibc`](../../packages/android-vaapi-glibc/build.sh)
+and [`bionilux`](../../packages/bionilux/build.sh) packages, and Firefox, Chromium and mpv use
+the Bionic [`android-vaapi`](../../packages/android-vaapi/build.sh) package. Chrome itself is
+downloaded from Google at install time, because its license forbids redistribution. The packaged
+stacks have not yet passed a fresh-install check on the phone, and the packaged ION adapter is
+now compiled from [`ion-dma-heap.c`](../../tests/browsers/ion-dma-heap.c) instead of being the
+pinned binary below, so its colours must be checked again. The sections after "What runs"
+record the earlier, on-phone setup.
+
 **Shared integration applied:** GPU/video support now has an
 [ABI-aware application layer](../native/ACCELERATION.md), a built private Bionic
 VA-API driver, a shared glibc stack, and an independent MediaCodec service.
@@ -82,18 +94,19 @@ Video should look normal. A green and purple picture with shifted copies is a fa
 
 | Part | Comes from | Role |
 | --- | --- | --- |
-| [Bionilux](https://github.com/theonuverse/bionilux) `4152b47`, [patched](../../overlays/Browser+Chromium/browsers/bionilux-0.5.0-browser.patch) | Built on the phone | Starts glibc Chrome and every glibc child, and keeps glibc's libraries away from Bionic programs |
-| [Mesa for Android Container](https://github.com/lfdevs/mesa-for-android-container) 27.0.0-devel-20261025 | Hash-pinned archive | glibc Turnip for Vulkan |
-| [19 Debian libraries](../../overlays/Browser+Chromium/browsers/chrome-gpu-libs.lock.json) | Hash-pinned, signed index | What that Mesa needs beyond Chrome's own libraries |
+| [Bionilux](https://github.com/theonuverse/bionilux) `4152b47`, [patched](../../overlays/Browser+Chromium/browsers/bionilux-0.5.0-browser.patch) | The `bionilux` package | Starts glibc Chrome and every glibc child, and keeps glibc's libraries away from Bionic programs |
+| [Mesa for Android Container](https://github.com/lfdevs/mesa-for-android-container) 27.0.0-devel-20261025 | Hash-pinned archive, in `android-vaapi-glibc` | glibc Turnip for Vulkan, and the Termux:VA driver |
+| [19 Debian libraries](../../overlays/Browser+Chromium/browsers/chrome-gpu-libs.lock.json) | Hash-pinned, in `android-vaapi-glibc` | What that Mesa needs beyond Chrome's own libraries |
 | [Mutter patch 0010](../../packages/gnome-48-mutter/0010-clip-pixmap-damage.patch) | This repository | The [fullscreen crash](fullscreen-investigation.md) fix |
-| [Termux:VA](https://github.com/lfdevs/termux-va) `ae14813` | Built on the phone | Opt-in hardware video only: daemon that owns Android's MediaCodec |
-| ION adapter `bf39f8bd…` | Explicitly applied tested glibc binary | Supplies a shared NV12 dma-buf through ION when `/dev/dma_heap/system` is absent |
+| [Termux:VA](https://github.com/lfdevs/termux-va) `ae14813` | The `termux-va` package | Hardware video: daemon that owns Android's MediaCodec |
+| ION adapter, from [`ion-dma-heap.c`](../../tests/browsers/ion-dma-heap.c) | Compiled in `android-vaapi-glibc` | Supplies a shared NV12 dma-buf through ION when `/dev/dma_heap/system` is absent |
 | [Hardware video extension](../../overlays/Browser+Chromium/browsers/hardware-video/) | This repository | Tells YouTube AV1 is unavailable. Meant for hardware video, but stays installed |
 
-[`install.sh chrome`](../../overlays/Browser+Chromium/browsers/install.sh) sets this up through
-[`install-native-video.py`](../../overlays/Browser+Chromium/browsers/install-native-video.py), about 193 MB plus
-the small programs. Only that second script has been run, on a phone that already had Chrome. The Bionilux command also
-works for other glibc programs: `bionilux ./program`. It is explicit, and nothing is preloaded globally.
+[`install.sh chrome`](../../overlays/Browser+Chromium/browsers/install.sh) installs these packages
+from this repository, then [`install-native-video.py`](../../overlays/Browser+Chromium/browsers/install-native-video.py)
+checks the stack's library closure, adds the extension and checks that Chrome starts through Bionilux.
+The Bionilux command also works for other glibc programs: `bionilux ./program`. It is explicit,
+and nothing is preloaded globally.
 
 ## Earlier results, before the ION adapter
 

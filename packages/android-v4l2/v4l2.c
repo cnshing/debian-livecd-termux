@@ -1,18 +1,17 @@
 // Preload that presents PipeWire cameras as V4L2 character devices.
-// Build and run in native Termux:
-//   clang -O2 -Wall -shared -fPIC -U_FORTIFY_SOURCE -o liblivecd-v4l2.so livecd-v4l2.c
-//   LD_PRELOAD="$LD_PRELOAD $PWD/liblivecd-v4l2.so" program
+//   LD_PRELOAD="$LD_PRELOAD:$PREFIX/lib/android-v4l2/libandroid-v4l2.so" program
+// The desktop session preloads it for every program it starts.
 //
 // Without root there is no kernel device, so the device exists only in the C
-// library calls a program makes. A camera producer (camnode) publishes each
-// camera as files in a generated folder, $LIVECD_V4L2_DIR, by default
-// $XDG_RUNTIME_DIR/livecd-v4l2:
+// library calls a program makes. A camera producer (camera-node) publishes each
+// camera as files in a generated folder, $ANDROID_V4L2_DIR, by default
+// $XDG_RUNTIME_DIR/android-v4l2:
 //   dev/videoN                              marker: /dev/videoN exists
 //   sys/class/video4linux/videoN/{name,...} served for /sys/class/video4linux
 // For a published /dev/videoN this library
 //   - sends open, ioctl, mmap, munmap, dup and close to PipeWire's pw-v4l2,
-//     loaded privately as a back end ($LIVECD_V4L2_BACKEND, or libpw-v4l2.so
-//     beside this library, or Termux's copy), so other calls never reach it;
+//     loaded privately as a back end ($ANDROID_V4L2_BACKEND, or the patched
+//     libpw-v4l2.so beside this library), so other calls never reach it;
 //   - reports a character device, major 81, to stat, fstat, statx and access;
 //   - lists it in /dev, and hides the phone's own video nodes, which SELinux
 //     blocks for apps;
@@ -139,7 +138,7 @@ static void append_number(char *buf, int n) {
 }
 
 static void base_dir(char *buf) {
-    const char *dir = getenv("LIVECD_V4L2_DIR");
+    const char *dir = getenv("ANDROID_V4L2_DIR");
     if (dir && *dir) {
         strlcpy(buf, dir, PATH_MAX);
         return;
@@ -147,7 +146,7 @@ static void base_dir(char *buf) {
     if (!(dir = getenv("XDG_RUNTIME_DIR")) || !*dir)
         if (!(dir = getenv("TMPDIR")) || !*dir) dir = "/data/data/com.termux/files/usr/tmp";
     strlcpy(buf, dir, PATH_MAX);
-    strlcat(buf, "/livecd-v4l2", PATH_MAX);
+    strlcat(buf, "/android-v4l2", PATH_MAX);
 }
 
 static void marker_path(int n, char *buf) {
@@ -197,7 +196,7 @@ static void track(int fd, int n) {
 
 static void load_backend(void) {
     char path[PATH_MAX];
-    const char *lib = getenv("LIVECD_V4L2_BACKEND");
+    const char *lib = getenv("ANDROID_V4L2_BACKEND");
     Dl_info info;
     if ((!lib || !*lib) && dladdr((void *)load_backend, &info) && info.dli_fname) {
         strlcpy(path, info.dli_fname, sizeof path);
@@ -208,12 +207,8 @@ static void load_backend(void) {
             if (REAL(faccessat)(AT_FDCWD, path, F_OK, 0) == 0) lib = path;
         }
     }
-    if (!lib || !*lib) {
-        const char *prefix = getenv("PREFIX");
-        strlcpy(path, prefix && *prefix ? prefix : "/data/data/com.termux/files/usr", sizeof path);
-        strlcat(path, "/lib/pipewire-0.3/v4l2/libpw-v4l2.so", sizeof path);
-        lib = path;
-    }
+    // Termux's own unpatched copy would recurse through Bionic's realpath().
+    if (!lib || !*lib) return;
     // RTLD_LOCAL keeps pw-v4l2's own wrappers out of the global lookup; its
     // RTLD_NEXT lookups then resolve to the C library, not to this library.
     void *h = dlopen(lib, RTLD_NOW | RTLD_LOCAL);

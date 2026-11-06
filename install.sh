@@ -47,8 +47,10 @@ for attempt in $(seq 10); do
     fi
     sleep 2
 done
-# Termux:API shares Termux's user ID, so its microphone permission covers the desktop's processes.
+# Termux:API shares Termux's user ID, so its microphone and camera permissions cover the desktop's
+# processes.
 rish pm grant com.termux.api android.permission.RECORD_AUDIO
+rish pm grant com.termux.api android.permission.CAMERA
 # Files and the desktop's storage mounts read and write shared storage. Android can withdraw the
 # read permission on its own, as the app-op, so set both the permission and the app-op.
 for permission in READ_EXTERNAL_STORAGE WRITE_EXTERNAL_STORAGE; do

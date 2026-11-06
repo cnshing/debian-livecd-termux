@@ -1,0 +1,62 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Camera test</title>
+<video muted playsinline></video>
+<canvas width="64" height="36"></canvas>
+<script>
+// Logs CAMTEST lines for run-firefox.py: the cameras Firefox found, then for
+// the front and rear camera in turn the track's settings, the frame rate
+// seen by the <video> element, and the luma levels of a 64x36 reduction of
+// the last frame. No picture leaves the page.
+const log = (message) => console.log("CAMTEST " + message);
+const video = document.querySelector("video");
+const context = document.querySelector("canvas").getContext("2d", {willReadFrequently: true});
+
+async function measure(camera) {
+  const stream = await navigator.mediaDevices.getUserMedia({
+    video: {deviceId: {exact: camera.deviceId}, width: 1280, height: 720, frameRate: 30},
+  });
+  const track = stream.getVideoTracks()[0];
+  video.srcObject = stream;
+  await video.play();
+  let frames = 0;
+  const counted = new Promise((resolve) => {
+    const start = performance.now();
+    const tick = () => {
+      frames++;
+      if (performance.now() - start < 4000) video.requestVideoFrameCallback(tick);
+      else resolve((frames - 1) * 1000 / (performance.now() - start));
+    };
+    video.requestVideoFrameCallback(tick);
+  });
+  const fps = await Promise.race([counted, new Promise((r) => setTimeout(() => r(frames / 10), 10000))]);
+  context.drawImage(video, 0, 0, 64, 36);
+  const pixels = context.getImageData(0, 0, 64, 36).data;
+  const luma = [];
+  for (let i = 0; i < pixels.length; i += 4) luma.push(0.299 * pixels[i] + 0.587 * pixels[i + 1] + 0.114 * pixels[i + 2]);
+  const mean = luma.reduce((a, b) => a + b, 0) / luma.length;
+  const spread = Math.sqrt(luma.reduce((a, b) => a + (b - mean) ** 2, 0) / luma.length);
+  log(`stream ${JSON.stringify(camera.label)} ${JSON.stringify(track.getSettings())} ` +
+      `fps ${fps.toFixed(1)} mean ${mean.toFixed(1)} spread ${spread.toFixed(1)}`);
+  track.stop();
+  video.srcObject = null;
+  await new Promise((r) => setTimeout(r, 3000));
+}
+
+(async () => {
+  try {
+    const first = await navigator.mediaDevices.getUserMedia({video: true});
+    first.getTracks().forEach((t) => t.stop());
+    const cameras = (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === "videoinput");
+    log("cameras " + JSON.stringify(cameras.map((d) => d.label)));
+    for (const name of ["Front camera", "Rear camera"]) {
+      const camera = cameras.find((d) => d.label.includes(name));
+      if (camera) await measure(camera);
+      else log(`missing ${JSON.stringify(name)}`);
+    }
+    log("done");
+  } catch (error) {
+    log("error " + error.name + ": " + error.message);
+  }
+})();
+</script>

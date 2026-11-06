@@ -25,6 +25,8 @@ ROOT = Path.home() / '.local/opt/livecd-native/gnome-48'
 RESOURCE_PRELOAD = PREFIX / 'lib/libandroid-procfs.so'
 RESOURCE_COMMANDS = PREFIX / 'libexec/android-procfs/bin'
 ACCELERATION = Path.home() / '.local/opt/livecd-native/acceleration'
+CAMERA = PREFIX / 'bin/android-v4l2'
+CAMERA_PRELOAD = PREFIX / 'lib/android-v4l2/libandroid-v4l2.so'
 STATE = Path.home() / '.local/state/livecd-native'
 DATA = Path.home() / '.local/share/livecd-native'
 CONFIG = Path.home() / '.config/livecd-native'
@@ -97,11 +99,14 @@ def environment(renderer='software'):
         PULSE_SERVER='unix:' + str(RUNTIME / 'pulse.sock'))
     library = RESOURCE_PRELOAD
     preload = [item for item in env.get('LD_PRELOAD', '').replace(':', ' ').split()
-               if Path(item).name != library.name]
+               if Path(item).name not in (library.name, CAMERA_PRELOAD.name)]
     if env.get('ANDROID_PROCFS_COMPAT') != '0' and library.exists() and preload_works(library, preload):
         preload.insert(0, str(library))
         env['PATH'] = f'{RESOURCE_COMMANDS}:' + env['PATH']
     native_encode(env, preload)
+    # Last, so the preloads before it see camera paths too; it adds no cost to other paths.
+    if camera_enabled() and CAMERA_PRELOAD.exists() and preload_works(CAMERA_PRELOAD, preload):
+        preload.append(str(CAMERA_PRELOAD))
     if preload:
         env['LD_PRELOAD'] = ':'.join(preload)
     else:
@@ -115,6 +120,38 @@ def acceleration_settings():
         return settings if isinstance(settings, dict) else {}
     except (OSError, ValueError):
         return {}
+
+
+def camera_enabled():
+    try:
+        options = json.loads((CONFIG / 'integrations.json').read_text())
+    except (OSError, ValueError):
+        options = {}
+    return os.access(CAMERA, os.X_OK) and not (isinstance(options, dict) and options.get('camera') is False)
+
+
+def camera_status(runtime):
+    if not os.access(CAMERA, os.X_OK):
+        return {'status': 'not-installed'}
+    if not camera_enabled():
+        return {'status': 'disabled'}
+    try:
+        data = json.loads((runtime / 'android-v4l2.json').read_text())
+        status = data['status']
+    except (OSError, ValueError, KeyError, TypeError):
+        return {'status': 'starting'}
+    if status in ('starting', 'ready'):
+        try:
+            state, birth = process_identity(int(data['pid']))
+            alive = state != 'Z' and birth == data.get('start')
+        except (OSError, ValueError, TypeError):
+            alive = False
+        status = status if alive else 'stopped'
+    result = {'status': status, 'devices': [{key: device.get(key) for key in ('device', 'name', 'state')}
+                                            for device in data.get('devices', [])]}
+    if data.get('detail'):
+        result['detail'] = data['detail']
+    return result
 
 
 def native_encode(env, preload):
@@ -291,6 +328,10 @@ def inner(safe):
     subprocess.Popen(['xdg-user-dirs-update'], env=env).wait()
     if (BASE / 'xsettings.py').exists():
         subprocess.Popen([sys.executable, str(BASE / 'xsettings.py')], env=env)
+    # Cameras are published before any application starts. The supervisor and its
+    # PipeWire share this session's runtime directory, bus and cleanup tag.
+    if not safe and camera_enabled():
+        subprocess.Popen([str(CAMERA), 'run'], env=env, stdin=subprocess.DEVNULL, start_new_session=True)
     # The native session is explicitly supervised, without systemd or logind.
     # Session management comes from the source-built gnome-session package.
     manager = PREFIX / 'bin/gnome-session'
@@ -443,6 +484,8 @@ def run(safe, renderer='software'):
                         result = {'ok': True, 'backend': 'native', 'owner': os.getpid(),
                                   'shell': pid, 'safe': safe, 'tag': tag, 'renderer': renderer,
                                   'integrations': integrations.status() if integrations else {'phase': 'disabled'}}
+                        if integrations:
+                            result['integrations']['features']['camera'] = camera_status(runtime)
                     elif mode == 'stop':
                         stopping = True
                         result = {'ok': True}

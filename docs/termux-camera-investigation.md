@@ -7,6 +7,14 @@ Investigated and tested on the connected Galaxy Note10+, Android 11 /
 SDK 30, ARM64, with Termux 0.118.3 (target SDK 28), Termux's PipeWire 1.4.9 and
 `ndk-sysroot` 30. Raw results: `temp/docs/evidence/camera-investigation/`.
 
+**This is the investigation; the shipped integration is described in the
+[camera guide](camera/README.md).** The results below come from a private test
+session that built the prototype producer and preload itself, before the desktop
+started either. Those prototypes became the `android-v4l2` package,
+and file links below point to its sources. The
+[session audit and PRoot assessment](camera-session-and-proot.md) records why
+PRoot was excluded, and the backend's exact buffer and ioctl coverage.
+
 **Question:** can [termux-api#904]'s CameraVideo API, driven through Shizuku or
 ADB, give the native desktop a live camera that any Linux program can use, with
 latency and CPU cost fit for live video?
@@ -14,7 +22,7 @@ latency and CPU cost fit for live video?
 **Answer: yes, but not through that pull request or through Shizuku.** A native
 Termux program opens the phone's cameras with Android's NDK Camera2 API under
 Termux's own UID and publishes each as a PipeWire camera. A preload,
-`liblivecd-v4l2.so`, then turns each into a V4L2 device, `/dev/video0` upward,
+`liblivecd-v4l2.so` (now `libandroid-v4l2.so`), then turns each into a V4L2 device, `/dev/video0` upward,
 for every Bionic program that loads it. Programs see a character device in
 `stat`, `/dev` listings and sysfs, and stream through PipeWire's `pw-v4l2`.
 Termux's unmodified Chromium found both cameras by name and streamed through its
@@ -151,7 +159,7 @@ sensor, offers no YUV output.
 
 ### The camera node
 
-[`camnode.c`](../tests/camera/camnode.c) publishes one camera per process as a
+[`camnode.c`](../packages/android-v4l2/camera-node.c) (now `camera-node`) publishes one camera per process as a
 PipeWire stream with `media.class=Video/Source` and `media.role=Camera`. It
 claims `/dev/videoN` with `object.path=v4l2:/dev/videoN`, the form PipeWire's
 own V4L2 nodes use, and offers NV21, NV12, YUYV and I420 at a fixed size and
@@ -187,7 +195,7 @@ phone also has real `/dev/video0`–`video2`, `video32`–`video34`, `v4l-subdev
 and `media*` nodes for its own hardware, which SELinux blocks for Termux.
 
 So the device lives in the C library calls a program makes.
-[`livecd-v4l2.c`](../tests/camera/livecd-v4l2.c) builds `liblivecd-v4l2.so`.
+[`livecd-v4l2.c`](../packages/android-v4l2/v4l2.c) builds `liblivecd-v4l2.so`.
 The camera node writes a generated folder, by default
 `$XDG_RUNTIME_DIR/livecd-v4l2`: a `dev/videoN` marker, and
 `sys/class/video4linux/videoN/` with `name`, `index`, `dev` and `uevent`. It
@@ -202,8 +210,8 @@ removes them on exit. For a published `/dev/videoN`, the preload:
 - answers `libv4l2`'s direct `syscall()` calls for the same operations.
 
 Everything else passes through. `pw-v4l2` needs
-[the `realpath` fix](../tests/camera/pw-v4l2-bionic-realpath.patch) and
-[a device-number claim](../tests/camera/pw-v4l2-device-path.patch). Without the
+[the `realpath` fix](../packages/android-v4l2/0001-bionic-realpath.patch) and
+[a device-number claim](../packages/android-v4l2/0002-device-path.patch). Without the
 claim, each process gave `/dev/videoN` to the first camera node it saw, so
 `/dev/video0` could open the back camera. The claim must use `object.path`,
 because only a fixed set of node properties reaches other clients; an
@@ -226,9 +234,9 @@ same ones:
 
 ### Results
 
-[`test-v4l2-preload.sh`](../tests/camera/test-v4l2-preload.sh) builds
-everything on the phone, starts a private PipeWire, WirePlumber and D-Bus, and
-publishes the front camera as `/dev/video0` and the back as `/dev/video1`.
+`test-v4l2-preload.sh`, in its prototype form, built
+everything on the phone, started a private PipeWire, WirePlumber and D-Bus, and
+published the front camera as `/dev/video0` and the back as `/dev/video1`.
 Every check has a control that must fail: without the preload, or with no
 camera published, or after the nodes stop. The final run had no unexpected
 results. Raw output: `temp/docs/evidence/camera-investigation/v4l2-preload-7.txt`.
@@ -279,7 +287,7 @@ reopened on the next stream. This phone does not stream both to an app at once.
 | Portal clients (Snapshot, OBS's PipeWire source) | Untested; need `xdg-desktop-portal` (packaged by Termux, not installed), which lists `media.role=Camera` nodes ([source][portal]) |
 | glibc programs (Google Chrome, ungoogled-chromium, anything run through the desktop's glibc runtime) | **Not covered**: a Bionic preload cannot load into them. Needs glibc builds of the preload and `pw-v4l2` |
 | Programs started without the preload | Not covered until the desktop adds it to the session preload |
-| Statically linked programs, or raw system calls (some Go programs) | Not covered; would need a ptrace launcher |
+| Statically linked programs, or inline kernel system calls (some Go programs) | Outside preload coverage; need a compatible dynamic build or native PipeWire/portal path under the selected approach |
 | `openat` relative to an open `/dev` directory | Not handled; none seen |
 
 GNOME Shell builds with `-Dcamera_monitor=false`
@@ -290,29 +298,8 @@ needs a PipeWire rebuild for camera use; its V4L2 path works.
 
 ## Proposed design
 
-- **`livecd-camera` package:** `camnode` as a per-camera service, NEON
-  conversions, and a test-pattern mode; `liblivecd-v4l2.so` with the patched
-  `libpw-v4l2.so` beside it.
-- **Session integration:** the desktop adds `liblivecd-v4l2.so` to the session
-  preload next to the resources preload, and starts a video-only PipeWire and
-  WirePlumber beside PulseAudio.
-- **glibc programs:** glibc builds of the preload and `pw-v4l2`, loaded by the
-  desktop's glibc runtime.
-- **Indicator:** enable GNOME Shell's camera monitor.
-- **Later:** an H.264 format fed by the hardware encoder for streaming.
-
-## Test plan for the package
-
-`test-v4l2-preload.sh` already covers device checks, plain V4L2, `libv4l2`,
-Chromium, the efficiency comparison and the negative controls. Still to add:
-
-- **Pixels:** a test-pattern mode checked for exact values, with a
-  U/V-swapped build that must fail. The warm-wall comparison stays as the
-  real-camera check; open the pictures.
-- **Lifecycle:** recovery after Samsung's Camera app takes the camera and
-  releases it.
-- **Session:** the same checks inside the running desktop, and for glibc
-  programs once built. GUI checks on a private display only.
+Superseded by the [camera guide](camera/README.md), which says what was built
+and what remains.
 
 [termux-api#904]: https://github.com/termux/termux-api/pull/904
 [termux-api-package#241]: https://github.com/termux/termux-api-package/pull/241

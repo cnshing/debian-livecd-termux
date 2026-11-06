@@ -2,7 +2,7 @@
 // instead of open, ioctl and mmap. Build and run in native Termux:
 //   clang -O2 -Wall -o libv4l2-read libv4l2-read.c -lv4l2
 //   ./libv4l2-read /dev/video1 150 [expected-card]
-// With camnode --stamp, reports exposure-start-to-application latency.
+// With camera-node --stamp, reports exposure-start-to-application latency.
 #include <errno.h>
 #include <fcntl.h>
 #include <libv4l2.h>

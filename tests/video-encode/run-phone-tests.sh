@@ -6,24 +6,23 @@
 # daemon socket that keeps the shared daemon out of the tests.
 #
 # Usage: run-phone-tests.sh --stack DIR --daemon PATH --out NEW_DIR
-#            [--clients PREFIX]... [--pipewire-src DIR] [--only SUITE]...
+#            [--clients PREFIX]... [--only SUITE]...
 #   --stack     a build-native.py output (lib/va-client, lib/dri, the preload)
 #   --daemon    the patched termux-va to test
 #   --clients   a prefix holding VA-API builds of FFmpeg and GStreamer's va
 #               plugin (bin/, lib/, lib/gstreamer-1.0/); repeatable
-#   --pipewire-src  a PipeWire 1.4.9 source tree, for the camera test
 #   --only      run only this suite: daemon, render-node, gstreamer, ffmpeg or
-#               camera; repeatable
+#               camera; repeatable. The camera suite needs android-v4l2
+#               installed, and runs when it is.
 set -u
 here=$(cd "$(dirname "$0")" && pwd)
-stack= daemon= out= clients=() pipewire= only=
+stack= daemon= out= clients=() only=
 while [ $# -gt 0 ]; do
     case $1 in
         --stack) stack=$(cd "$2" && pwd -P); shift 2 ;;
         --daemon) daemon=$2; shift 2 ;;
         --out) out=$2; shift 2 ;;
         --clients) clients+=("$2"); shift 2 ;;
-        --pipewire-src) pipewire=$2; shift 2 ;;
         --only) only="$only $2"; shift 2 ;;
         *) echo "unknown argument $1" >&2; exit 2 ;;
     esac
@@ -73,8 +72,8 @@ suite render-node env LD_LIBRARY_PATH="$libraries" PATH="$path" GST_PLUGIN_PATH=
     bash "$here/test-render-node.sh" "$stack/lib/liblivecd-render-node.so" "$out/va-probe" "$out/render-node"
 suite gstreamer session python "$here/test-gstreamer.py" --out "$out/gstreamer"
 suite ffmpeg session python "$here/test-ffmpeg.py" --out "$out/ffmpeg"
-if [ -n "$pipewire" ]; then
-    suite camera session bash "$here/test-camera-encode.sh" "$pipewire" "$out/camera"
+if [ -x "$PREFIX/libexec/android-v4l2/camera-node" ]; then
+    suite camera session bash "$here/test-camera-encode.sh" "$out/camera"
 fi
 echo; echo "Results in $out"; grep -h '^UNEXPECTED\|passed,\|RESULT' "$out"/*.txt; grep -h '^FAIL' "$out"/{daemon,gstreamer,ffmpeg,camera}.txt 2>/dev/null
 exit $status

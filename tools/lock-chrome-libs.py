@@ -1,20 +1,24 @@
 #!/usr/bin/env python3
 """Pin the Debian arm64 libraries Google Chrome needs, from signed Debian indexes.
 
-Run on a Debian PC when those libraries need security updates. Termux's glibc
+Run on a Debian PC when those libraries need security updates. Each entry also gets a
+snapshot.debian.org URL, because the mirror drops superseded versions. Termux's glibc
 repository has no NSS, ATK, CUPS, udev or GTK3, so Chrome takes its whole library
 set from one coherent source: Debian trixie, the live CD's base.
 """
 import hashlib
 import json
 import lzma
+import time
 from pathlib import Path
 import re
 import subprocess
 import tempfile
+import urllib.error
 import urllib.request
 
 MIRROR = 'https://deb.debian.org/'
+SNAPSHOT = 'https://snapshot.debian.org/file/'
 KEYRING = '/usr/share/keyrings/debian-archive-keyring.gpg'
 SUITES = (('debian', 'trixie'), ('debian', 'trixie-updates'), ('debian-security', 'trixie-security'))
 # Chrome's DT_NEEDED entries, then what it loads with dlopen: GTK3 for its file
@@ -91,9 +95,29 @@ def closure(packages, provides, roots, already):
     return seen
 
 
+def snapshot(url, sha256):
+    """The by-hash snapshot.debian.org URL of a mirror file. It never moves, and it is
+    cheap for the server, unlike a dated archive path."""
+    data = fetch(url)
+    if hashlib.sha256(data).hexdigest() != sha256:
+        raise RuntimeError('Hash mismatch: ' + url)
+    permanent = f'{SNAPSHOT}{hashlib.sha1(data).hexdigest()}/{url.rsplit("/", 1)[-1]}'
+    # snapshot.debian.org answers 503 or 504 now and then, and imports new files a few times a day.
+    for attempt in range(5):
+        try:
+            urllib.request.urlopen(urllib.request.Request(permanent, method='HEAD'), timeout=120).close()
+            return permanent
+        except urllib.error.HTTPError as error:
+            if attempt == 4:
+                raise RuntimeError(f'{error.code} from {permanent}; rerun once snapshot.debian.org has it') from error
+            time.sleep(15 * (attempt + 1))
+
+
 def write_lock(target, seen):
     lock = [{'package': name, 'version': fields['Version'], 'url': MIRROR + fields['area'] + '/' + fields['Filename'],
              'sha256': fields['SHA256'], 'size': int(fields['Size'])} for name, fields in sorted(seen.items())]
+    for item in lock:
+        item['snapshot'] = snapshot(item['url'], item['sha256'])
     target.write_text(json.dumps(lock, indent=1) + '\n')
     print(f'{len(lock)} packages, {sum(item["size"] for item in lock) / 1e6:.1f} MB compressed: {target}')
 

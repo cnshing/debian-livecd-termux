@@ -14,6 +14,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import urllib.error
 import urllib.request
 
 HERE = Path(__file__).resolve().parent
@@ -33,11 +34,19 @@ def fetch(url):
         return response.read()
 
 
-def cached(url, sha256):
-    """Return a verified download, reusing the cache only when its hash still matches."""
+def cached(url, sha256, fallback=None):
+    """Return a verified download, reusing the cache only when its hash still matches.
+
+    Debian's mirror drops superseded versions, so a lock's snapshot.debian.org copy is the fallback.
+    """
     path = CACHE / url.rsplit('/', 1)[-1]
     if not path.is_file() or hashlib.sha256(path.read_bytes()).hexdigest() != sha256:
-        data = fetch(url)
+        try:
+            data = fetch(url)
+        except urllib.error.HTTPError as error:
+            if error.code != 404 or not fallback:
+                raise
+            data = fetch(fallback)
         if hashlib.sha256(data).hexdigest() != sha256:
             raise RuntimeError('Hash mismatch: ' + url)
         path.write_bytes(data)
@@ -83,7 +92,7 @@ def install_libraries(stage, work):
     libraries.mkdir()
     for item in json.loads((HERE / 'chrome-libs.lock.json').read_text()):
         unpacked = work / ('deb-' + item['package'])
-        subprocess.run(['dpkg-deb', '-x', str(cached(item['url'], item['sha256'])), str(unpacked)], check=True)
+        subprocess.run(['dpkg-deb', '-x', str(cached(item['url'], item['sha256'], item.get('snapshot'))), str(unpacked)], check=True)
         multiarch = unpacked / 'usr/lib/aarch64-linux-gnu'
         # libpulse keeps one private library in this subdirectory.
         for folder in (multiarch, multiarch / 'pulseaudio'):

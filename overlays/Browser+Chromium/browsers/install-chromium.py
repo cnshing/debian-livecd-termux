@@ -10,6 +10,7 @@ import shutil
 import subprocess
 import tarfile
 import tempfile
+import urllib.error
 import urllib.request
 
 HERE = Path(__file__).resolve().parent
@@ -27,7 +28,14 @@ def download(item):
     path = CACHE / item['url'].rsplit('/', 1)[-1]
     if not path.is_file() or hashlib.sha256(path.read_bytes()).hexdigest() != item['sha256']:
         temporary = path.with_suffix(path.suffix + '.part')
-        with urllib.request.urlopen(item['url'], timeout=120) as source, temporary.open('wb') as output:
+        try:
+            source = urllib.request.urlopen(item['url'], timeout=120)
+        except urllib.error.HTTPError as error:
+            # Debian's mirror drops superseded versions; the lock's snapshot copy stays.
+            if error.code != 404 or 'snapshot' not in item:
+                raise
+            source = urllib.request.urlopen(item['snapshot'], timeout=120)
+        with source, temporary.open('wb') as output:
             shutil.copyfileobj(source, output)
         if (temporary.stat().st_size != item['size'] or
                 hashlib.sha256(temporary.read_bytes()).hexdigest() != item['sha256']):

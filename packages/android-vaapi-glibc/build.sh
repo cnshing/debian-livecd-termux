@@ -20,23 +20,23 @@ termux_step_post_get_source() {
 	termux_download "$_MESA_URL" "$TERMUX_PKG_CACHEDIR/mesa-glibc.tar.gz" "$_MESA_SHA256"
 	mkdir -p mesa libraries sysroot
 	tar -xzf "$TERMUX_PKG_CACHEDIR/mesa-glibc.tar.gz" -C mesa
-	local package url sha archive
+	local package url sha snapshot archive
 	: > COPYRIGHTS
-	while read -r package url sha; do
+	while read -r package url sha snapshot; do
 		archive="$TERMUX_PKG_CACHEDIR/$(basename "$url")"
-		termux_download "$url" "$archive" "$sha"
+		termux_download "$url" "$archive" "$sha" || termux_download "$snapshot" "$archive" "$sha"
 		dpkg-deb -x "$archive" "deb-$package"
 		cp -P "deb-$package"/usr/lib/aarch64-linux-gnu/*.so* libraries/ 2>/dev/null || true
 		printf '\n===== %s =====\n' "$package" >> COPYRIGHTS
 		cat "deb-$package"/usr/share/doc/*/copyright >> COPYRIGHTS
-	done < <(python3 -c 'import json, sys; [print(i["package"], i["url"], i["sha256"]) for i in json.load(open(sys.argv[1]))]' \
+	done < <(python3 -c 'import json, sys; [print(i["package"], i["url"], i["sha256"], i.get("snapshot", i["url"])) for i in json.load(open(sys.argv[1]))]' \
 		"$TERMUX_PKG_BUILDER_DIR/libraries.lock.json")
 	# Headers only, to compile the two small glibc helpers below.
-	while read -r package url sha; do
+	while read -r package url sha snapshot; do
 		archive="$TERMUX_PKG_CACHEDIR/$(basename "$url")"
-		termux_download "$url" "$archive" "$sha"
+		termux_download "$url" "$archive" "$sha" || termux_download "$snapshot" "$archive" "$sha"
 		dpkg-deb -x "$archive" sysroot
-	done < <(python3 -c 'import json, sys; [print(i["package"], i["url"], i["sha256"]) for i in json.load(open(sys.argv[1]))]' \
+	done < <(python3 -c 'import json, sys; [print(i["package"], i["url"], i["sha256"], i.get("snapshot", i["url"])) for i in json.load(open(sys.argv[1]))]' \
 		"$TERMUX_PKG_BUILDER_DIR/headers.lock.json")
 	printf '\n===== mesa-for-android-container =====\n' >> COPYRIGHTS
 	cat mesa/usr/share/doc/*/copyright >> COPYRIGHTS 2>/dev/null || echo 'MIT, see https://docs.mesa3d.org/license.html' >> COPYRIGHTS

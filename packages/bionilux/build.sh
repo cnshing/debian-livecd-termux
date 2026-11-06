@@ -17,12 +17,12 @@ termux_step_configure() {
 	termux_setup_rust
 	# glibc's headers and C library, only to compile and link the two glibc preloads.
 	mkdir -p sysroot
-	local package url sha archive
-	while read -r package url sha; do
+	local package url sha snapshot archive
+	while read -r package url sha snapshot; do
 		archive="$TERMUX_PKG_CACHEDIR/$(basename "$url")"
-		termux_download "$url" "$archive" "$sha"
+		termux_download "$url" "$archive" "$sha" || termux_download "$snapshot" "$archive" "$sha"
 		dpkg-deb -x "$archive" sysroot
-	done < <(python3 -c 'import json, sys; [print(i["package"], i["url"], i["sha256"]) for i in json.load(open(sys.argv[1]))]' \
+	done < <(python3 -c 'import json, sys; [print(i["package"], i["url"], i["sha256"], i.get("snapshot", i["url"])) for i in json.load(open(sys.argv[1]))]' \
 		"$TERMUX_PKG_BUILDER_DIR/glibc-sysroot.lock.json")
 }
 

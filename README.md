@@ -49,6 +49,10 @@ livecd start
 `livecd stop` ends it, and `livecd status` reports it. On a Qualcomm GPU, setup installs Mesa's
 Turnip driver and the desktop renders through Zink; elsewhere it renders in software.
 
+Firefox, Chromium and Google Chrome are installed with GPU rendering and Android's hardware video
+decoding and encoding. Chrome is downloaded from Google during installation, because its license
+does not allow this project to redistribute it.
+
 The desktop's Android integrations start with it: the phone microphone, or a connected Bluetooth
 headset (pair it in Android with **Calls** enabled), EasyEffects, GSConnect, whole-device CPU and
 process readings for Mission Center, battery status, and internal storage, SD card and USB drives
@@ -58,7 +62,7 @@ in Files. See [session integrations](docs/native/README.md#session-integrations)
 
 ```sh
 livecd-pkg list
-livecd-pkg install mixtapes     # or serein, chromium, ...
+livecd-pkg install mixtapes     # or serein, ungoogled-chromium, ...
 ```
 
 `livecd-pkg` adds features and applications that the default installation leaves out. It works while
@@ -141,8 +145,9 @@ Thank you to everyone behind the projects and references below.
 | [Chromium](https://www.chromium.org/), [Firefox](https://github.com/mozilla-firefox/firefox), [chromium-linux-tarballs](https://github.com/chromium-linux-tarballs/chromium-tarballs), and [ungoogled-chromium-portablelinux](https://github.com/ungoogled-software/ungoogled-chromium-portablelinux) | Browser sources, source archives and the optional portable Chromium input. Thanks also to licy183 and the Termux Chromium maintainers for the recipe and Android patches retained by this build. |
 | [Android Open Source Project](https://source.android.com/), [Android NDK](https://developer.android.com/ndk), and [scrcpy](https://github.com/Genymobile/scrcpy) | Camera, Binder, Bluetooth, shared-memory, buffer-allocation and MediaCodec source/API references. The camera investigation also consulted [scrcpy PR #4213](https://github.com/Genymobile/scrcpy/pull/4213). |
 
-Exact GPU/video inputs are recorded in the [native-video source lock](prebuilt/native-video/sources.lock.json),
-[Termux:VA lock](prebuilt/native-video/daemon.lock.json), and [browser integration report](docs/browsers/native-gpu-and-video.md).
+Exact GPU/video inputs are pinned in the [android-vaapi](packages/android-vaapi/build.sh),
+[android-vaapi-glibc](packages/android-vaapi-glibc/build.sh), [termux-va](packages/termux-va/build.sh)
+and [bionilux](packages/bionilux/build.sh) recipes; see also the [browser integration report](docs/browsers/native-gpu-and-video.md).
 
 ### Applications, audio and Android integration
 

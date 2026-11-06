@@ -2,7 +2,8 @@
 # Google Chrome is a glibc program on a Bionic system. Termux's preload library cannot
 # load into it, and the session's Bionic library path must not reach its loader.
 shared=$HOME/.local/lib/livecd-native/acceleration.py
-if [[ -f $shared && -f $HOME/.local/opt/livecd-native/acceleration/glibc/manifest.json ]]; then
+if [[ -f $shared && ( -f $HOME/.local/opt/livecd-native/acceleration/glibc/manifest.json ||
+    -f /data/data/com.termux/files/usr/lib/android-vaapi-glibc/manifest.json ) ]]; then
     exec /data/data/com.termux/files/usr/bin/python "$shared" run --profile chrome -- \
         /data/data/com.termux/files/usr/opt/google/chrome/chrome "$@"
 fi

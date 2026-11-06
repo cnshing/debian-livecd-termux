@@ -1,76 +1,29 @@
 #!/data/data/com.termux/files/usr/bin/python
-"""Install GPU rendering and hardware video for Google Chrome, without PRoot.
+"""Finish GPU rendering and hardware video for Google Chrome, without PRoot.
 
-Bionilux and Termux:VA are built here from pinned commits, and Mesa and its libraries
-come from hash-pinned archives. See docs/browsers/native-gpu-and-video.md.
-Nothing changes for Chrome until its launcher finds all of this and the Mutter fix.
+Bionilux and the glibc GPU and video stack come from the bionilux and android-vaapi-glibc
+packages. This adds the extension that steers YouTube to hardware codecs and checks that
+Chrome starts through Bionilux. See docs/browsers/native-gpu-and-video.md.
 """
 import hashlib
-import importlib.util
 import json
 import os
 from pathlib import Path
 import shutil
+import struct
 import subprocess
 import tempfile
 
 HERE = Path(__file__).resolve().parent
 PREFIX = Path(os.environ['PREFIX'])
 CHROME = PREFIX / 'opt/google/chrome'
-GPU = CHROME / 'gpu'
-BIONILUX = ('https://github.com/theonuverse/bionilux', '4152b476db31ffa8e2bb50b060292a59e15d0031')
-TERMUX_VA = ('https://github.com/lfdevs/termux-va', 'ae14813d77dbf107273b410a32f4ade34ba56313')
-MESA_VERSION = '27.0.0-devel-20261025'
-MESA_SHA256 = 'b711d1d9ab5537ee9085da8896dfe2115e791b33aa317fe37538f276c967d687'
-MESA_URL = ('https://github.com/lfdevs/mesa-for-android-container/releases/download/'
-    f'mesa-{MESA_VERSION}/mesa-for-android-container_{MESA_VERSION}_debian_trixie_arm64.tar.gz')
+STACK = PREFIX / 'lib/android-vaapi-glibc'
 # A Bionic launcher must never find these, and libpci exits the process that loads it on Android.
 FORBIDDEN = ('libc.so', 'libc.so.6', 'libdl.so', 'libm.so', 'libpci.so.3')
-
-spec = importlib.util.spec_from_file_location('install_chrome', HERE / 'install-chrome.py')
-install_chrome = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(install_chrome)
 
 
 def run(*command, **options):
     subprocess.run([str(part) for part in command], check=True, **options)
-
-
-def checkout(repository, commit, directory):
-    # Fetching by commit makes git verify the content against the pin.
-    directory.mkdir()
-    run('git', 'init', '-q', cwd=directory)
-    run('git', 'fetch', '-q', '--depth', '1', repository, commit, cwd=directory)
-    run('git', 'checkout', '-q', 'FETCH_HEAD', cwd=directory)
-
-
-def install_bionilux(work):
-    source = work / 'bionilux'
-    checkout(*BIONILUX, source)
-    run('patch', '--batch', '-p1', '-i', HERE / 'bionilux-0.5.0-browser.patch', cwd=source)
-    run('bash', 'scripts/build-preload.sh', cwd=source)
-    run('cargo', 'build', '--release', '--locked', cwd=source, env={**os.environ, 'CARGO_TARGET_DIR': str(work / 'target')})
-    shutil.copy2(source / 'libbionilux_preload.so', PREFIX / 'glibc/lib/libbionilux_preload.so')
-    shutil.copy2(work / 'target/release/bionilux', PREFIX / 'bin/bionilux')
-
-
-def install_termux_va(work):
-    source = work / 'termux-va'
-    checkout(*TERMUX_VA, source)
-    # API 29 is the release build's level, and exposes the MediaCodec calls it needs.
-    compiler = ['clang', '--target=aarch64-linux-android29', '-O2', '-std=c11', '-Icommon']
-    run(*compiler, 'daemon/termux-va.c', '-o', 'termux-va', '-lmediandk', '-llog', '-landroid', cwd=source)
-    run(*compiler, 'tools/tva-probe.c', '-o', 'tva-probe', cwd=source)
-    for name in ('termux-va', 'tva-probe'):
-        shutil.copy2(source / name, PREFIX / 'bin' / name)
-    for name in ('termux-va-start', 'termux-va-stop'):
-        shutil.copy2(source / 'scripts' / (name + '.sh'), PREFIX / 'bin' / name)
-        (PREFIX / 'bin' / name).chmod(0o755)
-
-
-def libraries_needed(path):
-    text = subprocess.run([shutil.which('readelf') or 'greadelf', '-d', str(path)], capture_output=True, text=True, check=True).stdout
-    return [line.split('[')[1].split(']')[0] for line in text.splitlines() if '(NEEDED)' in line]
 
 
 def check_forbidden_libraries(*folders):
@@ -81,24 +34,30 @@ def check_forbidden_libraries(*folders):
                 raise RuntimeError(f'{name} must not be in the GPU library path: {folder}')
 
 
-def stage_gpu(work):
-    stage = work / 'gpu'
-    (stage / 'mesa').mkdir(parents=True)
-    (stage / 'lib').mkdir()
-    archive = install_chrome.cached(MESA_URL, MESA_SHA256)
-    run('tar', '-xzf', archive, '-C', stage / 'mesa')
-    for item in json.loads((HERE / 'chrome-gpu-libs.lock.json').read_text()):
-        unpacked = work / ('deb-' + item['package'])
-        run('dpkg-deb', '-x', install_chrome.cached(item['url'], item['sha256']), unpacked)
-        folder = unpacked / 'usr/lib/aarch64-linux-gnu'
-        for path in folder.glob('*.so*') if folder.is_dir() else ():
-            if path.is_symlink() or path.is_file():
-                shutil.move(str(path), stage / 'lib' / path.name)
-        shutil.rmtree(unpacked)
-    mesa = stage / 'mesa/usr/lib/aarch64-linux-gnu'
-    check_forbidden_libraries(mesa, stage / 'lib')
-    # Prove the closure here: a missing library would otherwise only show as software video.
-    found = {path.name for folder in (mesa, stage / 'lib', CHROME / 'lib', PREFIX / 'glibc/lib') for path in folder.glob('*.so*')}
+def libraries_needed(path):
+    """DT_NEEDED of a 64-bit little-endian ELF; Chrome's installation brings no readelf."""
+    data = path.read_bytes()
+    shoff, = struct.unpack_from('<Q', data, 0x28)
+    shentsize, shnum = struct.unpack_from('<HH', data, 0x3a)
+    sections = [struct.unpack_from('<IIQQQQIIQQ', data, shoff + i * shentsize) for i in range(shnum)]
+    needed = []
+    for _, kind, _, _, offset, size, link, _, _, _ in sections:
+        if kind != 6:  # SHT_DYNAMIC
+            continue
+        strings = sections[link][4]
+        for tag, value in struct.iter_unpack('<qQ', data[offset:offset + size]):
+            if tag == 0:
+                break
+            if tag == 1:  # DT_NEEDED
+                needed.append(data[strings + value:data.index(b'\0', strings + value)].decode())
+    return needed
+
+
+def check_stack(libraries):
+    """A missing library would otherwise only show as software video."""
+    check_forbidden_libraries(*libraries)
+    found = {path.name for folder in (*libraries, CHROME / 'lib', PREFIX / 'glibc/lib') for path in folder.glob('*.so*')}
+    mesa = libraries[0]
     for root in ('libvulkan_freedreno.so', 'libgallium-27.0.0-devel.so', 'libgbm.so.1', 'libtva_drm_shim_wayland.so'):
         missing = sorted(set(libraries_needed(mesa / root)) - found)
         if missing:
@@ -106,11 +65,6 @@ def stage_gpu(work):
     for name in ('libva.so.2', 'libva-drm.so.2'):
         if name not in found:
             raise RuntimeError('Missing ' + name)
-    # Upstream's manifest has an absolute /usr path. Its final location goes in here.
-    icd = json.loads((stage / 'mesa/usr/share/vulkan/icd.d/freedreno_icd.aarch64.json').read_text())
-    icd['ICD']['library_path'] = str(GPU / 'mesa/usr/lib/aarch64-linux-gnu/libvulkan_freedreno.so')
-    (stage / 'freedreno_icd.json').write_text(json.dumps(icd, indent=2) + '\n')
-    return stage
 
 
 def install_extension(work):
@@ -142,35 +96,23 @@ def install_extension(work):
 def main():
     if not (CHROME / 'chrome').is_file():
         raise SystemExit('Install Google Chrome first: bash install.sh chrome')
+    manifest = json.loads((STACK / 'manifest.json').read_text())
+    check_stack([STACK / path for path in manifest['libraries']])
     work = Path(tempfile.mkdtemp(dir=CHROME.parent, prefix='.gpu-work-'))
     try:
         work.chmod(0o700)
-        install_bionilux(work)
-        install_termux_va(work)
-        stage = stage_gpu(work)
         install_extension(work)
-        if GPU.exists():
-            GPU.rename(work / 'previous')
-        stage.rename(GPU)
-        # Bionilux itself would answer a --version that comes straight after the program.
-        report = subprocess.run([PREFIX / 'bin/bionilux', CHROME / 'chrome', '--no-sandbox', '--version'],
-            capture_output=True, text=True, check=True, timeout=60,
-            env={**{k: v for k, v in os.environ.items() if k not in ('LD_PRELOAD', 'LD_LIBRARY_PATH')},
-                'BIONILUX_LIBRARY_PATH': f'{GPU}/mesa/usr/lib/aarch64-linux-gnu:{GPU}/lib:{CHROME}/lib'}).stdout.strip()
-        if 'Chrome' not in report:
-            raise RuntimeError('Chrome did not start through Bionilux: ' + report)
-        print('[Native video] ==> Chrome through Bionilux reports:', report, flush=True)
     finally:
         shutil.rmtree(work)
-    common = HERE.parents[2] / 'prebuilt/native-video/setup.py'
-    # General installs need a built adapter before selecting shared hardware
-    # video. A manually applied pinned adapter can be migrated immediately.
-    adapter = PREFIX / 'libexec/livecd-browser/liblivecd_tva_ion-bf39f8bd.so'
-    if common.is_file() and adapter.is_file():
-        # --glibc-compat adds the VA completion wait that hardware video needs to
-        # present current frames; without it Chrome shows stale video after seeks.
-        run('python', common, '--migrate-glibc', '--glibc-compat')
-    print('[Native video] ==> Installed to', GPU)
+    # Bionilux itself would answer a --version that comes straight after the program.
+    libraries = [str(STACK / path) for path in manifest['libraries']] + [str(CHROME / 'lib')]
+    report = subprocess.run([PREFIX / 'bin/bionilux', CHROME / 'chrome', '--no-sandbox', '--version'],
+        capture_output=True, text=True, check=True, timeout=60,
+        env={**{k: v for k, v in os.environ.items() if k not in ('LD_PRELOAD', 'LD_LIBRARY_PATH')},
+            'BIONILUX_LIBRARY_PATH': ':'.join(libraries)}).stdout.strip()
+    if 'Chrome' not in report:
+        raise RuntimeError('Chrome did not start through Bionilux: ' + report)
+    print('[Native video] ==> Chrome through Bionilux reports:', report, flush=True)
 
 
 if __name__ == '__main__':

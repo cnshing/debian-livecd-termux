@@ -4,7 +4,7 @@
 #   livecd-pkg install mixtapes
 #
 # Android integrations are on by default. Opt-in overlays, also installable later with
-# `livecd-pkg install NAME`: Browser+Chromium, Music Player
+# `livecd-pkg install NAME`: Music Player, ungoogled-chromium
 overlays:
 - Desktop Environment
 - Desktop Environment+Shell
@@ -22,5 +22,6 @@ overlays:
 - System Monitor
 - Browser
 - Browser+Ad blocking
+- Browser+Chromium
 - Audio Effects
 - Microphone

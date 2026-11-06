@@ -10,7 +10,7 @@ repo=$(cd -- "$(dirname -- "$(realpath -- "${BASH_SOURCE[0]}")")/.." && pwd)
 overlay() {
     case ${1,,} in
         mixtapes|music|music-player) echo 'Music Player';;
-        chromium|chrome|google-chrome|ungoogled-chromium) echo 'Browser+Chromium';;
+        chromium|chrome|google-chrome) echo 'Browser+Chromium';;
         easyeffects|audio-effects) echo 'Audio Effects';;
         gsconnect|phone-sync) echo 'Desktop Environment+Phone Sync';;
         mic|microphone) echo 'Microphone';;
@@ -34,13 +34,15 @@ case ${1:-} in
             dpkg -s "$package" >/dev/null 2>&1 && continue
             printf '  %-22s %s\n' "$package" "$(sed -n 's/^TERMUX_PKG_DESCRIPTION="\(.*\)"$/\1/p' "$recipe/build.sh")"
         done
-        echo 'Short names: mixtapes, chromium, easyeffects, gsconnect, microphone'
+        echo 'Short names: mixtapes, ungoogled-chromium, easyeffects, gsconnect, microphone'
         ;;
     install)
         shift
         test $# -gt 0 || { echo 'Name what to install: livecd-pkg list' >&2; exit 2; }
-        overlays=() packages=()
+        overlays=() packages=() browsers=()
         for name in "$@"; do
+            # Not in the default browser set, so only its own installer adds it.
+            test "${name,,}" != ungoogled-chromium || { browsers+=(ungoogled-chromium); continue; }
             found=$(overlay "$name")
             if test -n "$found"; then overlays+=("$found"); else packages+=("$name"); fi
         done
@@ -59,6 +61,7 @@ case ${1:-} in
         export LIVECD_SETUP_LOCKED=1 DEBIAN_FRONTEND=noninteractive
         test ${#packages[@]} -eq 0 || apt-get install -y --no-install-recommends "${packages[@]}"
         test ${#overlays[@]} -eq 0 || python "$repo/src/apply-overlays.py" "${overlays[@]}"
+        test ${#browsers[@]} -eq 0 || bash "$repo/overlays/Browser+Chromium/browsers/install.sh" "${browsers[@]}"
         ;;
     *) sed -n '2,7s/^# \{0,1\}//p' "${BASH_SOURCE[0]}" >&2; exit 2;;
 esac

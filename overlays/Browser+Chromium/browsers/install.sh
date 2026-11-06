@@ -1,9 +1,11 @@
 #!/data/data/com.termux/files/usr/bin/bash
-# Install Firefox, Chromium, Google Chrome and ungoogled Chromium on native Termux, with
-# the live CD's extensions, using the live CD's own extension scripts. Nothing runs under PRoot.
-# Usage: install.sh [firefox] [chromium] [chrome] [ungoogled-chromium]    (default: all four)
-# Rerun to update Chrome and the pinned Chromium builds, which apt does not manage here,
-# and the extension files.
+# Install Firefox, Chromium and Google Chrome, and optionally ungoogled Chromium, on native
+# Termux, with the live CD's extensions, using the live CD's own extension scripts. Nothing
+# runs under PRoot. All of them use the GPU and Android's hardware video.
+# Usage: install.sh [firefox] [chromium] [chrome] [ungoogled-chromium]
+#        (default: firefox chromium chrome)
+# Rerun to update Chrome and the pinned ungoogled Chromium build, which apt does not manage
+# here, and the extension files.
 set -eu
 test "${PREFIX:-}" = /data/data/com.termux/files/usr || { echo 'Run this script in native Termux (com.termux).' >&2; exit 2; }
 test "$(dpkg --print-architecture)" = aarch64 || { echo 'Google publishes Chrome for arm64 only, and this port is tested on aarch64.' >&2; exit 2; }
@@ -14,7 +16,7 @@ scripts=$repo/overlays/Browser/lb/hooks/normal/scripts
 . "$scripts/install-firefox-extensions.sh"
 export DEBIAN_FRONTEND=noninteractive
 
-test $# -gt 0 || set -- firefox chromium chrome ungoogled-chromium
+test $# -gt 0 || set -- firefox chromium chrome
 for browser in "$@"; do
     case "$browser" in firefox|chromium|chrome|ungoogled-chromium) ;; *) echo "Unknown browser: $browser" >&2; exit 2;; esac
 done
@@ -40,13 +42,12 @@ install_chromium_extensions() {
 packages="curl unzip jq"
 wants firefox && packages="$packages firefox"
 wants chromium && packages="$packages chromium"
-wants chrome && packages="$packages gnupg patchelf desktop-file-utils clang git llvm openssl-tool patch rust"
-# The VA-API Chromium builds are Debian's and ungoogled-chromium's glibc binaries.
-if wants chromium || wants ungoogled-chromium; then
-    packages="$packages patchelf clang lld"
-fi
+# Chrome's GPU and video stack, and the loader that runs it, are packages from this repository.
+wants chrome && packages="$packages gnupg patchelf desktop-file-utils openssl-tool bionilux android-vaapi-glibc termux-va"
+# The pinned ungoogled-chromium is a glibc binary, with small helpers compiled here.
+wants ungoogled-chromium && packages="$packages patchelf clang lld"
 apt-get update
-if wants chrome || wants chromium || wants ungoogled-chromium; then
+if wants chrome || wants ungoogled-chromium; then
     # glibc-repo only adds a source list, so index it before asking for glibc.
     apt-get install -y --no-install-recommends glibc-repo
     apt-get update
@@ -99,24 +100,16 @@ if wants chrome; then
     install_chromium_extensions "$PREFIX/opt/google/chrome/extensions"
 fi
 
-# Termux's chromium package compiles VA-API out. These pinned builds keep it, and run
-# on the shared glibc GPU and video stack that the chrome step sets up. --activate makes
-# the desktop's Chromium menu entry and chromium-browser start the VA-API build; the
-# package's own command stays available as $PREFIX/bin/chromium-browser.
-prebuilt=
-wants chromium && prebuilt="$prebuilt chromium"
-wants ungoogled-chromium && prebuilt="$prebuilt ungoogled-chromium"
-if [ -n "$prebuilt" ]; then
-    if [ -f "$HOME/.local/opt/livecd-native/acceleration/glibc/manifest.json" ]; then
-        python "$source_dir/install-chromium.py" $prebuilt --activate
-        for name in $prebuilt; do
-            browser_major=$(jq -r --arg name "$name" '.browsers[$name].version' "$source_dir/chromium-prebuilt.lock.json" | cut -d. -f1)
-            install_chromium_extensions "$PREFIX/opt/livecd-browsers/$name-extensions"
-        done
-    elif wants ungoogled-chromium; then
-        echo 'ungoogled-chromium needs the shared GPU stack: run install.sh chrome ungoogled-chromium.' >&2; exit 2
+# This repository's chromium package is built with VA-API, which Termux's compiles out.
+# The pinned ungoogled-chromium build runs on Chrome's shared glibc stack instead.
+if wants ungoogled-chromium; then
+    if [ -f "$PREFIX/lib/android-vaapi-glibc/manifest.json" ] ||
+       [ -f "$HOME/.local/opt/livecd-native/acceleration/glibc/manifest.json" ]; then
+        python "$source_dir/install-chromium.py" ungoogled-chromium --activate
+        browser_major=$(jq -r '.browsers["ungoogled-chromium"].version' "$source_dir/chromium-prebuilt.lock.json" | cut -d. -f1)
+        install_chromium_extensions "$PREFIX/opt/livecd-browsers/ungoogled-chromium-extensions"
     else
-        echo 'Chromium stays on Termux'"'"'s build without hardware video until install.sh chrome sets up the shared GPU stack.' >&2
+        echo 'ungoogled-chromium needs the shared GPU stack: run install.sh chrome ungoogled-chromium.' >&2; exit 2
     fi
 fi
 printf '\nInstalled: %s\n' "$*"

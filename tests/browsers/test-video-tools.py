@@ -183,6 +183,17 @@ class LibraryClosure(unittest.TestCase):
                             module.check_forbidden_libraries(folder)
                         path.unlink()
 
+    @unittest.skipUnless(shutil.which('readelf'), 'readelf is the reference for the ELF reader')
+    def test_needed_libraries_match_readelf(self):
+        with patch.dict(os.environ, PREFIX='/nonexistent-video-test-prefix'):
+            module = load('native_video', BROWSERS / 'install-native-video.py')
+        for path in (Path(sys.executable).resolve(), Path(__import__('_bz2').__file__)):
+            text = subprocess.check_output(['readelf', '-d', str(path)], text=True)
+            expected = [line.split('[')[1].split(']')[0] for line in text.splitlines() if '(NEEDED)' in line]
+            with self.subTest(path=path):
+                self.assertTrue(expected)
+                self.assertEqual(module.libraries_needed(path), expected)
+
 
 class PrebuiltBrowsers(unittest.TestCase):
     @unittest.skipUnless(shutil.which('cc'), 'A C compiler is required for the VA synchronization regression')

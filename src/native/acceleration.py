@@ -291,10 +291,17 @@ def prepare(profile, command, abi, video_override):
                    XKB_CONFIG_ROOT=str(PREFIX / 'share/X11/xkb'), XLOCALEDIR=str(PREFIX / 'share/X11/locale'))
         if env.get('DISPLAY', '').startswith(':'):
             env['DISPLAY'] = str(PREFIX / 'tmp/.X11-unix') + '/X' + env['DISPLAY'][1:].split('.')[0]
+        if profile == 'chrome':
+            # Chrome's own Debian libraries, which a packaged stack does not carry.
+            env['BIONILUX_LIBRARY_PATH'] = ':'.join(filter(None,
+                [env.get('BIONILUX_LIBRARY_PATH'), str(PREFIX / 'opt/google/chrome/lib')]))
         if profile == 'chrome' and video:
             compat = (ROOT / 'glibc-compat').resolve()
             completion = compat / 'liblivecd-va-completion.so'
             fortify = compat / 'liblivecd-bionilux-fortify.so'
+            if not (completion.is_file() and fortify.is_file()) and 'completion_preload' in selected[1]:
+                completion = selected[0] / selected[1]['completion_preload']
+                fortify = PREFIX / 'glibc/lib/libbionilux-fortify.so'
             if completion.is_file() and fortify.is_file():
                 env['BIONILUX_EXTRA_PRELOAD'] = ':'.join(filter(None,
                     [str(completion), env.get('BIONILUX_EXTRA_PRELOAD'), str(fortify)]))

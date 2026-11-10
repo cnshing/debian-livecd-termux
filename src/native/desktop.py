@@ -577,7 +577,13 @@ def main():
                 time.sleep(0.1)
         raise RuntimeError('Native startup timed out; see session.log')
     if args.action in ('stop', 'status'):
-        result = request('status')
+        try:
+            result = request('status')
+        except (FileNotFoundError, ConnectionRefusedError):
+            # No owner is listening, including after a crash left its socket.
+            # A status query succeeds even when the desktop itself is stopped.
+            print(json.dumps({'ok': args.action == 'stop', 'running': False}))
+            return 0
         if args.action == 'stop':
             result = request('stop')
             for _ in range(1300):

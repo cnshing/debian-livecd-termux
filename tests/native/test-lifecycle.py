@@ -23,6 +23,7 @@ def stopped(tag):
     assert not tagged_processes(tag), tagged_processes(tag)
     assert not (RUNTIME / 'control.sock').exists()
     assert not (STATE / 'session.json').exists()
+    assert call('status') == {'ok': False, 'running': False}
 
 
 def main():

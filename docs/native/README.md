@@ -34,6 +34,11 @@ livecd start --renderer software   # or --renderer zink, for this start only
 livecd select                      # validate the running renderer and save it as the default
 ```
 
+When stopped, `livecd status` prints `{"ok": false, "running": false}` and exits
+0 because the query succeeded. `livecd stop` also succeeds when already stopped.
+Connection permission errors, timeouts and errors reported by a running owner
+still fail. The host regression test is `tests/native/test-desktop-status.py`.
+
 From the PC rig, use the currently connected serial from `adb devices -l`:
 
 ```sh

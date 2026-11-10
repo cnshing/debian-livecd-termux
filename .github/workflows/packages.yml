@@ -82,6 +82,8 @@ jobs:
       run: python3 tests/native/test-storage-mounts.py
     - name: Test desktop integration startup
       run: python3 tests/native/test-integrations.py
+    - name: Test desktop status without a running session
+      run: python3 tests/native/test-desktop-status.py
     - name: Test the camera supervisor and its desktop wiring
       run: python3 tests/camera/test-camera-controller.py
     - name: Test GNOME wallpaper registration

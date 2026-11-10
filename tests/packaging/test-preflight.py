@@ -21,18 +21,20 @@ shift
 echo "$*" >> "$FAKE/rish.log"
 case $* in
     id) test -e "$FAKE/shizuku-running" && echo 'uid=2000(shell) gid=2000(shell)';;
-    'dumpsys package com.termux.api')
+    'dumpsys package com.termux.api'*)
         echo '    requested permissions:'
         echo '      android.permission.CAMERA'
         echo '      android.permission.RECORD_AUDIO'
         echo '    runtime permissions:'
+        # Shizuku+ can deliver part of the output through stderr, as it did on the phone.
         for permission in CAMERA RECORD_AUDIO; do
             state=false; grep -qx "$permission" "$FAKE/granted" && state=true
-            echo "        android.permission.$permission: granted=$state, flags=[ USER_SET]"
+            echo "        android.permission.$permission: granted=$state, flags=[ USER_SET]" >&2
         done;;
     'dumpsys deviceidle whitelist')
+        echo 'Waiting for Shizuku authorization... check your notifications.'
         echo 'system,com.android.shell,2000'
-        grep -qx idle "$FAKE/granted" && echo 'user,com.termux,10309';;
+        grep -qx idle "$FAKE/granted" && echo 'user,com.termux,10309' >&2;;
     'pm grant com.termux.api android.permission.'*) echo "${*##*.}" >> "$FAKE/granted";;
     'dumpsys deviceidle whitelist +com.termux') echo idle >> "$FAKE/granted";;
 esac

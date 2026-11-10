@@ -62,8 +62,10 @@ if test -z "$shell" && test -n "$grant"; then
     rish dumpsys deviceidle whitelist +com.termux >/dev/null
 fi
 if test -z "$shell"; then
-    api=$(rish dumpsys package com.termux.api 2>/dev/null || true)
-    idle=$(rish dumpsys deviceidle whitelist 2>/dev/null || true)
+    # Shizuku+ can deliver part of a command's output through rish's stderr, so read both, and
+    # filter on Android's side to keep the answer short.
+    api=$(rish "dumpsys package com.termux.api | grep 'granted=true'" 2>&1 || true)
+    idle=$(rish dumpsys deviceidle whitelist 2>&1 || true)
 fi
 
 stops=0 warnings=0

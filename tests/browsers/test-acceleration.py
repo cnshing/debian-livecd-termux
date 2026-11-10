@@ -117,7 +117,10 @@ def worker(args):
         launcher.chmod(0o700)
         if args.application == 'firefox':
             acceleration.firefox_preferences(profile, True, True)
-            browser = probe.Firefox(launcher, profile, tag, preserve_prefs=True)
+            # Extension welcome tabs can hide the measured video in a fresh
+            # profile. Add-on qualification has its own browser test suite.
+            browser = probe.Firefox(launcher, profile, tag, prefs=(
+                ('extensions.enabledScopes', 1), ('extensions.autoDisableScopes', 15)), preserve_prefs=True)
             result['version'] = browser.version
         else:
             path = args.out / 'mpv.sock'

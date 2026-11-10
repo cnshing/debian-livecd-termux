@@ -304,6 +304,11 @@ def prepare(profile, command, abi, video_override):
             env[key] = value
     if video and profile != 'mpv':
         video_environment(env, selected, abi, config)
+        if abi == 'bionic' and profile in ('chromium', 'ungoogled-chromium'):
+            # ANGLE consumes exported surfaces through implicit DRM sync. The
+            # MediaCodec/CPU producer needs an explicit completion boundary.
+            env['TERMUX_VA_SYNC_END_PICTURE'] = (
+                '0' if os.environ.get('LIVECD_VA_DISABLE_COMPLETION') == '1' else '1')
         if profile == 'firefox':
             env.setdefault('MOZ_DRM_DEVICE', '/dev/kgsl-3d0')
             port, ffmpeg = firefox

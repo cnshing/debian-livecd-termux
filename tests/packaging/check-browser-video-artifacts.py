@@ -15,7 +15,13 @@ def check(directory):
     for path in Path(directory).glob('*.deb'):
         name = subprocess.check_output(['dpkg-deb', '-f', str(path), 'Package'], text=True).strip()
         if name in wanted:
-            packages[name] = path
+            previous = packages.get(name)
+            if previous is None or subprocess.run([
+                    'dpkg', '--compare-versions',
+                    subprocess.check_output(['dpkg-deb', '-f', str(path), 'Version'], text=True).strip(), 'gt',
+                    subprocess.check_output(['dpkg-deb', '-f', str(previous), 'Version'], text=True).strip(),
+                    ]).returncode == 0:
+                packages[name] = path
     if set(packages) != wanted:
         raise RuntimeError('Missing browser video package artifacts: ' + ', '.join(wanted - packages.keys()))
     with tempfile.TemporaryDirectory() as temporary:
@@ -30,6 +36,9 @@ def check(directory):
         manifest = json.loads((vaapi / 'manifest.json').read_text())
         if 'lib/va-client' not in manifest['libraries']:
             raise RuntimeError('Chromium cannot search the private libva ABI aliases')
+        if not any(b'TERMUX_VA_SYNC_END_PICTURE' in library.read_bytes()
+                   for library in vaapi.glob('libgallium*.so*') if library.is_file()):
+            raise RuntimeError('Native VA-API driver lacks implicit-sync decode completion support')
         for name in ('libva', 'libva-drm', 'libva-x11'):
             alias = vaapi / 'lib/va-client' / (name + '.so.2')
             if not alias.is_symlink() or alias.resolve() != (prefix / 'lib' / (name + '.so')).resolve():

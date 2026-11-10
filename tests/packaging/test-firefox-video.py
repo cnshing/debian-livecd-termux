@@ -134,6 +134,19 @@ class FirefoxVideo(unittest.TestCase):
         video.assert_not_called()
         self.assertEqual(errors, '')
 
+    def test_only_native_chromium_requests_implicit_sync_completion(self):
+        for profile, override, disabled, expected in (
+                ('chromium', 'on', False, '1'), ('chromium', 'on', True, '0'),
+                ('chromium', 'off', False, None), ('generic', 'on', False, None),
+                ('firefox', 'on', False, None)):
+            with self.subTest(profile=profile, override=override, disabled=disabled), \
+                    mock.patch.object(acceleration, 'chromium_has_vaapi', return_value=True), \
+                    mock.patch.object(acceleration, 'video_environment'), \
+                    mock.patch.dict(os.environ, {'LIVECD_VA_DISABLE_COMPLETION': '1' if disabled else '0'}):
+                _, env = acceleration.prepare(profile,
+                    [str(self.prefix / 'bin/firefox'), '--profile', '/disposable/profile'], 'bionic', override)
+                self.assertEqual(env.get('TERMUX_VA_SYNC_END_PICTURE'), expected)
+
 
 if __name__ == '__main__':
     unittest.main()

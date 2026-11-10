@@ -10,6 +10,7 @@ authorized after the initial startup-only run. No tests use the live desktop.
 | mpv / H.264 | Pass: the same checks with the Qualcomm AVC decoder |
 | mpv / HEVC | Pass: the same checks with the Qualcomm HEVC decoder |
 | Firefox / HEVC | Pass: VA-API frames, WebRender, Turnip/KGSL process and numbered-frame pixels with the private FFmpeg libraries |
+| Native Chromium 156 / VP9 | Pass: `VaapiVideoDecoder`, Vulkan/Turnip, browser and GNOME pixels across 2 fullscreen cycles with native producer completion |
 | Chromium (Debian 156, pinned) / VP9, HEVC | Pass: `VaapiVideoDecoder`, Turnip GPU compositing, browser and GNOME Shell pixels across 6 fullscreen cycles |
 | ungoogled Chromium 156 (pinned) / VP9, HEVC | Pass: the same checks |
 | Google Chrome / VP9, HEVC | Pass: the same checks, with the shared VA completion adapter |
@@ -18,8 +19,68 @@ The pixel oracle identifies a reference by the image's barcode, checks eight
 color patches (maximum channel error 16), and requires PSNR >=28 dB and
 SSIM >=0.90. Firefox captures its page; mpv captures the decoded video. These
 checks do not qualify GNOME fullscreen presentation, Android's actual display,
-long playback or every stream/profile. The earlier stale fullscreen frame bug
-remains unresolved.
+long playback or every stream/profile. The glibc runs below record an earlier
+intermittent stale-frame failure under concurrent hardware-encoding load.
+
+## Native packages after the fresh-install investigation, 2026-11-10
+
+The checked phone had just been reinstalled from `7ae6f6b`. Its Firefox and
+Chromium GPU rendering worked, but Firefox lacked the home-built probe/decoder
+pair and Chromium could not load `libva.so.2`. The fixes were tested by installing
+the new native packages on that clean base; final acceptance from the assembled
+new repository tarball remains a separate reinstall check.
+
+`android-firefox-video` now packages Mozilla's KGSL graphics probe and VA-API
+FFmpeg 9.0.2 libraries under `$PREFIX`. Its small private Firefox loader shares
+the installed application's assets, and a manifest guards its Firefox identity.
+The launcher warns and starts the current Firefox with software decoding when
+the port is missing, incomplete or mismatched. The Browser overlay installs the
+package by default. The documented `livecd-accelerate` command is also packaged,
+and the acceleration test uses the installed `termux-va` daemon.
+
+Chromium's native VA loader requires desktop `libva.so.2` / `libva-drm.so.2`
+names, while Termux's Meson emits unversioned libraries. Private aliases in
+`android-vaapi` resolve that failure. Hardware decoding then exposed a producer
+completion bug: its browser capture had the requested frame, while GNOME showed
+a different one. The native driver now performs a bounded 500 ms surface wait
+at `vaEndPicture` for the native Chromium profile. This is the same completion
+boundary used by the existing glibc adapter; Firefox keeps its explicit waits.
+
+With `android-vaapi` revision 2, `android-firefox-video` 9.0.2 and
+`livecd-desktop` 0.2.0-12:
+
+- Firefox 159.0.1 passes VP9 and HEVC: 48 frames, VA-API frame diagnostics,
+  WebRender, Turnip/KGSL process evidence and numbered-frame pixels, with
+  `hardware_verified: true`. Both were repeated after the completion change.
+- Native Chromium 156 passes the strict VP9 hardware/fullscreen command below.
+  Only `VaapiVideoDecoder` is recorded, all four fullscreen/windowed samples
+  drop zero frames, and both browser and GNOME match reference frames 12 and 36
+  on their first capture. PSNR is 30.74–30.76 dB and SSIM 0.908–0.910. The contact
+  sheet was visually checked.
+- `LIVECD_VA_DISABLE_COMPLETION=1` reproduces the failure with the same command:
+  hardware and browser pixels pass, while GNOME shows frames 3 and 11 instead of
+  12 and 36. The disabled control's contact sheet was also checked.
+- Every test uses a private Termux:X11 server and passes live-session isolation
+  and cleanup checks. No test sends input to `:0` or opens a camera/microphone.
+
+From a short phone test directory containing `browsers/` and `fixtures-v2/`:
+
+```sh
+python browsers/test-acceleration.py firefox --fixtures fixtures-v2 --out f1
+python browsers/test-acceleration.py firefox --fixtures fixtures-v2 --case chart-hevc.mp4 --out f2
+python browsers/test-fullscreen.py chromium --browser-command "$PREFIX/bin/chromium-browser" \
+  --x-server lorie --renderer zink --browser-flag=--window-size=1280,1100 \
+  --require-gpu --require-hardware-decode --private-daemon --media-dir fixtures-v2 \
+  --fixture-manifest fixtures-v2/manifest.json --case chart-vp9.webm --cycles 2 --out c1
+```
+
+Raw device evidence stays in the working tree's `temp/acceptance-fixes/` and the
+phone's `~/.cache/codex-video/`. The package artifact check verifies the decoder ABI,
+native helpers, VA loader aliases and compiled completion support. Host tests
+cover the launcher fallback and completion routing, including the disabled
+control and other native clients.
+
+## Earlier development qualification
 
 The test runner now writes mpv's explicit log file, flushes Firefox diagnostics,
 and waits for process exit after signalling. A private Firefox application copy

@@ -17,15 +17,17 @@ playback, or hardware decoding in a particular application. The
 [fixes and checks](../browsers/native-acceleration-checks.md) pass Firefox
 VP9/HEVC and mpv VP9/H.264/HEVC hardware decoding, GPU process checks and numbered-frame
 pixel comparisons. Chromium is this repository's package built with VA-API.
-The earlier fullscreen frame-freshness failure remains unresolved.
+The native Chromium fullscreen case below now passes with explicit producer
+completion. The earlier glibc investigation still records an intermittent
+stale-frame failure under concurrent encoding load.
 
 ## Applications
 
 | Application | GPU configuration | Video configuration |
 | --- | --- | --- |
 | Google Chrome | Shared glibc Turnip and ANGLE Vulkan | Shared glibc Termux:VA driver and ION adapter from `android-vaapi-glibc`; VP9/HEVC on by default |
-| Native Firefox | Turnip/Zink and WebRender; KGSL graphics probe from `android-firefox-video` | Private VA-API FFmpeg libraries from the same package; the earlier development build passed VP9/HEVC GPU and pixel checks |
-| Native Chromium | Existing Vulkan/ANGLE support | This repository's `chromium` package, built with VA-API; enabled when the installed package carries its VA-API build receipt |
+| Native Firefox | Turnip/Zink and WebRender; KGSL graphics probe from `android-firefox-video` | Packaged VA-API FFmpeg libraries pass VP9/HEVC hardware, GPU and numbered-frame pixel checks |
+| Native Chromium | Turnip and Vulkan/ANGLE | Native `chromium` with private libva ABI aliases and producer completion passes VP9 hardware and fullscreen browser/GNOME pixel checks |
 | Native mpv | Vulkan `gpu-next` / `x11vk` | VP9/H.264/HEVC hardware decoding and pixel checks pass through native MediaCodec |
 | Other applications | Inherited native rendering, or an explicit glibc profile | Standard VA-API available through the shared launcher when the application includes a compatible backend |
 
@@ -101,6 +103,15 @@ The Bionic `android-vaapi` stack also supplies private `libva.so.2` and
 `libva-drm.so.2` aliases. Chromium explicitly dlopens those desktop ABI names;
 Termux's native libva package uses unversioned filenames. The aliases refer to
 the same native libraries and are searched through the application's environment.
+
+Native Chromium also requests a bounded producer wait at `vaEndPicture`. Its
+implicit DRM synchronization does not cover the MediaCodec/CPU copy, so a frame
+can be correct in the browser's capture while GNOME presents an older surface.
+The native driver completes that copy before returning the submitted picture,
+with a 500 ms limit and error propagation. Other native VA clients keep their
+existing explicit synchronization. `LIVECD_VA_DISABLE_COMPLETION=1` is a
+diagnostic negative control: it reproduces the wrong-frame GNOME captures while
+hardware decoding and the browser's own pixels still pass.
 
 The packages are built in CI from [packages/](../../packages/). Instructions for building
 a development stack on the phone are in [prebuilt/native-video](../../prebuilt/native-video/README.md).

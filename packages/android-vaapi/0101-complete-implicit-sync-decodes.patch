@@ -1,0 +1,30 @@
+Complete the CPU-backed decode producer before an implicit-sync consumer uses
+the exported DMA buffer. Native Chromium does not issue the explicit VA wait
+Firefox uses. Opt in per application, with the same bounded 500 ms wait as the
+already validated glibc browser adapter. Keep normal asynchronous VA users and
+the encoding path unchanged.
+
+--- a/src/gallium/frontends/va/picture.c
++++ b/src/gallium/frontends/va/picture.c
+@@ -368,6 +368,21 @@ vlVaEndPicture(VADriverContextP ctx, VAContextID context_id)
+       return VA_STATUS_ERROR_OPERATION_FAILED;
+    }
+ 
++   /* KGSL has no implicit fence for the MediaCodec/CPU producer. Chromium
++    * can hand an exported surface to ANGLE without an explicit VA wait; an
++    * old picture then remains visible even though its browser capture is
++    * correct. Opt in only for this consumer and never wait indefinitely. */
++   const char *sync_end_picture = getenv("TERMUX_VA_SYNC_END_PICTURE");
++   if (context->decoder->entrypoint == PIPE_VIDEO_ENTRYPOINT_BITSTREAM &&
++       sync_end_picture && !strcmp(sync_end_picture, "1")) {
++      VAStatus sync_status = vlVaSyncSurfaceObjectLocked(
++         drv, surf, UINT64_C(500000000));
++      if (sync_status != VA_STATUS_SUCCESS) {
++         mtx_unlock(&drv->mutex);
++         return sync_status;
++      }
++   }
++
+    if (getenv("DMD_VA_LOG"))
+       fprintf(stderr, "tva-picture end target=%#x surf=%p after_fence=%p out_ptr=%p\n",
+               output_id, (void *)surf, (void *)surf->fence,

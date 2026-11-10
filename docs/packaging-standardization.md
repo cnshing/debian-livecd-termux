@@ -48,6 +48,25 @@ when replacing it with `android-upower`. The shared helper assumes a configured
 Termux build environment; Linux hosts use Docker. Native builds default to two
 jobs and take the normal desktop session lock.
 
+Nautilus declares ICU directly and records dependency bounds for the ICU major
+version found by pkg-config during configuration. CI's `-w` dependency download
+mode can use the mirror's current ICU with the existing builder pin. The
+`49.3-1` recipe invalidates the old artifact and upgrades installed `49.3`
+packages. Before saving a build and before assembling a repository, CI compares
+Nautilus's ICU `DT_NEEDED` entries with the current mirror's libicu package and
+checks the dependency bounds. Assembly checks reused artifacts too, so an ICU
+major update requires a Nautilus rebuild even when its recipe has not changed.
+
+Host checks use real ELF and Debian package fixtures to verify matching ICU,
+missing libraries and missing or incorrect dependency bounds. Nautilus 49.3-1
+was cross-built for aarch64 with the pinned builder and fresh dependencies;
+the resulting package passes the mirror ABI check and declares ICU >= 79,
+<< 80. On the phone, its extracted executable reports its version and opens
+a local folder on an isolated D-Bus session. Its process maps both
+libicuuc.so.79 and libicui18n.so.79. The installed package and the desktop
+session were left in place; installed-package/DING acceptance and the release
+refresh remain separate steps.
+
 Python helpers remain valid build inputs for resource generation, metadata and
 data preparation. The recipe declares dependencies and verified sources, applies
 patches and produces the package; those boundaries matter independently of the

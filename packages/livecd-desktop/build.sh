@@ -3,7 +3,7 @@ TERMUX_PKG_DESCRIPTION="Native GNOME desktop controller and profile setup"
 TERMUX_PKG_LICENSE="MIT"
 TERMUX_PKG_MAINTAINER="@cnshing"
 TERMUX_PKG_VERSION="0.2.0"
-TERMUX_PKG_REVISION=10
+TERMUX_PKG_REVISION=11
 TERMUX_PKG_SKIP_SRC_EXTRACT=true
 TERMUX_PKG_PLATFORM_INDEPENDENT=true
 TERMUX_PKG_BUILD_IN_SRC=true
@@ -20,7 +20,7 @@ termux_step_make_install() {
 	for file in "$TERMUX_PKG_BUILDER_DIR/native/"*.py; do
 		install -Dm644 "$file" "$TERMUX_PREFIX/libexec/livecd-native/$(basename "$file")"
 	done
-	for file in livecd livecd-native; do
+	for file in livecd livecd-native livecd-accelerate; do
 		sed "s|@TERMUX_PREFIX@|$TERMUX_PREFIX|g" "$TERMUX_PKG_BUILDER_DIR/$file" \
 			> "$TERMUX_PREFIX/bin/$file"
 		chmod 755 "$TERMUX_PREFIX/bin/$file"

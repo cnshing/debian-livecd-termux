@@ -192,6 +192,39 @@ def firefox_preferences(profile, gpu, video):
         temporary.replace(path)
 
 
+def firefox_video_runtime():
+    """Select a complete probe/decoder pair matching the currently installed Firefox."""
+    packaged = PREFIX / 'lib/android-firefox-video'
+    reason = 'install android-firefox-video for the installed Firefox version'
+    for port, ffmpeg in ((ROOT / 'firefox', ROOT / 'firefox-ffmpeg'),
+                         (packaged, packaged / 'ffmpeg')):
+        try:
+            receipt = json.loads((port / 'manifest.json').read_text())
+            decoder = json.loads((ffmpeg / 'manifest.json').read_text())
+            if any(not isinstance(data, dict) or data.get('format') != 1 or data.get('abi') != 'bionic'
+                   for data in (receipt, decoder)):
+                reason = 'incompatible Firefox video metadata'
+                continue
+            if not all(path.is_file() for path in (
+                    port / 'application/firefox', port / 'application/gfxtest',
+                    ffmpeg / 'lib/libavcodec.so.63', ffmpeg / 'lib/libavutil.so.61')):
+                reason = 'incomplete Firefox video package'
+                continue
+            installed = (PREFIX / 'bin/firefox').resolve()
+            inputs = receipt['inputs']
+            if (hashlib.sha256(installed.read_bytes()).hexdigest() != inputs['binary'] or
+                    hashlib.sha256((installed.parent / 'application.ini').read_bytes()).hexdigest() !=
+                    inputs['application_ini']):
+                reason = 'Firefox changed; update android-firefox-video to match it'
+                continue
+            return (port.resolve(), ffmpeg.resolve()), None
+        except FileNotFoundError:
+            continue
+        except (OSError, ValueError, KeyError, TypeError):
+            reason = 'invalid Firefox video package metadata'
+    return None, reason
+
+
 def command_line(profile, command, abi, video, gpu):
     flags = []
     if profile in ('chrome', 'chromium', 'ungoogled-chromium'):
@@ -236,6 +269,12 @@ def prepare(profile, command, abi, video_override):
     video = requested and gpu and (profile == 'mpv' or selected is not None)
     if profile in ('chromium', 'ungoogled-chromium') and not chromium_has_vaapi(profile, abi):
         video = False
+    firefox = None
+    if profile == 'firefox' and video:
+        firefox, reason = firefox_video_runtime()
+        if firefox is None:
+            video = False
+            print('Firefox hardware video unavailable: ' + reason + '; using software decoding.', file=sys.stderr)
     if abi == 'glibc':
         for key in ('LD_PRELOAD', 'LD_LIBRARY_PATH', 'BIONILUX_EXTRA_PRELOAD', 'BIONILUX_LIBRARY_PATH',
                     'GALLIUM_DRIVER', 'COGL_DRIVER', 'GSK_RENDERER', 'LIBGL_ALWAYS_SOFTWARE'):
@@ -267,22 +306,10 @@ def prepare(profile, command, abi, video_override):
         video_environment(env, selected, abi, config)
         if profile == 'firefox':
             env.setdefault('MOZ_DRM_DEVICE', '/dev/kgsl-3d0')
-            # Firefox's desktop sonames and GPU probe need a KGSL port. The
-            # private application copy is selected only for its package version.
-            port = (ROOT / 'firefox').resolve()
-            receipt = port / 'manifest.json'
-            if receipt.is_file():
-                inputs = json.loads(receipt.read_text())['inputs']
-                installed = (PREFIX / 'bin/firefox').resolve()
-                if (hashlib.sha256(installed.read_bytes()).hexdigest() != inputs['binary'] or
-                    hashlib.sha256((installed.parent / 'application.ini').read_bytes()).hexdigest()
-                        != inputs['application_ini']):
-                    raise RuntimeError('Firefox changed; rerun prebuilt/native-video/setup-firefox.py')
-                command = [str(port / 'application/firefox'), *command[1:]]
-                env['LD_LIBRARY_PATH'] = str(port / 'lib') + ':' + env.get('LD_LIBRARY_PATH', '')
-            ffmpeg = (ROOT / 'firefox-ffmpeg').resolve()
-            if (ffmpeg / 'manifest.json').is_file():
-                env['LD_LIBRARY_PATH'] = str(ffmpeg / 'lib') + ':' + env.get('LD_LIBRARY_PATH', '')
+            port, ffmpeg = firefox
+            command = [str(port / 'application/firefox'), *command[1:]]
+            env['LD_LIBRARY_PATH'] = ':'.join(filter(None,
+                [str(ffmpeg / 'lib'), str(port / 'lib'), env.get('LD_LIBRARY_PATH')]))
     if profile in ('chrome', 'chromium', 'ungoogled-chromium') and abi == 'glibc':
         wrapper = {'chrome': 'google-chrome', 'chromium': 'chromium-vaapi',
                    'ungoogled-chromium': 'ungoogled-chromium'}[profile]

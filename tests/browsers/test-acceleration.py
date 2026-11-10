@@ -318,8 +318,7 @@ def main():
                 daemon_env = apply_renderer(env.copy(), 'software')
                 for key in ('LD_PRELOAD', 'LD_LIBRARY_PATH'):
                     daemon_env.pop(key, None)
-                daemon = subprocess.Popen([str(Path.home() /
-                    '.local/opt/livecd-native/acceleration/service/bin/termux-va')],
+                daemon = subprocess.Popen([str(PREFIX / 'bin/termux-va')],
                     env=daemon_env, stdout=log, stderr=log)
 
             def daemon_ready():

@@ -24,7 +24,7 @@ The earlier fullscreen frame-freshness failure remains unresolved.
 | Application | GPU configuration | Video configuration |
 | --- | --- | --- |
 | Google Chrome | Shared glibc Turnip and ANGLE Vulkan | Shared glibc Termux:VA driver and ION adapter from `android-vaapi-glibc`; VP9/HEVC on by default |
-| Native Firefox | Turnip/Zink and WebRender; private KGSL graphics probe port | VP9/HEVC VA-API, GPU and pixel checks pass with private VA-API-enabled FFmpeg libraries |
+| Native Firefox | Turnip/Zink and WebRender; KGSL graphics probe from `android-firefox-video` | Private VA-API FFmpeg libraries from the same package; the earlier development build passed VP9/HEVC GPU and pixel checks |
 | Native Chromium | Existing Vulkan/ANGLE support | This repository's `chromium` package, built with VA-API; enabled when the installed package carries its VA-API build receipt |
 | Native mpv | Vulkan `gpu-next` / `x11vk` | VP9/H.264/HEVC hardware decoding and pixel checks pass through native MediaCodec |
 | Other applications | Inherited native rendering, or an explicit glibc profile | Standard VA-API available through the shared launcher when the application includes a compatible backend |
@@ -87,6 +87,20 @@ The existing daemon can serve both ABIs through its socket. When a caller suppli
 Otherwise startup is serialized, reuses a listening endpoint, and starts the
 daemon directly if absent. It never invokes upstream's process-wide kill helpers
 or runs a decode health probe. There is no global video preload on GNOME Shell.
+
+The Browser overlay also installs `android-firefox-video`. Its Mozilla graphics
+probe port and VA-API FFmpeg decoder libraries live under
+`$PREFIX/lib/android-firefox-video`; Firefox no longer requires a home-directory
+build. The launcher verifies that the package matches the installed Firefox
+loader and application.ini before using it. A newer or rebuilt Firefox can start
+normally with software decoding and a diagnostic until the matching video
+package is rebuilt. The optional development `firefox` / `firefox-ffmpeg` pair
+under the acceleration directory remains supported when complete and compatible.
+
+The Bionic `android-vaapi` stack also supplies private `libva.so.2` and
+`libva-drm.so.2` aliases. Chromium explicitly dlopens those desktop ABI names;
+Termux's native libva package uses unversioned filenames. The aliases refer to
+the same native libraries and are searched through the application's environment.
 
 The packages are built in CI from [packages/](../../packages/). Instructions for building
 a development stack on the phone are in [prebuilt/native-video](../../prebuilt/native-video/README.md).

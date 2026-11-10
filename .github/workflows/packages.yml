@@ -66,6 +66,10 @@ jobs:
     - uses: actions/checkout@v7
     - name: Test the AutoEq converter
       run: python3 tests/audio/test-autoeq.py
+    - name: Test EasyEffects output recovery
+      run: python3 tests/audio/test-bridge.py
+    - name: Test the audio signal probe's route isolation
+      run: python3 tests/audio/test-verify-signal.py
     - name: Test Bluetooth microphone session cleanup
       run: python3 tests/mic/test-bluetooth.py
     - name: Test packaging and profile integration

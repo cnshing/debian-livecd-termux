@@ -19,6 +19,7 @@ STATE = Path.home() / ".local/state/easyeffects-bridge"
 RUNTIME = Path(os.environ.get("TMPDIR", str(PREFIX / "tmp"))) / "livecd-fx"
 RECORD = STATE / "session.json"
 AUDIO_ENV = ("PIPEWIRE_RUNTIME_DIR", "PIPEWIRE_REMOTE", "PULSE_SERVER")
+OUTPUT = "easyeffects_termux_output"
 
 
 def invoke(command, env, **kwargs):
@@ -54,7 +55,82 @@ def wait_for(probe, children, description, attempts=100):
 
 
 def sinks(env):
-    return json.loads(invoke(["pactl", "--format=json", "list", "sinks"], env, capture_output=True).stdout)
+    return json.loads(invoke(["pactl", "--format=json", "list", "sinks"], env,
+                             capture_output=True, timeout=5).stdout)
+
+
+class PulseTunnel:
+    """Replace only the tunnel when its downstream sink disappears or changes.
+
+    PipeWire 1.4's in-module reconnect can stay stuck after its sink disappears.
+    A separate pw-cli owns the module, so replacement starts with fresh state and
+    leaves PipeWire, EasyEffects and the applications connected to them running.
+    """
+
+    def __init__(self, env, server, cookie):
+        self.env = env
+        self.backend = dict(env, PULSE_SERVER=server)
+        if cookie:
+            self.backend["PULSE_COOKIE"] = cookie
+        self.server = server
+        self.process = None
+        self.target = None
+        self.started = 0
+        self.ready = False
+
+    def close(self):
+        if self.process is not None:
+            if self.process.poll() is None:
+                self.process.terminate()
+            try:
+                self.process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                self.process.kill()
+                self.process.wait()
+            self.process = None
+        self.target = None
+        self.ready = False
+
+    def refresh(self):
+        try:
+            info = json.loads(invoke(["pactl", "--format=json", "info"], self.backend,
+                                     capture_output=True, timeout=5).stdout)
+            target = next(((sink["index"], sink["name"]) for sink in sinks(self.backend)
+                           if sink["name"] == info["default_sink_name"]), None)
+        except (OSError, ValueError, subprocess.SubprocessError):
+            target = None
+        # The index detects removal/recreation under the same name between polls.
+        if target != self.target or (self.process is not None and self.process.poll() is not None):
+            self.close()
+        if target is None:
+            return False
+        if self.process is not None:
+            try:
+                present = any(sink["name"] == OUTPUT for sink in sinks(self.env))
+            except (OSError, ValueError, subprocess.SubprocessError):
+                return False
+            if present:
+                self.ready = True
+                return True
+            if not self.ready and time.monotonic() - self.started < 5:
+                return False
+            self.close()
+        args = {
+            "tunnel.mode": "sink", "pulse.server.address": self.server,
+            "target.object": target[1], "reconnect.interval.ms": 0,
+            "audio.channels": 2, "audio.position": ["FL", "FR"], "node.virtual": False,
+            "stream.props": {
+                "node.name": OUTPUT, "node.description": "Termux PulseAudio output",
+                "media.class": "Audio/Sink", "priority.session": 1000,
+            },
+        }
+        self.process = subprocess.Popen(
+            ["pw-cli", "--monitor", "load-module", "libpipewire-module-pulse-tunnel", json.dumps(args)],
+            env=self.backend, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL)
+        self.target = target
+        self.started = time.monotonic()
+        print(f"PulseAudio tunnel output: {target[1]} (sink {target[0]})", flush=True)
+        return False
 
 
 def supervise(server, cookie):
@@ -77,29 +153,13 @@ def supervise(server, cookie):
             shutil.copyfile(PREFIX / "share/pipewire" / filename, config / filename)
         dropins = config / "pipewire.conf.d"
         dropins.mkdir(exist_ok=True)
-        (dropins / "90-termux-output.conf").write_text('''context.modules = [
-  { name = libpipewire-module-pulse-tunnel
-    args = {
-      tunnel.mode = sink
-      pulse.server.address = %s
-      reconnect.interval.ms = 1000
-      audio.channels = 2
-      audio.position = [ FL FR ]
-      stream.props = {
-        node.name = "easyeffects_termux_output"
-        node.description = "Termux PulseAudio output"
-        media.class = "Audio/Sink"
-        node.virtual = false
-        priority.session = 1000
-      }
-    }
-  }
-]
-''' % json.dumps(server))
+        # Remove the daemon-owned tunnel left by earlier bridge versions.
+        (dropins / "90-termux-output.conf").unlink(missing_ok=True)
         daemon_env = dict(env, PIPEWIRE_CONFIG_DIR=str(config), PULSE_SERVER=server)
         if cookie:
             daemon_env["PULSE_COOKIE"] = cookie
         children = []
+        tunnel = PulseTunnel(env, server, cookie)
         stopped = False
 
         def stop(*_):
@@ -115,8 +175,7 @@ def supervise(server, cookie):
             # BlueZ or cameras; Android hardware is already behind PulseAudio.
             children.append(subprocess.Popen(["wireplumber", "--profile=policy"], env=env))
             children.append(subprocess.Popen(["pipewire-pulse"], env=dict(env, PIPEWIRE_CONFIG_DIR=str(config))))
-            wait_for(lambda: any(s["name"] == "easyeffects_termux_output" for s in sinks(env)),
-                     children, "PulseAudio tunnel")
+            wait_for(tunnel.refresh, children, "PulseAudio tunnel")
             # EasyEffects handles app redirection, avoiding a feedback loop through
             # its own virtual sink. Only select the logical tunnel in this private graph.
             wait_for(lambda: invoke(["pactl", "set-default-sink", "easyeffects_termux_output"],
@@ -137,11 +196,16 @@ def supervise(server, cookie):
             temporary = RECORD.with_suffix(".tmp")
             temporary.write_text(json.dumps(data))
             temporary.replace(RECORD)
+            next_check = time.monotonic() + 1
             while not stopped:
                 if any(child.poll() is not None for child in children):
                     raise RuntimeError("Audio process exited unexpectedly")
+                if time.monotonic() >= next_check:
+                    tunnel.refresh()
+                    next_check = time.monotonic() + 1
                 time.sleep(0.2)
         finally:
+            tunnel.close()
             for child in reversed(children):
                 if child.poll() is None:
                     child.terminate()

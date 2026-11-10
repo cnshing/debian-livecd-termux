@@ -18,6 +18,12 @@ PulseAudio-compatible frontend alone does not send PipeWire output to a second
 PulseAudio server: the explicit [Pulse tunnel module](https://docs.pipewire.org/page_module_pulse_tunnel.html)
 provides that connection.
 
+The bridge runs the tunnel in an owned `pw-cli` helper and follows the backend's
+default sink. When that sink disappears, changes, or returns under the same name,
+it replaces the helper without restarting PipeWire, EasyEffects or applications.
+There is a short audio gap while the replacement connects. This avoids PipeWire
+1.4's failing in-module reconnect loop after Bluetooth output removal.
+
 ## Build and install
 
 GitHub Actions cross-compiles them from two recipes,
@@ -34,6 +40,14 @@ The overlay also hides the stock EasyEffects launcher, which would bypass the br
 Run the conversion tests with `python tests/audio/test-autoeq.py`. CI runs them too. The sorting test,
 [`test-sort.cpp`](../../tests/audio/test-sort.cpp), needs Bionic, so compile it on the phone against
 LSP's patched `stdlib.cpp`.
+
+Host recovery and probe-cleanup checks are `tests/audio/test-bridge.py` and
+`tests/audio/test-verify-signal.py`. The on-device `verify-signal.py` requires a
+disposable bridge session: it temporarily selects a clocked backend null sink,
+waits for the tunnel to follow it, then measures that monitor and restores the
+previous backend default. This avoids undrained Bluetooth pipe sinks and keeps
+the test tones off physical outputs. It loads the installed extensionless
+`$PREFIX/bin/easyeffects-autoeq` directly, with a checkout fallback on the host.
 
 Packages built by the earlier on-device script are kept locally in the Git-ignored
 [`repo/incoming/`](../../repo/incoming).

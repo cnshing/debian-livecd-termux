@@ -13,7 +13,8 @@ source_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 repo=$(cd -- "$source_dir/../../.." && pwd)
 scripts=$repo/overlays/Browser/lb/hooks/normal/scripts
 . "$scripts/install-chrome-extensions.sh"
-. "$scripts/install-firefox-extensions.sh"
+# Upstream's copy installs Firefox extensions into Debian's /usr; Termux's Firefox reads $PREFIX.
+. <(sed "s|/usr/share/mozilla/|$PREFIX/share/mozilla/|" "$scripts/install-firefox-extensions.sh")
 export DEBIAN_FRONTEND=noninteractive
 
 test $# -gt 0 || set -- firefox chromium chrome
@@ -65,10 +66,9 @@ fi
 apt-get install -y --no-install-recommends $packages
 
 if wants firefox; then
-    extensions="$PREFIX/share/mozilla/extensions/{ec8030f7-c20a-464f-9b0e-13a3a9e97384}"
-    install_firefox_xpi 'uBlock0@raymondhill.net' 'uBlock Origin' "$extensions"
-    install_firefox_xpi '{446900e4-71c2-419f-a6a7-df9c091e268b}' 'Bitwarden' "$extensions"
-    install_firefox_xpi '78272b6fa58f4a1abaac99321d503a20@proton.me' 'Proton Pass' "$extensions"
+    install_firefox_xpi 'uBlock0@raymondhill.net' 'uBlock Origin'
+    install_firefox_xpi '{446900e4-71c2-419f-a6a7-df9c091e268b}' 'Bitwarden'
+    install_firefox_xpi '78272b6fa58f4a1abaac99321d503a20@proton.me' 'Proton Pass'
     # The live CD relies on Debian's value here: upstream's default leaves add-ons from
     # this directory disabled behind a prompt. Upstream also scans it only for a new profile
     # or a Firefox upgrade, which would miss these in a profile that already exists.

@@ -4,6 +4,7 @@ TERMUX_PKG_LICENSE="MIT"
 TERMUX_PKG_LICENSE_FILE="docs/license.rst"
 TERMUX_PKG_MAINTAINER="@cnshing"
 TERMUX_PKG_VERSION="27.0.0~devel20261029"
+TERMUX_PKG_REVISION=1
 TERMUX_PKG_SRCURL=https://codeload.github.com/lfdevs/mesa-for-android-container/tar.gz/eb3e7fd4f009cab04b1482aad4843c0bde28a786
 TERMUX_PKG_SHA256=123af0b3b2f7c83273a51f28367a64054201d524cbfa52f99ba76696e619927a
 TERMUX_PKG_AUTO_UPDATE=false
@@ -75,6 +76,14 @@ termux_step_make_install() {
 	cp -P "$stage$TERMUX_PREFIX"/lib/libgallium*.so* "$private/" 2>/dev/null || true
 	cp -P "$stage$TERMUX_PREFIX/lib/libtva_drm_shim_wayland.so" "$private/"
 	test -f "$private/dri/termuxva_drv_video.so"
+	# Chromium dlopens the desktop ABI names. Termux's Meson omits those
+	# soversions, so expose aliases only in the application's private search path.
+	install -d "$private/lib/va-client"
+	local library
+	for library in va va-drm va-x11; do
+		test -f "$TERMUX_PREFIX/lib/lib${library}.so"
+		ln -sf "../../../lib${library}.so" "$private/lib/va-client/lib${library}.so.2"
+	done
 	# libva names a driver after the DRM device, and the render node reports "kgsl". These links
 	# in libva's own driver directory let every program find it without settings.
 	ln -sf termuxva_drv_video.so "$private/dri/kgsl_drv_video.so"
@@ -94,7 +103,7 @@ termux_step_make_install() {
 		printf '226:128\n' > "$node/device/drm/renderD128/dev"
 	done
 	cat > "$private/manifest.json" <<-JSON
-		{"format": 1, "abi": "bionic", "libraries": [], "driver_directory": "dri",
+		{"format": 1, "abi": "bionic", "libraries": ["lib/va-client"], "driver_directory": "dri",
 		 "preloads": ["libtva_drm_shim_wayland.so"], "session_preload": "libandroid-vaapi-render-node.so",
 		 "ion_fallback": "built-in", "encoders": ["h264", "hevc"]}
 	JSON

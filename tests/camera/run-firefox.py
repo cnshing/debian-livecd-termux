@@ -7,7 +7,9 @@ Usage, inside the desktop session:
 Runs the desktop's `firefox` launcher from the session PATH with a temporary
 profile that allows camera access without asking. Passes when Firefox lists
 the front and rear cameras by name and streams each at 20 fps or more with a
-picture that is not uniform. Only rates and luma levels are reported.
+picture that is not uniform. System extensions are disabled in this disposable
+profile: their welcome tabs can hide the camera page and throttle its compositor.
+Only rates and luma levels are reported.
 """
 import os
 from pathlib import Path
@@ -22,6 +24,8 @@ import time
 
 PAGE = Path(__file__).resolve().parent / 'firefox-camera.html'
 PREFERENCES = {
+    'extensions.enabledScopes': '1',
+    'extensions.autoDisableScopes': '15',
     'media.navigator.permission.disabled': 'true',
     'media.navigator.streams.fake': 'false',
     'devtools.console.stdout.content': 'true',
@@ -75,7 +79,9 @@ def main():
     listed = next((l for l in lines if l.startswith('cameras ')), '')
     ok = 'Front camera' in listed and 'Rear camera' in listed
     print(f"{'PASS' if ok else 'FAIL'} Firefox lists both cameras: {listed or 'nothing'}")
-    results = [ok]
+    complete = 'done' in lines and not any(line.startswith('error') for line in lines)
+    print(f"{'PASS' if complete else 'FAIL'} Firefox camera test completed")
+    results = [ok, complete]
     for name in ('Front camera', 'Rear camera'):
         line = next((l for l in lines if l.startswith(f'stream "{name}')), '')
         match = re.search(r'fps ([\d.]+) mean ([\d.]+) spread ([\d.]+)', line)

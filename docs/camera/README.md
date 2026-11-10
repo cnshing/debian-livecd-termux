@@ -108,10 +108,22 @@ ioctls and buffer modes it lacks; `VIDIOC_S_PARM` does not change the rate.
 | --- | --- | --- |
 | [`test-camera-controller.py`](../../tests/camera/test-camera-controller.py) | Host, CI | Camera choice, helper environment, desktop preload and status, permission notice, and the supervisor's start, restart and cleanup against stand-in programs |
 | [`test-desktop-camera.py`](../../tests/camera/test-desktop-camera.py) | Inside the installed desktop: `livecd-native exec python …` | The desktop's preload in its own processes, status, discovery, PipeWire nodes and idle state; with `--stream`, each camera, switching both ways, release and both at once. It starts nothing of its own, so a missing integration fails it |
+| [`run-firefox.py`](../../tests/camera/run-firefox.py) | Inside the installed desktop | Both camera names, presented frame rates and luma levels in headless Firefox with a temporary profile and system extensions disabled |
 | [`test-v4l2-preload.sh`](../../tests/camera/test-v4l2-preload.sh) | Phone, private session | The installed binaries with negative controls, `libv4l2`, Chromium if present, and the preload's per-call cost |
 
 Camera tests record whoever is in front of the phone. They report frames only
 as rates, latency and luma levels, and keep no picture.
+
+The fresh-install investigation on 2026-11-10 found that Firefox's installed
+extensions can open welcome tabs in a fresh profile, hiding the camera page and
+throttling its frame callbacks. A synthetic 30 fps canvas stream reproduced the
+slowdown with no camera: the default extension profile reported a hidden page
+and 53 callbacks over 9 s; with external extension scopes disabled, the page was
+visible and delivered 162 callbacks over 8 s headless and 199 over 8 s on private
+Xvfb. `run-firefox.py` now disables those scopes only in its disposable profile,
+and the page rejects a hidden measurement. These synthetic results identify a
+harness problem; the acceptance session must rerun the real camera checks after
+the fix.
 
 ### Results
 

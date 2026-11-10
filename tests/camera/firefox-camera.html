@@ -19,6 +19,10 @@ async function measure(camera) {
   const track = stream.getVideoTracks()[0];
   video.srcObject = stream;
   await video.play();
+  if (document.hidden) {
+    track.stop();
+    throw new Error("Camera test page is hidden; a background page cannot measure presentation fps");
+  }
   let frames = 0;
   const counted = new Promise((resolve) => {
     const start = performance.now();

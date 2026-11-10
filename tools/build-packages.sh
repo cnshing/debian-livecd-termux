@@ -37,6 +37,8 @@ if $native; then
     mkdir -p "$HOME/.local/state/livecd"
     exec 8>"$HOME/.local/state/livecd/session.lock"
     flock -n 8 || { echo 'Stop the managed desktop before building native packages.' >&2; exit 2; }
+    # livecd-desktop's APT guard would otherwise take this lock for the running desktop's.
+    export LIVECD_SETUP_LOCKED=1
 fi
 # Validate package names and include this repository's dependencies before cloning.
 ordered=$("$python" "$repo/tools/recipes.py" order "$@")

@@ -61,12 +61,15 @@ in Files. See [session integrations](docs/native/README.md#session-integrations)
 ### Optional applications
 
 ```sh
-livecd-pkg list
-livecd-pkg install mixtapes     # or serein, ungoogled-chromium, ...
+apt list '?archive(^livecd$)'   # every package from this project's repository
+pkg install mixtapes            # or serein, ...
 ```
 
-`livecd-pkg` adds features and applications that the default installation leaves out. It works while
-the desktop runs, unless the installation would upgrade a library the desktop is using.
+`install.sh` adds this project's packages as an apt repository, so `pkg install` installs the
+applications that the default installation leaves out. It works while the desktop runs, unless it would
+replace an installed package the desktop may have loaded; then it stops before changing anything and
+asks you to run `livecd stop` first. ungoogled Chromium has its own installer; see the
+[browser guide](docs/browsers/README.md).
 
 ### Feature guides
 

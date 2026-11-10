@@ -86,6 +86,8 @@ def main():
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
             raise SystemExit('Stop the running desktop before applying overlays.')
+        # Tells livecd-desktop's APT guard, and the hooks, that this process holds the lock.
+        os.environ['LIVECD_SETUP_LOCKED'] = '1'
     overlays = [OVERLAYS / name for name in dict.fromkeys(names)]
     packages = [package for overlay in overlays for package in listed(overlay / 'packages/termux.yaml')]
     if packages:

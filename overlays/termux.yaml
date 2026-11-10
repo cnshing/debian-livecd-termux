@@ -1,10 +1,9 @@
 # Overlays that `install.sh` applies by default. This is Termux's counterpart to upstream's
 # os/config.yaml. Opt-in overlays are named on the command line, for example:
 #   bash install.sh "Music Player"
-#   livecd-pkg install mixtapes
 #
-# Android integrations are on by default. Opt-in overlays, also installable later with
-# `livecd-pkg install NAME`: Music Player, ungoogled-chromium
+# Android integrations are on by default. Optional applications are packages, installed
+# later with `pkg install NAME`, such as `pkg install mixtapes`.
 overlays:
 - Desktop Environment
 - Desktop Environment+Shell

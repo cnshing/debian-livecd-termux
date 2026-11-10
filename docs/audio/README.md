@@ -23,10 +23,11 @@ provides that connection.
 GitHub Actions cross-compiles them from two recipes,
 [`easyeffects`](../../packages/easyeffects/build.sh), whose `easyeffects-autoeq` subpackage holds the
 importer, and [`lsp-plugins-lv2`](../../packages/lsp-plugins-lv2/build.sh). Both check their source
-archive hashes and apply the included patches. `install.sh` installs them; on an existing installation:
+archive hashes and apply the included patches. `install.sh` installs them with the Audio Effects
+overlay, which is on by default. To add them back after removing them:
 
 ```sh
-livecd-pkg install easyeffects
+pkg install easyeffects easyeffects-autoeq
 ```
 
 The overlay also hides the stock EasyEffects launcher, which would bypass the bridge's private bus.

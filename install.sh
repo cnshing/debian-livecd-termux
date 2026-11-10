@@ -166,9 +166,10 @@ EOF
 else
     echo 'No supported GPU driver was set up; the desktop renders in software.'
 fi
-ln -sf "$repo/src/livecd-pkg" "$PREFIX/bin/livecd-pkg"
+# Earlier versions linked a livecd-pkg command here; pkg install replaces it.
+rm -f "$PREFIX/bin/livecd-pkg"
 python "$base/audit.py" > "$state/elf-audit.json"
 dpkg-query -W > "$state/host-packages.tsv"
 printf '\nNative GNOME installed. Start: livecd start\n'
 printf 'Validate: livecd validate; stop: livecd stop\n'
-printf 'Optional applications: livecd-pkg list\n'
+printf "Optional applications: apt list '?archive(^livecd\$)', then pkg install NAME\n"

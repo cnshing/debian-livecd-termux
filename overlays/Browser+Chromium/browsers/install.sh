@@ -59,6 +59,8 @@ if apt-get -s install --no-install-recommends $packages | grep -q '^Inst [^ ]* \
     # install.sh and apply-overlays.py already hold this lock when they run this as a hook.
     test -n "${LIVECD_SETUP_LOCKED:-}" || exec 9>"$HOME/.local/state/livecd/session.lock"
     test -n "${LIVECD_SETUP_LOCKED:-}" || flock -n 9 || { echo 'These packages upgrade shared libraries: stop the desktop first (livecd stop).' >&2; exit 2; }
+    # livecd-desktop's APT guard would otherwise take this lock for the running desktop's.
+    export LIVECD_SETUP_LOCKED=1
 fi
 apt-get install -y --no-install-recommends $packages
 

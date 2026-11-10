@@ -1,0 +1,63 @@
+#!@TERMUX_PREFIX@/bin/python
+"""APT runs this before dpkg changes anything, with the archives to install on stdin.
+
+The running desktop has the installed libraries loaded, so while it holds the session lock
+APT may add packages but not replace installed ones. `pkg install NAME` therefore works on a
+running desktop unless it would upgrade something, and then stops before anything changes.
+"""
+import fcntl
+import os
+from pathlib import Path
+import subprocess
+import sys
+
+
+def field(archive, name):
+    return subprocess.run(['dpkg-deb', '--field', archive, name], capture_output=True, text=True).stdout.strip()
+
+
+def installed_version(package):
+    result = subprocess.run(['dpkg-query', '--show', '--showformat=${db:Status-Status} ${Version}', package],
+                            capture_output=True, text=True)
+    status, _, version = result.stdout.partition(' ')
+    return version if result.returncode == 0 and status == 'installed' else None
+
+
+def desktop_running():
+    # install.sh and the overlay tools set this while they hold the lock themselves.
+    if os.environ.get('LIVECD_SETUP_LOCKED'):
+        return False
+    path = Path(os.environ.get('HOME', '')) / '.local/state/livecd/session.lock'
+    try:
+        lock = path.open('a')
+    except OSError:
+        return False
+    with lock:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            return True
+        return False
+
+
+def main():
+    # Read everything APT sends, whatever the outcome, so it never sees a broken pipe.
+    archives = [line.strip() for line in sys.stdin if line.strip().endswith('.deb')]
+    if not desktop_running():
+        return 0
+    replaced = []
+    for archive in archives:
+        package = field(archive, 'Package')
+        old = installed_version(package)
+        if old is not None and old != field(archive, 'Version'):
+            replaced.append(package)
+    if replaced:
+        print('The desktop is running, and this would replace installed packages it may have loaded: '
+              + ' '.join(replaced) + '\nStop it first with `livecd stop`, then run the command again.',
+              file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == '__main__':
+    sys.exit(main())

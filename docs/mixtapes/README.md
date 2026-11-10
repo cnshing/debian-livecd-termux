@@ -20,11 +20,12 @@ a pinned upstream commit, verifies its SHA-256 and applies the patches. To insta
 repository, run this in native Termux:
 
 ```sh
-livecd-pkg install mixtapes
+pkg install mixtapes
 ```
 
-`livecd-pkg install mixtapes` also adds Termux's glibc repository, glibc and its OpenSSL, which
-uploaded songs need. Everything else works without them.
+It also installs glibc and its OpenSSL, which uploaded songs need, as recommended packages from
+Termux's glibc repository. The default installation enables that repository for Google Chrome.
+Everything else works without them.
 
 > **What was tested:** every result below comes from a binary built on the phone by
 > an earlier on-phone build script, since removed. The

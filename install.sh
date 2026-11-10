@@ -11,54 +11,12 @@ mkdir -p "$HOME/.local/state/livecd"
 exec > >(tee -a "$HOME/.local/state/livecd/install.log") 2>&1
 echo "=== install.sh $(date '+%F %T') $*"
 trap 'echo "install.sh stopped at line $LINENO. The log is ~/.local/state/livecd/install.log." >&2' ERR
-# The desktop's Android integrations need these apps. Termux cannot install them, so name what is missing.
-missing=
-for app in com.termux.x11=Termux:X11 com.termux.api=Termux:API moe.shizuku.privileged.api=Shizuku; do
-    /system/bin/pm path "${app%%=*}" >/dev/null 2>&1 || missing="$missing ${app#*=}"
-done
-test -z "$missing" || { echo "Install these Android apps first:$missing. See README.md." >&2; exit 2; }
-shizuku=$HOME/.local/lib/shizuku
-# The first run finds Shizuku's rish export in shared storage, so it asks Android for access with
-# termux-setup-storage. Later runs already have rish, which grants storage below.
-if ! test -f "$shizuku/rish_shizuku.dex" && ! test -r /sdcard/Android; then
-    termux-setup-storage || true
-    for _ in $(seq 60); do test -r /sdcard/Android && break; sleep 1; done
-    test -r /sdcard/Android || { echo 'Allow Termux storage access, then run this again.' >&2; exit 2; }
-fi
-if ! test -f "$shizuku/rish_shizuku.dex"; then
-    # find reports Android's unreadable app directories as a failure.
-    exported=$(find /sdcard/ -maxdepth 3 -name rish_shizuku.dex -printf '%h\n' 2>/dev/null | head -n 1 || true)
-    if test -z "$exported" || ! test -f "$exported/rish"; then
-        echo 'In Shizuku, choose "Use Shizuku in terminal apps", export the files to shared storage, then run this again.' >&2
-        exit 2
-    fi
-    install -d -m 700 "$shizuku"
-    install -m 700 "$exported/rish" "$shizuku/rish"
-    install -m 400 "$exported/rish_shizuku.dex" "$shizuku/rish_shizuku.dex"
-fi
-rish() { RISH_APPLICATION_ID=com.termux RISH_PRESERVE_ENV=0 timeout 30 "$shizuku/rish" -c "$*" </dev/null; }
-# Shizuku+ may print a waiting notice before the answer, and its first calls after a pause
-# can return nothing.
-for attempt in $(seq 10); do
-    case $(rish id 2>/dev/null || true) in *uid=2000\(shell\)*) break;; esac
-    if test "$attempt" = 10; then
-        echo 'Shizuku did not answer. Start Shizuku and allow Termux under its authorized apps, then run this again.' >&2
-        exit 2
-    fi
-    sleep 2
-done
-# Termux:API shares Termux's user ID, so its microphone and camera permissions cover the desktop's
-# processes.
-rish pm grant com.termux.api android.permission.RECORD_AUDIO
-rish pm grant com.termux.api android.permission.CAMERA
-# Files and the desktop's storage mounts read and write shared storage. Android can withdraw the
-# read permission on its own, as the app-op, so set both the permission and the app-op.
-for permission in READ_EXTERNAL_STORAGE WRITE_EXTERNAL_STORAGE; do
-    rish pm grant com.termux android.permission.$permission
-    rish appops set com.termux $permission allow
-done
-# Android otherwise stops a backgrounded desktop to save battery.
-rish dumpsys deviceidle whitelist +com.termux >/dev/null
+# Grant what Shizuku can, then report each feature whose Android app or permission is missing.
+# Only a missing Termux:X11 stops the installation; the other features stay off until fixed.
+preflight=0
+bash "$repo/src/preflight.sh" --grant > "$HOME/.local/state/livecd/preflight.txt" || preflight=$?
+cat "$HOME/.local/state/livecd/preflight.txt"
+test "$preflight" = 0 || exit 2
 release=https://github.com/cnshing/debian-livecd-termux/releases/latest/download
 tarball_name=livecd-termux-repo-aarch64.tar.gz
 tarball=
@@ -173,3 +131,5 @@ dpkg-query -W > "$state/host-packages.tsv"
 printf '\nNative GNOME installed. Start: livecd start\n'
 printf 'Validate: livecd validate; stop: livecd stop\n'
 printf "Optional applications: apt list '?archive(^livecd\$)', then pkg install NAME\n"
+# Repeat what the preflight found, which the package output has scrolled away.
+if grep -q '^  WARN' "$common/preflight.txt"; then echo; cat "$common/preflight.txt"; fi

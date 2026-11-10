@@ -72,6 +72,8 @@ jobs:
       run: python3 tests/packaging/test-packaging.py
     - name: Test the APT guard for a running desktop
       run: python3 tests/packaging/test-apt-session-guard.py
+    - name: Test the installer's Android preflight
+      run: python3 tests/packaging/test-preflight.py
     - name: Test network discovery integration
       run: python3 tests/packaging/test-network-discovery.py
     - name: Test Android storage mount discovery

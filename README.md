@@ -20,7 +20,25 @@ with the standard `com.termux` prefix; other devices and Android versions need t
 
 Everything else is automatic. `install.sh` asks Android for storage access (accept the prompt), and
 through Shizuku it grants Termux:API's microphone and camera permissions, which cover Termux, and
-exempts Termux from battery optimization. It stops with the step to take when an app or permission is missing.
+exempts Termux from battery optimization.
+
+Before it downloads anything, `install.sh` reports each feature whose app or permission is missing,
+with the step that fixes it. Only a missing Termux:X11 stops it; any other feature stays off until
+fixed, and the rest of the desktop works. Run `bash debian-livecd-termux/src/preflight.sh` to check
+again later, such as after changing a permission in Android Settings, or add `--grant` to grant
+through Shizuku again.
+
+| Feature | Needs |
+| --- | --- |
+| The desktop | Termux:X11 (stops the installation) |
+| GPU rendering, hardware video | A Qualcomm Adreno GPU; otherwise software rendering |
+| Phone microphone | Termux:API, with its Microphone permission |
+| Bluetooth headset microphone | The microphone's permission, Shizuku, and the headset paired with **Calls** enabled |
+| Front and rear cameras | Termux:API, with its Camera permission |
+| Battery status | Termux:API |
+| Internal storage, SD card, USB drives in Files | Termux's storage permission |
+| Whole-device CPU and processes in Mission Center | Shizuku |
+| The desktop keeps running in the background | Termux exempt from battery optimization |
 
 ## Install
 

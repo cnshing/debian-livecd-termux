@@ -151,7 +151,7 @@ guest applications -> guest pipewire-pulse/PipeWire -> EasyEffects
 
 PipeWire's [Pulse tunnel module](https://docs.pipewire.org/page_module_pulse_tunnel.html) supplies the guest-to-host link. Start the needed user processes and configure routing without assuming ALSA hardware exists in the guest. Crucially, guest applications must connect to the guest processing graph; pointing them straight at the Termux server bypasses the EQ. This combined configuration still requires device testing.
 
-Keep [opra2ee.py](../overlays/Audio%20Effects/lb/hooks/normal/scripts/opra2ee.py) when the chosen EasyEffects preset format matches. The preset conversion itself is ordinary userland work. A lighter alternative is PipeWire's [parametric equalizer module](https://docs.pipewire.org/page_module_parametric_equalizer.html), which accepts AutoEQ-style filter data; reformatting the existing filters would be an additional small conversion task, not direct reuse of EasyEffects JSON.
+Keep [opra2ee.py](../packages/easyeffects/opra2ee.py) when the chosen EasyEffects preset format matches. The preset conversion itself is ordinary userland work. A lighter alternative is PipeWire's [parametric equalizer module](https://docs.pipewire.org/page_module_parametric_equalizer.html), which accepts AutoEQ-style filter data; reformatting the existing filters would be an additional small conversion task, not direct reuse of EasyEffects JSON.
 
 The reasonable regression is manual headphone/preset selection and processing of guest audio only. Automatic recognition of whatever Bluetooth/USB headset Android selected remains a separate bridge. Use Android EQ if it covers the desired playback paths more simply.
 

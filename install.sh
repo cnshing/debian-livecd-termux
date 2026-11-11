@@ -75,12 +75,18 @@ printf 'deb [trusted=yes] file://%s livecd main\n' "$repo/repo" > "$PREFIX/etc/a
 # Our builds carry the Android patches, so a same-named package from Termux's mirrors must not
 # replace them, even at a newer version. Libraries the builder compiled along the way, such as
 # libexpat, are not pinned: Termux's newer releases of those win, and ours remain a fallback.
-ours=$(for recipe in "$repo"/packages/*/; do
-    basename "$recipe"
-    for subpackage in "$recipe"*.subpackage.sh; do
-        if test -e "$subpackage"; then basename "$subpackage" .subpackage.sh; fi
-    done
-done | tr '\n' ' ')
+# CI lists them in the tarball (tools/recipes.py pins), with the subpackages Termux's recipes add to
+# ours. Older tarballs lack the list, so name the recipes here then.
+if test -f "$repo/repo/pins"; then
+    ours=$(tr '\n' ' ' < "$repo/repo/pins")
+else
+    ours=$(for recipe in "$repo"/packages/*/; do
+        basename "$recipe"
+        for subpackage in "$recipe"*.subpackage.sh; do
+            if test -e "$subpackage"; then basename "$subpackage" .subpackage.sh; fi
+        done
+    done | tr '\n' ' ')
+fi
 printf 'Package: %s\nPin: release n=livecd\nPin-Priority: 1001\n' "$ours" > "$PREFIX/etc/apt/preferences.d/livecd"
 # An offline tarball also holds, as suite termux, every Termux package the installation can need.
 # apt, and every hook it starts, then reads only the two local suites, with a package list of their

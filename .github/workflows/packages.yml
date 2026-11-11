@@ -392,10 +392,24 @@ jobs:
         if test -n "$(find debs -name 'android-firefox-video_*.deb' -print -quit)"; then
           python3 tests/packaging/check-browser-video-artifacts.py debs
         fi
+    # What the pin list and the offline packages need from the pinned builder: the recipes' subpackage
+    # files, its keyring and its bootstrap script.
+    - uses: actions/checkout@v7
+      with:
+        repository: termux/termux-packages
+        ref: ${{ needs.plan.outputs.revision }}
+        path: termux-packages
+        sparse-checkout: |
+          x11-packages/*/*.subpackage.sh
+          packages/termux-keyring/
+          scripts/generate-bootstraps.sh
+        sparse-checkout-cone-mode: false
     - name: Build the apt repository
       run: |
         command -v apt-ftparchive >/dev/null || { sudo apt-get update; sudo apt-get install --yes apt-utils; }
         tools/make-apt-repo.sh debs repo
+        # install.sh pins these to suite livecd.
+        python3 tools/recipes.py pins termux-packages > repo/pins
     - name: Build the net tarball
       if: needs.plan.outputs.net == 'true'
       run: |
@@ -412,16 +426,6 @@ jobs:
 
     # Offline: this project's packages plus every Termux package an installation can need, from
     # Termux's current repositories. tools/offline-repo.py has the rules.
-    - uses: actions/checkout@v7
-      if: needs.plan.outputs.offline == 'true'
-      with:
-        repository: termux/termux-packages
-        ref: ${{ needs.plan.outputs.revision }}
-        path: termux-packages
-        sparse-checkout: |
-          packages/termux-keyring
-          scripts/generate-bootstraps.sh
-        sparse-checkout-cone-mode: false
     # Termux keeps each package file until it is superseded, so last run's downloads are mostly still
     # current, and apt fetches only the rest. One entry is kept: it holds about 800 MB, and the build
     # caches already take most of the repository's 10 GB.

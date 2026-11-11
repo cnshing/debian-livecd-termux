@@ -39,6 +39,25 @@ class Seeds(unittest.TestCase):
     def test_recipes_are_pinned(self):
         self.assertIn('livecd-desktop', offline.ours())
 
+    def test_upstream_subpackages_are_pinned(self):
+        """Termux's newer code-is-code-oss would otherwise demand its own newer code-oss."""
+        spec = importlib.util.spec_from_file_location('recipes', ROOT / 'tools/recipes.py')
+        recipes = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(recipes)
+        with tempfile.TemporaryDirectory() as directory:
+            checkout = Path(directory)
+            for relative in ('code-oss/code-is-code-oss.subpackage.sh', 'unrelated/other.subpackage.sh'):
+                (checkout / 'x11-packages' / relative).parent.mkdir(parents=True)
+                (checkout / 'x11-packages' / relative).touch()
+            names = recipes.pins(checkout)
+            repo = checkout / 'repo'
+            repo.mkdir()
+            (repo / 'pins').write_text('\n'.join(names))
+            self.assertEqual(offline.ours(repo), names)
+        self.assertIn('code-is-code-oss', names)
+        self.assertNotIn('other', names)
+        self.assertTrue(set(offline.ours()) <= set(names))
+
 
 @unittest.skipUnless(shutil.which('apt-ftparchive') and shutil.which('dpkg-deb'), 'needs apt-utils and dpkg')
 class SecondSuite(unittest.TestCase):

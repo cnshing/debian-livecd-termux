@@ -5,9 +5,9 @@ TERMUX_PKG_MAINTAINER="@cnshing"
 # Built from the same release as Termux's gst-plugins-bad, which leaves the va
 # plugin out. Only the files that package lacks are installed: libgstva-1.0
 # and the plugin itself, which links that package's libgstcodecs-1.0.
-TERMUX_PKG_VERSION="1.28.8"
+TERMUX_PKG_VERSION="1.28.9"
 TERMUX_PKG_SRCURL=https://gstreamer.freedesktop.org/src/gst-plugins-bad/gst-plugins-bad-${TERMUX_PKG_VERSION}.tar.xz
-TERMUX_PKG_SHA256=670d888bde8242579b0d8e91f60cf337aa7be20ca7c315ebfbdd6e5a9218d104
+TERMUX_PKG_SHA256=4a4e0b7bf84f868378c48f143a7ac3a98923b488a5b74f1a35ba46bc3c43f6b1
 TERMUX_PKG_DEPENDS="glib, gst-plugins-bad (= ${TERMUX_PKG_VERSION}), gst-plugins-base, gstreamer, libdrm, libva"
 # Renamed from livecd-gst-va.
 TERMUX_PKG_CONFLICTS="livecd-gst-va"

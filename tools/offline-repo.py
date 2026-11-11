@@ -15,7 +15,8 @@ from an empty dpkg database, so nothing is assumed installed. It resolves:
   - then each opt-in overlay, and each package of this project's, alone, with Recommends, as
     `pkg install NAME` would.
 What that downloads becomes suite termux, beside livecd. install.sh switches to these two suites
-alone when it finds dists/termux. A failure in the first transaction fails; one in the rest warns.
+alone when it finds dists/termux. Anything that does not resolve fails the run, as the tarball
+would then not install it.
 """
 import argparse
 from pathlib import Path
@@ -64,8 +65,10 @@ def bootstrap(termux):
     return sorted(names)
 
 
-def ours():
-    """The names install.sh pins to suite livecd."""
+def ours(repo=None):
+    """The names install.sh pins to suite livecd: the tarball's list, or else the recipes'."""
+    if repo and (repo / 'pins').is_file():
+        return (repo / 'pins').read_text().split()
     names = []
     for recipe in sorted((ROOT / 'packages').iterdir()):
         if recipe.is_dir():
@@ -101,7 +104,7 @@ def main():
         shutil.copy(key, etc / 'trusted.gpg.d')
     (etc / 'sources.list').write_text(f'deb [trusted=yes] file:{repo} livecd main\n'
                                       f'deb {args.main} stable main\ndeb {args.x11} x11 main\ndeb {GLIBC}\n')
-    (etc / 'preferences.d/livecd').write_text(f'Package: {" ".join(ours())}\nPin: release n=livecd\nPin-Priority: 1001\n')
+    (etc / 'preferences.d/livecd').write_text(f'Package: {" ".join(ours(repo))}\nPin: release n=livecd\nPin-Priority: 1001\n')
     (work / 'status').touch()
     apt = ['apt-get', '-q', '-y', '-o', f'Dir={work}/', '-o', f'Dir::State::status={work}/status',
            '-o', f'Dir::State::Lists={work}/lists', '-o', f'Dir::Cache::Archives={debs}',
@@ -146,8 +149,10 @@ def main():
         if not resolve(names):
             failed.append(label)
     for label in failed:
-        print(f'::warning::{label} cannot be installed from the current Termux repositories; '
-              'the offline repository leaves it out.')
+        print(f'::error::{label} cannot be installed from the current Termux repositories, '
+              'usually because a dependency it needs exactly moved on: rebuild it against the new version.')
+    if failed:
+        raise SystemExit(1)
 
     # Packages from the file: source stay where they are, so the downloads are only Termux's. A cached
     # download that nothing chose this time is dropped, from the cache as well as from the repository.

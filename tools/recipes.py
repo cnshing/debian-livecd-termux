@@ -9,6 +9,7 @@
   recipes.py order NAME...            Print packages and local dependencies in build order.
   recipes.py host-packages NAME...    Print the build-machine packages a cross build of NAME needs.
   recipes.py config                   Print the builder revision and image for CI.
+  recipes.py pins CHECKOUT            Print every package name the recipes build, for install.sh's pin.
 """
 import argparse
 import hashlib
@@ -219,6 +220,20 @@ def prepare_builder(checkout):
     print('Staged', len(all_names()), 'recipes at', revision)
 
 
+def pins(checkout):
+    """Each recipe's package and subpackages, including those of Termux's x11-packages recipe that
+    prepare_builder keeps beside ours, as code-oss keeps code-is-code-oss. Pinning these too keeps
+    Termux's newer build of a subpackage from demanding its own newer main package."""
+    names = []
+    for name in all_names():
+        metadata = PACKAGES / name / 'upstream.json'
+        removed = set(json.loads(metadata.read_text()).get('remove_files', {})) if metadata.is_file() else set()
+        upstream = {path.name for path in (Path(checkout) / 'x11-packages' / name).glob('*.subpackage.sh')} - removed
+        subpackages = upstream | {path.name for path in (PACKAGES / name).glob('*.subpackage.sh')}
+        names += [name] + sorted(subpackage[:-len('.subpackage.sh')] for subpackage in subpackages)
+    return names
+
+
 def install_output(directory, names):
     """Install completed package artifacts rather than copying over installed files."""
     names = list(names)
@@ -302,6 +317,7 @@ def main():
     commands.add_parser('order').add_argument('names', nargs='+')
     commands.add_parser('host-packages').add_argument('names', nargs='+')
     commands.add_parser('config')
+    commands.add_parser('pins').add_argument('checkout')
     installer = commands.add_parser('install-output')
     installer.add_argument('directory')
     installer.add_argument('names', nargs='+')
@@ -324,6 +340,8 @@ def main():
         config = json.loads(BUILD_CONFIG.read_text())
         print('revision=' + config['revision'])
         print('image=' + config['image'])
+    elif args.command == 'pins':
+        print('\n'.join(pins(args.checkout)))
     elif args.command == 'install-output':
         install_output(args.directory, checked(args.names))
     else:

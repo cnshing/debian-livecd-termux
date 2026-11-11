@@ -81,35 +81,45 @@ tabs, as on the live CD.
 
 ## How the extensions are installed
 
-This is the live CD's process, using the same scripts:
-[`install-chrome-extensions.sh`](../../overlays/Browser/lb/hooks/normal/scripts/install-chrome-extensions.sh)
-and [`install-firefox-extensions.sh`](../../overlays/Browser/lb/hooks/normal/scripts/install-firefox-extensions.sh).
-They gained one optional argument and now respect `$TMPDIR`, which doesn't change the image
-build. The extension IDs are the ones in [`os/config.yaml`](https://github.com/cnshing/debian-livecd/blob/cd769287d6511b90d54ad7682416b201e4c44e2f/os/config.yaml).
+Extensions are ordinary APT packages from this repository. Their recipes pin the signed
+CRX or XPI URL, version and SHA-256 checksum; setup does not fetch the latest extension
+from a store. Update a recipe's pin and rebuild to ship a new bootstrap version.
+Browser-managed extension updates remain enabled.
 
-| Browser | Live CD directory | Directory here |
+| Extension | Chromium package | Firefox package |
 | --- | --- | --- |
-| Firefox | `/usr/share/mozilla/extensions/{ec8030f7-…}` | `$PREFIX/share/mozilla/extensions/{ec8030f7-…}` |
-| Chromium | `/usr/share/chromium/extensions` | `$PREFIX/opt/livecd-browsers/chromium-extensions`; Termux's build: `$PREFIX/lib/chromium/extensions` |
-| Google Chrome | `/opt/google/chrome/extensions` | `$PREFIX/opt/google/chrome/extensions` |
-| ungoogled Chromium | Debian package | `$PREFIX/opt/livecd-browsers/ungoogled-chromium-extensions` |
+| uBlock Origin Lite | `webext-ublock-origin-lite-chromium` | `webext-ublock-origin-lite-firefox` |
+| uBlock Origin | — | `webext-ublock-origin-firefox` |
+| Bitwarden | `webext-bitwarden-chromium` | `webext-bitwarden-firefox` |
+| Proton Pass | `webext-proton-pass-chromium` | `webext-proton-pass-firefox` |
 
-Chromium reads these from an `extensions` directory beside its binary. Each pinned build's
-directory links there, so the extensions survive an update to a new build.
+The default Firefox setup keeps full uBlock Origin. Lite is available separately with
+`pkg install webext-ublock-origin-lite-firefox`; choose one blocker in the browser.
+The browser installer selects the appropriate packages for the browsers requested.
+The Chromium packages support Chromium, Google Chrome and ungoogled Chromium without
+requiring all three browsers to be installed.
 
-These apply to every profile. Firefox also needs two settings, written to
-`$PREFIX/lib/firefox/browser/defaults/preferences/livecd-extensions.js`. `extensions.autoDisableScopes` takes
-Debian's value, because upstream's default leaves these add-ons disabled behind a prompt.
-`extensions.startupScanScopes` makes Firefox check this directory at each start, because
-upstream only does so for a new profile or a Firefox upgrade. To remove an extension, delete
-its `<id>.crx` and `<id>.json`, or `<id>.xpi`, then remove it in the browser.
+| Browser | Package-owned registration directory under `$PREFIX` |
+| --- | --- |
+| Firefox | `share/mozilla/extensions/{ec8030f7-c20a-464f-9b0e-13a3a9e97384}` |
+| Chromium | `lib/chromium/extensions` and `opt/livecd-browsers/chromium-extensions` |
+| Google Chrome | `opt/google/chrome/extensions` |
+| ungoogled Chromium | `opt/livecd-browsers/ungoogled-chromium-extensions` |
 
-Both Chromium builds use uBlock Origin Lite because Google's update server no longer offers
-full uBlock Origin at this version: it answers `204`, nothing to install. The live CD's
-ungoogled-chromium gets the full extension from a Debian package instead.
+Each Chromium package stores its signed CRX once under `$PREFIX/share/webext`, with a
+CRX link and external-extension JSON in each browser's directory. These directories
+survive updates of the browser binaries. Firefox packages install the signed XPI directly.
 
-The native desktop's setup also places a pinned uBlock Origin in its private Firefox profile.
-Firefox loads that copy for that profile, in place of the system one.
+`webext-firefox-common` owns the loading preferences in
+`$PREFIX/lib/firefox/browser/defaults/preferences/livecd-extensions.js`.
+`extensions.autoDisableScopes=3` enables distribution add-ons, and
+`extensions.startupScanScopes=8` scans for installed packages on each start.
+To remove a bootstrap, run `pkg uninstall PACKAGE`, then remove the extension in the
+browser if it has retained a profile copy.
+
+Setup backs up the old hook's unchanged Firefox uBlock 1.67.0 bootstrap under
+`~/.local/state/livecd-native/runtime-backups`. Copies already updated by Firefox or
+installed by the user are preserved and can take precedence over the packaged bootstrap.
 
 ## How Google Chrome runs here
 

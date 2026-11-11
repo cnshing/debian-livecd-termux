@@ -1,0 +1,15 @@
+TERMUX_PKG_HOMEPAGE=https://github.com/gorhill/uBlock
+TERMUX_PKG_DESCRIPTION="uBlock Origin Lite for Chromium, Google Chrome and ungoogled Chromium"
+TERMUX_PKG_LICENSE="GPL-3.0-only"
+TERMUX_PKG_MAINTAINER="@cnshing"
+TERMUX_PKG_VERSION="2026.1110.1816"
+TERMUX_PKG_SRCURL="https://clients2.googleusercontent.com/crx/blobs/ARGaeZK1zEchf7mNslVwmgsMkLvWz57QtZ-hIf9KmrdEuPJzarqJg5KI6TzQ5fs5Yq9aLKo61R6_XKBQ2538VdnMQWqSv5wner4CpCD_8gU8DxY9pQQ2wTtr9tjI1pAkrCVWAMZSmuXdZhuwHc0UmR8nl2b6kGKyttZeIg/DDKJIAHEJLHFCAFBDDMGIAHCPHECMPFH_2026_1110_1816_0.crx"
+TERMUX_PKG_SHA256=f830f9b2ac6c40dce7f193717fd286a4c966e8999018d5a3e75998d81751bb8a
+TERMUX_PKG_SKIP_SRC_EXTRACT=true
+TERMUX_PKG_PLATFORM_INDEPENDENT=true
+TERMUX_PKG_BUILD_IN_SRC=true
+TERMUX_PKG_AUTO_UPDATE=false
+
+_WEBEXT_ID='ddkjiahejlhfcafbddmgiahcphecmpfh'
+_WEBEXT_BROWSER=chromium
+source "$(dirname -- "${BASH_SOURCE[0]}")/webext.sh"

@@ -1,20 +1,15 @@
 #!/data/data/com.termux/files/usr/bin/bash
 # Install Firefox, Chromium and Google Chrome, and optionally ungoogled Chromium, on native
-# Termux, with the live CD's extensions, using the live CD's own extension scripts. Nothing
+# Termux, with extensions supplied by this repository's webext packages. Nothing
 # runs under PRoot. All of them use the GPU and Android's hardware video.
 # Usage: install.sh [firefox] [chromium] [chrome] [ungoogled-chromium]
 #        (default: firefox chromium chrome)
 # Rerun to update Chrome and the pinned ungoogled Chromium build, which apt does not manage
-# here, and the extension files.
+# here. APT manages extension updates.
 set -eu
 test "${PREFIX:-}" = /data/data/com.termux/files/usr || { echo 'Run this script in native Termux (com.termux).' >&2; exit 2; }
 test "$(dpkg --print-architecture)" = aarch64 || { echo 'Google publishes Chrome for arm64 only, and this port is tested on aarch64.' >&2; exit 2; }
 source_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
-repo=$(cd -- "$source_dir/../../.." && pwd)
-scripts=$repo/overlays/Browser/lb/hooks/normal/scripts
-. "$scripts/install-chrome-extensions.sh"
-# Upstream's copy installs Firefox extensions into Debian's /usr; Termux's Firefox reads $PREFIX.
-. <(sed "s|/usr/share/mozilla/|$PREFIX/share/mozilla/|" "$scripts/install-firefox-extensions.sh")
 export DEBIAN_FRONTEND=noninteractive
 
 test $# -gt 0 || set -- firefox chromium chrome
@@ -24,24 +19,11 @@ done
 wants() { case " $selected " in *" $1 "*) return 0;; *) return 1;; esac; }
 selected=" $* "
 
-# The hook asks dpkg for the version, and dpkg cannot see Chrome or Termux's chromium name.
-chrome_prodversion() { printf '%s\n' "$browser_major"; }
-
-# IDs match upstream's os/config.yaml. Both Chromium builds get uBlock Origin Lite because Google's
-# update server answers 204, nothing to install, when asked for full uBlock Origin at
-# this version. The live CD's ungoogled-chromium gets the full one from a Debian package.
-install_chromium_extensions() {
-    for entry in 'ddkjiahejlhfcafbddmgiahcphecmpfh uBlock Origin Lite' \
-                 'nngceckbapebfimnlniiiahkandclblb Bitwarden' \
-                 'ghmbeldphafepmbegfdlkpapadhbakde Proton Pass'; do
-        install_crx "${entry%% *}" "${entry#* }" "$1"
-        # install_crx only warns, so that one bad extension does not stop an image build.
-        test -f "$1/${entry%% *}.crx" || { echo "Missing extension: ${entry#* }" >&2; exit 1; }
-    done
-}
-
-packages="curl unzip jq"
-wants firefox && packages="$packages firefox"
+packages=""
+wants firefox && packages="$packages firefox webext-ublock-origin-firefox webext-bitwarden-firefox webext-proton-pass-firefox"
+if wants chromium || wants chrome || wants ungoogled-chromium; then
+    packages="$packages webext-ublock-origin-lite-chromium webext-bitwarden-chromium webext-proton-pass-chromium"
+fi
 wants chromium && packages="$packages chromium"
 # Chrome's GPU and video stack, and the loader that runs it, are packages from this repository.
 wants chrome && packages="$packages gnupg patchelf desktop-file-utils openssl-tool bionilux android-vaapi-glibc termux-va"
@@ -65,24 +47,7 @@ if apt-get -s install --no-install-recommends $packages | grep -q '^Inst [^ ]* \
 fi
 apt-get install -y --no-install-recommends $packages
 
-if wants firefox; then
-    install_firefox_xpi 'uBlock0@raymondhill.net' 'uBlock Origin'
-    install_firefox_xpi '{446900e4-71c2-419f-a6a7-df9c091e268b}' 'Bitwarden'
-    install_firefox_xpi '78272b6fa58f4a1abaac99321d503a20@proton.me' 'Proton Pass'
-    # The live CD relies on Debian's value here: upstream's default leaves add-ons from
-    # this directory disabled behind a prompt. Upstream also scans it only for a new profile
-    # or a Firefox upgrade, which would miss these in a profile that already exists.
-    # This directory is the one that loads after, and so overrides, Firefox's own defaults.
-    mkdir -p "$PREFIX/lib/firefox/browser/defaults/preferences"
-    cat > "$PREFIX/lib/firefox/browser/defaults/preferences/livecd-extensions.js" <<'EOF'
-pref("extensions.autoDisableScopes", 3);
-pref("extensions.startupScanScopes", 8);
-EOF
-fi
-
 if wants chromium; then
-    browser_major=$(dpkg-query -W -f='${Version}' chromium | cut -d. -f1)
-    install_chromium_extensions "$PREFIX/lib/chromium/extensions"
     # Termux's recipe fills in placeholder names upstream has since renamed, which leaves
     # this menu entry unable to start. An upgrade restores the file; rerunning repairs it.
     sed -i -e "s|@@desktop_exec|$PREFIX/bin/chromium-browser|" -e 's|@@startup_wm_class|chromium|' \
@@ -98,8 +63,6 @@ if wants chrome; then
     fi
     python "$source_dir/install-chrome.py"
     python "$source_dir/install-native-video.py"
-    browser_major=$(cut -d. -f1 "$PREFIX/opt/google/chrome/INSTALLED_VERSION")
-    install_chromium_extensions "$PREFIX/opt/google/chrome/extensions"
 fi
 
 # This repository's chromium package is built with VA-API, which Termux's compiles out.
@@ -108,8 +71,6 @@ if wants ungoogled-chromium; then
     if [ -f "$PREFIX/lib/android-vaapi-glibc/manifest.json" ] ||
        [ -f "$HOME/.local/opt/livecd-native/acceleration/glibc/manifest.json" ]; then
         python "$source_dir/install-chromium.py" ungoogled-chromium --activate
-        browser_major=$(jq -r '.browsers["ungoogled-chromium"].version' "$source_dir/chromium-prebuilt.lock.json" | cut -d. -f1)
-        install_chromium_extensions "$PREFIX/opt/livecd-browsers/ungoogled-chromium-extensions"
     else
         echo 'ungoogled-chromium needs the shared GPU stack: run install.sh chrome ungoogled-chromium.' >&2; exit 2
     fi

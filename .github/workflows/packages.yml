@@ -38,9 +38,9 @@ on:
   push:
     tags: ["v*"]
     branches: [main]
-    paths: ["packages/**", "src/**", "tools/recipes.py", "tools/termux-build.json", "tests/packaging/*nautilus*", ".github/workflows/packages.yml"]
+    paths: ["packages/**", "src/**", "tools/recipes.py", "tools/termux-build.json", "tests/packaging/*nautilus*", "tests/packaging/test-webext.py", ".github/workflows/packages.yml"]
   pull_request:
-    paths: ["packages/**", "src/**", "tools/recipes.py", "tools/termux-build.json", "tests/packaging/*nautilus*", ".github/workflows/packages.yml"]
+    paths: ["packages/**", "src/**", "tools/recipes.py", "tools/termux-build.json", "tests/packaging/*nautilus*", "tests/packaging/test-webext.py", ".github/workflows/packages.yml"]
 
 permissions:
   contents: read
@@ -74,6 +74,8 @@ jobs:
       run: python3 tests/mic/test-bluetooth.py
     - name: Test packaging and profile integration
       run: python3 tests/packaging/test-packaging.py
+    - name: Test packaged browser extensions
+      run: python3 tests/packaging/test-webext.py
     - name: Test packaged Firefox video selection and software fallback
       run: python3 tests/packaging/test-firefox-video.py
     - name: Test Nautilus ICU artifact validation

@@ -1,0 +1,17 @@
+TERMUX_PKG_HOMEPAGE=https://bitwarden.com/
+TERMUX_PKG_DESCRIPTION="Bitwarden for Chromium, Google Chrome and ungoogled Chromium"
+TERMUX_PKG_LICENSE="GPL-3.0-only, custom"
+TERMUX_PKG_MAINTAINER="@cnshing"
+TERMUX_PKG_VERSION="2026.10.2"
+TERMUX_PKG_SRCURL="https://clients2.googleusercontent.com/crx/blobs/ARGaeZKrZCDk7UJWQXzUQ8_0pOOy6h1s3wvynvj3vqcHsuSvjGAmX2lV7s6ji5YP7A7DtxD42g7KMQK_5GXm_vg2NDXXdpmUbI8KoV-GsJ1nYSJ_koU3RksuUv-S7IUYLaPkAMZSmuXJX4rmXGST-41wO8smk2xEA2h2yA/NNGCECKBAPEBFIMNLNIIIAHKANDCLBLB_2026_10_2_0.crx"
+TERMUX_PKG_SHA256=1c995179f75863104c8a6e389e1050568a82c0d2c07d6acf6b62703d249430c9
+TERMUX_PKG_SKIP_SRC_EXTRACT=true
+TERMUX_PKG_PLATFORM_INDEPENDENT=true
+TERMUX_PKG_BUILD_IN_SRC=true
+TERMUX_PKG_AUTO_UPDATE=false
+# License texts from bitwarden/clients at browser-v2026.10.2.
+TERMUX_PKG_LICENSE_FILE="LICENSE.txt, LICENSE_GPL.txt, LICENSE_BITWARDEN.txt"
+
+_WEBEXT_ID='nngceckbapebfimnlniiiahkandclblb'
+_WEBEXT_BROWSER=chromium
+source "$(dirname -- "${BASH_SOURCE[0]}")/webext.sh"

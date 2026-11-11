@@ -94,8 +94,9 @@ loads the theme from `appearance.ghostty`, which installing replaces.
 Nautilus offers **Scripts → Open in Terminal**, passing
 decoded local URIs as arguments. Native image thumbnails use FFmpeg because the
 official packages do not supply a usable PNG/JPEG thumbnailer here.
-The installer pins uBlock's signed 1.67.0 bootstrap XPI; normal Firefox extension
-updates remain enabled, and the final device check recorded signed 1.75.0.
+The `Browser+Ad blocking` overlay installs `webext-ublock-origin-firefox`, which owns
+the pinned, signed bootstrap XPI. Normal Firefox extension updates remain enabled.
+The earlier device check recorded signed 1.75.0; the current package pin is in its recipe.
 
 ```sh
 livecd-native terminal "$HOME/Documents"

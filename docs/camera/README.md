@@ -9,8 +9,9 @@ default, from the `android-v4l2` package that the Camera overlay installs.
 | `/dev/video1` | Rear camera | The first rear-facing camera Android lists with YUV output |
 
 The assignment comes from Android's lens-facing characteristic, not from
-camera IDs, so it is the same on any phone. On the Note10+ that is camera 1
-(front) and camera 0 (rear); its other lenses and its depth camera, which
+camera IDs, so it is the same on any phone. On both tested phones, the
+Note10+ and the Galaxy S20, that is camera 1 (front) and camera 0 (rear). On
+the Note10+, its other lenses and its depth camera, which
 offers no YUV output, are not published. Each camera offers 1280×720 at 30 fps
 in NV21, NV12, YUYV and I420, or the closest size and rate Android lists.
 
@@ -35,16 +36,14 @@ Android camera → NDK Camera2 + AImageReader (Termux UID) → camera-node, one 
   device files it left, and starts everything over if PipeWire or WirePlumber
   exits. It stops with the session. Its programs run without
   `LD_LIBRARY_PATH`, which would load libandroid-stub's `libmediandk.so` in
-  place of Android's. For the same reason `camera-node` searches
-  `/system/lib64` before `$PREFIX/lib`. The stub loads a second copy of
-  Android's media and binder libraries, and on a Galaxy S20 (Exynos 990,
-  Android 13) that aborted every capture session. Logs:
-  `~/.local/state/android-v4l2/`.
+  place of Android's. For the same reason, `camera-node` searches
+  `/system/lib64` before `$PREFIX/lib` (see [Tested phones](#tested-phones)).
+  Logs: `~/.local/state/android-v4l2/`.
 - **`camera-node`** publishes its device only once PipeWire has registered the
   node. When Android takes the camera away, the node keeps the same device and
   name and reopens that camera once no other camera of ours is open. Without
   that wait, two programs streaming at once would take the camera from each
-  other forever. This phone runs one camera at a time.
+  other forever. Both tested phones run one camera at a time.
 - **`libandroid-v4l2.so`** is in the session's `LD_PRELOAD` for every program
   the desktop starts, after the other preloads, once a test program starts
   with it. For `/dev/videoN` it serves `stat`, `/dev` listings and
@@ -105,6 +104,44 @@ indicator is built out (`-Dcamera_monitor=false`).
 The V4L2 back end offers memory-mapped capture only. The
 [backend audit](../camera-session-and-proot.md#exact-backend-coverage) lists the
 ioctls and buffer modes it lacks; `VIDIOC_S_PARM` does not change the rate.
+
+## Tested phones
+
+| | Galaxy Note10+ | Galaxy S20 |
+| --- | --- | --- |
+| Model | SM-N975U1 | SM-G981B (`x1s`) |
+| SoC and GPU | Snapdragon 855, Adreno 640 | Exynos 990, Mali-G77 |
+| Android | 11 (SDK 30) | 13 (SDK 33) |
+| Published cameras | Front = 1, rear = 0 | Front = 1, rear = 0 |
+| NDK frames | `YUV_420_888` as NV21, 1280×720 at 30 fps | The same |
+| Cameras open at once | One | One |
+| `android-v4l2` 0.1.0 | 15 of 15 | 10 of 15: every stream check fails |
+| `android-v4l2` 0.1.0-1 | Not yet rerun | 15 of 15 |
+
+The camera path itself does not depend on the GPU. The S20 renders the desktop
+in software, but its cameras work like the Note10+'s.
+
+On the S20, camera-node 0.1.0 aborted in `ACameraDevice_createCaptureSession`
+each time a stream opened a camera. Its RUNPATH searched `$PREFIX/lib` first,
+so it loaded libandroid-stub's `libmediandk.so` and `libbinder_ndk.so`. Those
+stubs load Android's real libraries into a linker namespace of their own, and
+the process ended up with two copies of libbinder and libgui. When Android
+configured the stream, a binder Parcel created by one copy was freed by the
+other. That underflowed libbinder's allocation counter, and its
+integer-overflow check called `abort()`. The logcat showed "IProducerListener:
+binder call 'needsReleaseNotify' failed", then the abort in
+`Parcel::freeDataNoInit`. The supervisor restarted the node each time, so the
+devices stayed listed and released, and only the stream checks failed.
+
+[`camcap.c`](../../tests/camera/camcap.c), built with the NDK and run from
+`adb shell` (which holds the camera permission), reproduced the crash outside
+the desktop when it was linked to the stub the same way. Linked directly to
+Android's libraries it streamed 30 of 30 frames. The session preloads, and
+opening the camera from a thread other than the main one, made no difference.
+Since 0.1.0-1, camera-node searches `/system/lib64` first.
+
+The Note10+ passed with 0.1.0 even though libandroid-stub is installed there
+too. Why the second copy did no harm on Android 11 is not known.
 
 ## Tests
 
@@ -167,3 +204,16 @@ while pw-v4l2 waited for threads that close files too; the runs above used the
 fixed preload. Startup on the upgraded install also timed out on a leftover
 `livecd-appearance@local` in the enabled extensions. Both were fixed in
 `android-procfs` 1.0.0-4 and `livecd-desktop` revision 7.
+
+On the Galaxy S20 (Exynos 990, Android 13), installed from the offline
+tarball, `android-v4l2` 0.1.0 passed the 10 checks that need no frames and
+failed all 5 stream checks, because camera-node aborted on every capture
+session (see [Tested phones](#tested-phones)). With 0.1.0-1, installed
+over it and with only the camera nodes restarted,
+`test-desktop-camera.py --stream` passed 15 of 15:
+- Front: 150 frames at 29.7 fps.
+- Rear: 90 frames at 29.3 fps.
+- Front again: 90 frames at 29.5 fps.
+- Asked for at once: the newer rear stream took its camera at 28.9 fps, and
+  the older front stream resumed the same camera.
+- Both cameras were released afterwards.

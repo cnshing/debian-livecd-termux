@@ -4,7 +4,7 @@ TERMUX_PKG_LICENSE="GPL-2.0-or-later"
 TERMUX_PKG_LICENSE_FILE="COPYING"
 TERMUX_PKG_MAINTAINER="@cnshing"
 TERMUX_PKG_VERSION="48.8"
-TERMUX_PKG_REVISION=1
+TERMUX_PKG_REVISION=2
 TERMUX_PKG_SRCURL=(
 	"https://download.gnome.org/sources/gnome-settings-daemon/48/gnome-settings-daemon-48.1.tar.xz"
 	"https://github.com/GNOME/localsearch/archive/refs/tags/3.9.0.tar.gz"
@@ -30,6 +30,8 @@ termux_step_make_install() {
 		"$TERMUX_PREFIX/opt/gnome-48"
 	install -Dm644 "$TERMUX_PKG_BUILDER_DIR/livecd-native.session" \
 		"$TERMUX_PREFIX/opt/gnome-48/share/gnome-session/sessions/livecd-native.session"
+	install -Dm644 "$TERMUX_PKG_BUILDER_DIR/gnome-mimeapps.list" \
+		"$TERMUX_PREFIX/opt/gnome-48/share/applications/gnome-mimeapps.list"
 }
 
 termux_step_create_debscripts() {

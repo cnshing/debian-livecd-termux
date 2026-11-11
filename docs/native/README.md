@@ -93,6 +93,10 @@ is disabled because its service fails to execute on Termux:X11. The terminal sti
 and starts a login shell. Ghostty reads
 `~/.config/livecd-native/ghostty/config.ghostty`, which installing keeps, and which
 loads the theme from `appearance.ghostty`, which installing replaces.
+`gnome-48-runtime` installs `share/applications/gnome-mimeapps.list` in its
+runtime tree with Nautilus as GNOME's default for folders, so the desktop's
+Home shortcut opens Files even when elementary Code is installed.
+User MIME preferences take precedence.
 Nautilus offers **Scripts → Open in Terminal**, passing
 decoded local URIs as arguments. Native image thumbnails use FFmpeg because the
 official packages do not supply a usable PNG/JPEG thumbnailer here.

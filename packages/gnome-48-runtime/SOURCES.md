@@ -16,8 +16,11 @@ port. Termux's `termux_setup_gir` uses them when cross-building;
 native builds use the target's introspection tooling. Source patches retain
 their upstream licenses and explanatory headers.
 
-`gnome-48-runtime` supplies the session and readable schemas required from
-GNOME Settings Daemon and LocalSearch. Fonts and GNOME Shell extensions are separate
+`gnome-48-runtime` supplies the session, the GNOME folder default in
+`share/applications/gnome-mimeapps.list`, and readable schemas required from
+GNOME Settings Daemon and LocalSearch. The folder default selects Nautilus,
+matching GNOME's newer session defaults; user MIME preferences override it.
+Fonts and GNOME Shell extensions are separate
 `fonts-*` and `gnome-shell-extension-*` packages, repackaged from Debian's pinned
 architecture-independent archives with their copyright files. They are not rebuilds of each
 font or extension's original sources.

@@ -84,20 +84,9 @@ termux_step_host_build() {
 	termux_setup_rust
 
 	if [[ "$TERMUX_ON_DEVICE_BUILD" == "false" ]]; then
-		# LIVECD-DIAG (temporary): why curl exits 6 here.
-		{
-			echo "LIVECD-DIAG curl=$(type -p curl) $(curl --version | head -1)"
-			echo "LIVECD-DIAG resolv: $(tr '\n' ' ' < /etc/resolv.conf)"
-			env | grep -iE '^(.*proxy|curl_|ssl_|ld_|resolv|localdomain|res_options|hostaliases)' | sed 's/^/LIVECD-DIAG env: /'
-			getent hosts azure.archive.ubuntu.com archive.ubuntu.com github.com | sed 's/^/LIVECD-DIAG getent: /'
-			for u in https://azure.archive.ubuntu.com/ubuntu/dists/resolute/Release https://archive.ubuntu.com/ubuntu/dists/resolute/Release https://github.com; do
-				curl -sS -o /dev/null -w "LIVECD-DIAG $u %{http_code}\n" "$u" 2>&1 | sed 's/^curl/LIVECD-DIAG curl/'
-				echo "LIVECD-DIAG exit=${PIPESTATUS[0]}"
-			done
-		} || true
-		# archive.ubuntu.com does not resolve inside the builder container on GitHub's runners
-		# (curl exit 6, twice). Azure's full mirror is the one those runners use themselves.
-		MIRROR_URL=https://azure.archive.ubuntu.com/ubuntu termux_download_ubuntu_packages \
+		# Inside the builder container on GitHub's runners, no *.ubuntu.com name resolves
+		# (curl exit 6; github.com resolves through the same DNS), so use kernel.org's full mirror.
+		MIRROR_URL=https://mirrors.edge.kernel.org/ubuntu termux_download_ubuntu_packages \
 			"libllvmspirvlib-$TERMUX_HOST_LLVM_MAJOR_VERSION-dev" \
 			"libllvm$TERMUX_HOST_LLVM_MAJOR_VERSION" \
 			"libllvmspirvlib$TERMUX_HOST_LLVM_MAJOR_VERSION.1" \

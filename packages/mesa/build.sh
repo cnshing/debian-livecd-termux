@@ -84,7 +84,9 @@ termux_step_host_build() {
 	termux_setup_rust
 
 	if [[ "$TERMUX_ON_DEVICE_BUILD" == "false" ]]; then
-		termux_download_ubuntu_packages \
+		# archive.ubuntu.com does not resolve inside the builder container on GitHub's runners
+		# (curl exit 6, twice). Azure's full mirror is the one those runners use themselves.
+		MIRROR_URL=https://azure.archive.ubuntu.com/ubuntu termux_download_ubuntu_packages \
 			"libllvmspirvlib-$TERMUX_HOST_LLVM_MAJOR_VERSION-dev" \
 			"libllvm$TERMUX_HOST_LLVM_MAJOR_VERSION" \
 			"libllvmspirvlib$TERMUX_HOST_LLVM_MAJOR_VERSION.1" \

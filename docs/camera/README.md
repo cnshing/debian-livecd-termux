@@ -116,7 +116,7 @@ ioctls and buffer modes it lacks; `VIDIOC_S_PARM` does not change the rate.
 | NDK frames | `YUV_420_888` as NV21, 1280×720 at 30 fps | The same |
 | Cameras open at once | One | One |
 | `android-v4l2` 0.1.0 | 15 of 15 | 10 of 15: every stream check fails |
-| `android-v4l2` 0.1.0-1 | Not yet rerun | 15 of 15 |
+| `android-v4l2` 0.1.0-1 | 15 of 15 | 15 of 15 |
 
 The camera path itself does not depend on the GPU. The S20 renders the desktop
 in software, but its cameras work like the Note10+'s.
@@ -141,7 +141,17 @@ opening the camera from a thread other than the main one, made no difference.
 Since 0.1.0-1, camera-node searches `/system/lib64` first.
 
 The Note10+ passed with 0.1.0 even though libandroid-stub is installed there
-too. Why the second copy did no harm on Android 11 is not known.
+too. Its 0.1.0 nodes did map the stub's `libmediandk.so`, but only one copy
+each of `/system/lib64/libbinder.so` and `libgui.so`. On Android 11 the stub's
+namespace reused the system's copies, so no Parcel crossed between two copies.
+With 0.1.0-1, installed over the same desktop and with only the camera nodes
+restarted, the nodes map `/system/lib64/libmediandk.so` and not the stub, and
+`test-desktop-camera.py --stream` passed 15 of 15:
+- Front: 150 frames at 29.6 fps.
+- Rear: 90 frames at 29.0 fps.
+- Front again: 90 frames at 29.2 fps.
+- Asked for at once: the newer rear stream got its camera at 29.3 fps, and the
+  older front stream resumed the same camera.
 
 ## Tests
 

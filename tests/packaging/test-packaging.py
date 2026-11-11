@@ -46,7 +46,9 @@ class Packaging(unittest.TestCase):
 
     def test_chromium_builds_alone_with_its_dependencies_and_longest_timeout(self):
         jobs = {job['name']: job for job in recipes.plan(recipes.all_names())['include']}
-        self.assertEqual(jobs['chromium']['packages'], 'libva chromium')
+        # Chromium's dependencies are held to exact versions, so the builder compiles this
+        # repository's mesa (a revision Termux's mirror lacks) in its job either way.
+        self.assertEqual(jobs['chromium']['packages'], 'libva mesa chromium')
         self.assertEqual(jobs['chromium']['timeout'], 360)
         self.assertTrue(jobs['chromium']['exact'])
         # Other users of libva build it themselves, first, with the ordinary limits.

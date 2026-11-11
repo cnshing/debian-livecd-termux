@@ -62,8 +62,9 @@ An offline tarball, `livecd-termux-repo-aarch64-offline.tar.gz`, also carries ev
 the installation can need. Given one with `--repo-tarball`, apt installs from it alone and never
 contacts a mirror. If a release has it in parts, join them first:
 `cat livecd-termux-repo-aarch64-offline.tar.gz.part* > livecd-termux-repo-aarch64-offline.tar.gz`.
-Google Chrome is the exception: Google does not allow redistributing it, so an offline install leaves
-it out and says how to add it once online.
+Google Chrome is the exception: Google does not allow redistributing it, so the tarball holds only
+the Termux packages it needs. An offline install still downloads Chrome from Google when the phone
+is online, and otherwise leaves it out and says how to add it later.
 
 Then start the desktop. It opens the Termux:X11 app:
 

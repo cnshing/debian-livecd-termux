@@ -149,8 +149,16 @@ def about_test(log):
     from gi.repository import GLib
     vendor = getprop('ro.product.manufacturer')
     device = f'{vendor[:1].upper()}{vendor[1:]} {getprop("ro.product.model")}'
-    soc = ' '.join(Path(f'/sys/devices/soc0/{name}').read_text().strip()
-                   for name in ('vendor', 'family', 'machine'))
+    def read(name):
+        try:
+            return Path(f'/sys/devices/soc0/{name}').read_text().strip()
+        except OSError:
+            return ''
+    # The panel prefers soc0, which Exynos phones keep from apps, then Android's SoC properties.
+    if read('machine'):
+        soc = ' '.join(part for part in map(read, ('vendor', 'family', 'machine')) if part)
+    else:
+        soc = ' '.join(part for part in (getprop('ro.soc.manufacturer'), getprop('ro.soc.model')) if part)
     stat = os.statvfs(Path.home())
     expected = [f'Android {getprop("ro.build.version.release")}', device,
                 f'{soc} × {os.sysconf("SC_NPROCESSORS_CONF")}',

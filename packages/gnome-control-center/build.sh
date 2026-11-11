@@ -3,6 +3,7 @@ TERMUX_PKG_DESCRIPTION="GNOME 48 Settings for the native X11 desktop"
 TERMUX_PKG_LICENSE="GPL-2.0-or-later"
 TERMUX_PKG_MAINTAINER="@cnshing"
 TERMUX_PKG_VERSION="48.7"
+TERMUX_PKG_REVISION=1
 TERMUX_PKG_SRCURL=(
 	"https://download.gnome.org/sources/gnome-control-center/48/gnome-control-center-${TERMUX_PKG_VERSION}.tar.xz"
 	"https://download.gnome.org/sources/tecla/48/tecla-48.0.2.tar.xz"

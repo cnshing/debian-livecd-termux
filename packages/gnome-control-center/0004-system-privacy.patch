@@ -722,13 +722,15 @@ diff --git a/panels/system/about/cc-system-details-window.c b/panels/system/abou
  }
  
  char *
-@@ -456,6 +429,24 @@ get_cpu_info ()
+@@ -456,6 +429,33 @@ get_cpu_info ()
    gpointer       key, value;
    int            i;
    int            j;
 +  g_autofree char *vendor = NULL;
 +  g_autofree char *family = NULL;
 +  g_autofree char *machine = NULL;
++  char soc_vendor[PROP_VALUE_MAX] = "";
++  char soc_model[PROP_VALUE_MAX] = "";
 +
 +  /* Android's cpuinfo has no model name, but the kernel describes the SoC. */
 +  if (g_file_get_contents ("/sys/devices/soc0/machine", &machine, NULL, NULL) &&
@@ -744,10 +746,17 @@ diff --git a/panels/system/about/cc-system-details-window.c b/panels/system/abou
 +      g_string_append_printf (cpu, "%s \303\227 %ld", machine, sysconf (_SC_NPROCESSORS_CONF));
 +      return g_strdup (cpu->str);
 +    }
++  /* Android 12 and later also name the SoC in properties, for devices whose soc0 apps cannot read. */
++  if (__system_property_get ("ro.soc.model", soc_model) > 0)
++    {
++      __system_property_get ("ro.soc.manufacturer", soc_vendor);
++      return g_strdup_printf ("%s%s%s \303\227 %ld", soc_vendor, *soc_vendor ? " " : "",
++                              soc_model, sysconf (_SC_NPROCESSORS_CONF));
++    }
  
    counts = g_hash_table_new (g_str_hash, g_str_equal);
    info = glibtop_get_sysinfo ();
-@@ -626,25 +617,8 @@ get_ram_size_libgtop (void)
+@@ -626,25 +626,8 @@ get_ram_size_libgtop (void)
  guint64
  get_ram_size_dmi (void)
  {

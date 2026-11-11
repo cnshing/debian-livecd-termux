@@ -1,4 +1,7 @@
 - code-oss
+# install.sh skips Recommends, so the one code-oss recommends is named here. The other packaged
+# extensions are optional: pkg install code-oss-extension-vscode-sshfs, and see docs/code-oss/README.md.
+- code-oss-extension-open-remote-ssh
 - gh
 - git
 - gnome-keyring

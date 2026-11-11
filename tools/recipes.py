@@ -9,6 +9,7 @@
   recipes.py order NAME...            Print packages and local dependencies in build order.
   recipes.py host-packages NAME...    Print the build-machine packages a cross build of NAME needs.
   recipes.py config                   Print the builder revision and image for CI.
+  recipes.py pins CHECKOUT            Print every package name the recipes build, for install.sh's pin.
 """
 import argparse
 import hashlib
@@ -50,7 +51,7 @@ PLACEHOLDERS = {'@TERMUX_PREFIX@': '/data/data/com.termux/files/usr', '@TERMUX_H
 READ = '''set +u
 source "$1" >/dev/null
 printf '%s\\0' "$TERMUX_PKG_VERSION" "${TERMUX_PKG_SRCURL[*]}" "${TERMUX_PKG_SHA256[*]}" \
-    "$TERMUX_PKG_DEPENDS" "$TERMUX_PKG_BUILD_DEPENDS" "$TERMUX_PKG_SKIP_SRC_EXTRACT"
+    "$TERMUX_PKG_DEPENDS" "$TERMUX_PKG_BUILD_DEPENDS" "$TERMUX_PKG_SKIP_SRC_EXTRACT" "$TERMUX_PKG_ANTI_BUILD_DEPENDS"
 '''
 POST_GET_SOURCE = '''set -e
 termux_download() {
@@ -66,10 +67,13 @@ if declare -F termux_step_post_get_source >/dev/null; then termux_step_post_get_
 
 def read_recipe(name):
     output = subprocess.check_output(['bash', '-c', READ, 'read', str(PACKAGES / name / 'build.sh')], text=True)
-    version, urls, hashes, depends, build_depends, skip = output.split('\0')[:6]
+    version, urls, hashes, depends, build_depends, skip, anti = output.split('\0')[:7]
+
+    def names(text):
+        return {re.match(r'[^\s(]+', part.strip()).group() for part in re.split(r'[,|]', text) if part.strip()}
+    # The builder neither builds nor installs an anti-build dependency, so a set does not need it.
     return {'version': version, 'urls': urls.split(), 'hashes': hashes.split(), 'skip_extract': skip == 'true',
-            'depends': {re.match(r'[^\s(]+', part.strip()).group()
-                        for part in re.split(r'[,|]', depends + ',' + build_depends) if part.strip()}}
+            'depends': names(depends + ',' + build_depends) - names(anti)}
 
 
 def all_names():
@@ -219,6 +223,20 @@ def prepare_builder(checkout):
     print('Staged', len(all_names()), 'recipes at', revision)
 
 
+def pins(checkout):
+    """Each recipe's package and subpackages, including those of Termux's x11-packages recipe that
+    prepare_builder keeps beside ours, as code-oss keeps code-is-code-oss. Pinning these too keeps
+    Termux's newer build of a subpackage from demanding its own newer main package."""
+    names = []
+    for name in all_names():
+        metadata = PACKAGES / name / 'upstream.json'
+        removed = set(json.loads(metadata.read_text()).get('remove_files', {})) if metadata.is_file() else set()
+        upstream = {path.name for path in (Path(checkout) / 'x11-packages' / name).glob('*.subpackage.sh')} - removed
+        subpackages = upstream | {path.name for path in (PACKAGES / name).glob('*.subpackage.sh')}
+        names += [name] + sorted(subpackage[:-len('.subpackage.sh')] for subpackage in subpackages)
+    return names
+
+
 def install_output(directory, names):
     """Install completed package artifacts rather than copying over installed files."""
     names = list(names)
@@ -302,6 +320,7 @@ def main():
     commands.add_parser('order').add_argument('names', nargs='+')
     commands.add_parser('host-packages').add_argument('names', nargs='+')
     commands.add_parser('config')
+    commands.add_parser('pins').add_argument('checkout')
     installer = commands.add_parser('install-output')
     installer.add_argument('directory')
     installer.add_argument('names', nargs='+')
@@ -324,6 +343,8 @@ def main():
         config = json.loads(BUILD_CONFIG.read_text())
         print('revision=' + config['revision'])
         print('image=' + config['image'])
+    elif args.command == 'pins':
+        print('\n'.join(pins(args.checkout)))
     elif args.command == 'install-output':
         install_output(args.directory, checked(args.names))
     else:

@@ -7,6 +7,8 @@ TERMUX_PKG_REVISION=1
 TERMUX_PKG_SRCURL=git+https://github.com/microsoft/vscode
 TERMUX_PKG_GIT_BRANCH="$TERMUX_PKG_VERSION"
 TERMUX_PKG_DEPENDS="electron43, libx11, libxkbfile, libsecret, ripgrep"
+# Termux is mostly reached for work on other machines, and Open VSX has nothing for Remote Tunnels.
+TERMUX_PKG_RECOMMENDS="code-oss-extension-open-remote-ssh"
 TERMUX_PKG_BUILD_DEPENDS="electron43-headers"
 TERMUX_PKG_ANTI_BUILD_DEPENDS="electron43"
 TERMUX_PKG_CONFLICTS="electron-for-code-oss (<= 42.7.0)"

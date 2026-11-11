@@ -94,11 +94,16 @@ printf 'Package: %s\nPin: release n=livecd\nPin-Priority: 1001\n' "$ours" > "$PR
 offline=
 if test -f "$repo/repo/dists/termux/Release"; then
     offline=$state/apt-offline
-    mkdir -p "$offline/lists/partial" "$offline/sources.list.d"
+    mkdir -p "$offline/lists/partial" "$offline/sources.list.d" "$offline/cache/archives/partial"
     printf 'deb [trusted=yes] file://%s livecd main\ndeb [trusted=yes] file://%s termux main\n' \
         "$repo/repo" "$repo/repo" > "$offline/sources.list"
-    printf 'Dir::Etc::SourceList "%s";\nDir::Etc::SourceParts "%s";\nDir::State::Lists "%s";\n' \
-        "$offline/sources.list" "$offline/sources.list.d" "$offline/lists" > "$offline/apt.conf"
+    printf 'Dir::Etc::SourceList "%s";\nDir::Etc::SourceParts "%s";\nDir::State::Lists "%s";\nDir::Cache "%s";\n' \
+        "$offline/sources.list" "$offline/sources.list.d" "$offline/lists" "$offline/cache" > "$offline/apt.conf"
+    # pkg runs apt update only when Termux's package cache is missing or stale, and Termux's lists
+    # never gain this repository or x11-repo here. Offline apt keeps its own cache, and Termux's is
+    # dropped, so the first online `pkg install NAME` fetches those lists instead of failing.
+    eval "$(apt-config shell termux_cache Dir::Cache/d)"
+    rm -f "${termux_cache:?}pkgcache.bin" "${termux_cache:?}srcpkgcache.bin"
     export APT_CONFIG=$offline/apt.conf
     # Hooks leave out what only a network supplies, such as Google Chrome.
     export LIVECD_OFFLINE=1

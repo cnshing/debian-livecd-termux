@@ -100,6 +100,8 @@ if test -f "$repo/repo/dists/termux/Release"; then
     printf 'Dir::Etc::SourceList "%s";\nDir::Etc::SourceParts "%s";\nDir::State::Lists "%s";\n' \
         "$offline/sources.list" "$offline/sources.list.d" "$offline/lists" > "$offline/apt.conf"
     export APT_CONFIG=$offline/apt.conf
+    # Hooks leave out what only a network supplies, such as Google Chrome.
+    export LIVECD_OFFLINE=1
     echo "Installing offline, from $repo/repo alone."
 fi
 # Keep existing configuration files rather than stop at dpkg's question, and let the pin

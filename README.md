@@ -62,7 +62,8 @@ An offline tarball, `livecd-termux-repo-aarch64-offline.tar.gz`, also carries ev
 the installation can need. Given one with `--repo-tarball`, apt installs from it alone and never
 contacts a mirror. If a release has it in parts, join them first:
 `cat livecd-termux-repo-aarch64-offline.tar.gz.part* > livecd-termux-repo-aarch64-offline.tar.gz`.
-Some overlays still download files that are not apt packages, such as browser extensions.
+Google Chrome is the exception: Google does not allow redistributing it, so an offline install leaves
+it out and says how to add it once online.
 
 Then start the desktop. It opens the Termux:X11 app:
 

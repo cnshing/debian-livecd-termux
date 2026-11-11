@@ -16,6 +16,22 @@ test $# -gt 0 || set -- firefox chromium chrome
 for browser in "$@"; do
     case "$browser" in firefox|chromium|chrome|ungoogled-chromium) ;; *) echo "Unknown browser: $browser" >&2; exit 2;; esac
 done
+# An offline install has no Google Chrome: Google does not allow redistributing it, so it is not in
+# the offline tarball, nor are the Debian libraries and ungoogled Chromium build fetched for these.
+if test -n "${LIVECD_OFFLINE:-}"; then
+    online=
+    for browser in "$@"; do
+        case "$browser" in
+            chrome|ungoogled-chromium) online="$online $browser";;
+            *) set -- "$@" "$browser";;
+        esac
+        shift
+    done
+    if test -n "$online"; then
+        echo "Offline: leaving out$online. Once online: bash $source_dir/install.sh$online" >&2
+    fi
+    test $# -gt 0 || exit 0
+fi
 wants() { case " $selected " in *" $1 "*) return 0;; *) return 1;; esac; }
 selected=" $* "
 

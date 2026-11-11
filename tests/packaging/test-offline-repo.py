@@ -19,7 +19,7 @@ spec.loader.exec_module(offline)
 class Seeds(unittest.TestCase):
     def test_hooks_name_the_packages_they_install(self):
         browsers = offline.hook_packages(ROOT / 'overlays/Browser+Chromium')
-        for name in ('curl', 'jq', 'firefox', 'chromium', 'bionilux', 'glibc-repo', 'glibc'):
+        for name in ('firefox', 'webext-ublock-origin-firefox', 'webext-bitwarden-chromium', 'chromium', 'bionilux', 'glibc-repo', 'glibc'):
             self.assertIn(name, browsers)
         self.assertEqual(set(offline.hook_packages(ROOT / 'overlays/Music Player')),
                          {'glibc-repo', 'glibc', 'openssl-glibc'})

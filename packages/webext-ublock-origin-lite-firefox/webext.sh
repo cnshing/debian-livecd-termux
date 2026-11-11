@@ -1,0 +1,1 @@
+../webext-ublock-origin-lite-chromium/webext.sh

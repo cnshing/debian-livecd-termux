@@ -497,7 +497,7 @@ def ad_probe(driver, base, attempts=4):
 def start(browser, profile, tag, extensions=True):
     command = BROWSERS[browser][0]
     if browser == 'firefox':
-        # With extensions, rely on the pref install.sh wrote; the control turns the scope off.
+        # With extensions, use webext-firefox-common's preferences; the control turns the scope off.
         prefs = {} if extensions else {'extensions.enabledScopes': 1}
         if extensions and ARGS.xpi_dir:
             seeded = profile / 'extensions'

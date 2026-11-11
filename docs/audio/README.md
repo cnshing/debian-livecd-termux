@@ -3,7 +3,7 @@
 An Android/Bionic port of EasyEffects 7.2.5, installed by default through the Audio Effects
 overlay as upstream's live CD does. This project builds three packages: `easyeffects`, which
 includes the `easyeffects-bridge` command described below; `easyeffects-autoeq`, the AutoEq
-preset importer; and `lsp-plugins-lv2`. Termux's own repositories have no EasyEffects.
+preset catalogue and importer; and `lsp-plugins-lv2`. Termux's own repositories have no EasyEffects.
 
 The playback path is:
 
@@ -28,7 +28,7 @@ There is a short audio gap while the replacement connects. This avoids PipeWire
 
 GitHub Actions cross-compiles them from two recipes,
 [`easyeffects`](../../packages/easyeffects/build.sh), whose `easyeffects-autoeq` subpackage holds the
-importer, and [`lsp-plugins-lv2`](../../packages/lsp-plugins-lv2/build.sh). Both check their source
+catalogue and importer, and [`lsp-plugins-lv2`](../../packages/lsp-plugins-lv2/build.sh). Both check their source
 archive hashes and apply the included patches. `install.sh` installs them with the Audio Effects
 overlay, which is on by default. To add them back after removing them:
 
@@ -105,13 +105,15 @@ There is no microphone processing path in this implementation. Logs are in
 
 ## AutoEq presets
 
-The Audio Effects overlay installs the OPRA catalogue of AutoEq presets, as upstream's live CD does:
-upstream's [`opra2ee.py`](../../overlays/Audio%20Effects/lb/hooks/normal/scripts/opra2ee.py) converts
+The `easyeffects-autoeq` package includes the OPRA catalogue of AutoEq presets, as upstream's live CD does:
+[`opra2ee.py`](../../packages/easyeffects/opra2ee.py) converts
 [OPRA's consumer mirror](https://github.com/opra-project/OPRA/blob/main/docs/CONSUMING.md) of the
 database into about 6,200 EasyEffects output presets for Harman targets, under
 `$PREFIX/share/easyeffects/output/OPRA`. Preset names retain the EQ author's credit. In EasyEffects,
 import a chosen community preset locally to save or associate it. The catalogue is downloaded when
-the overlay is applied, not pinned, and not every preset was tested.
+the `.deb` is built, using the same mirror and conversion as the former overlay hook. The database
+is not pinned; installing the package needs no database download. CI can reuse an earlier package
+build; force a rebuild to refresh the catalogue without a recipe change. Not every preset was tested.
 
 For headphones outside the catalogue, at [autoeq.app](https://autoeq.app/), select your headphones and export
 **EqualizerAPO ParametricEq**. Import and select that file explicitly:

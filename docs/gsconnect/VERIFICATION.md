@@ -126,9 +126,33 @@ Phone-to-PC notification display therefore remains unconfirmed.
 
 The last fix was re-tested on the final package: see [Final package](#final-package).
 
+## KDE Connect Android app on the same phone
+
+Found on a second phone, a Galaxy S20 (SM-G981B, Android 13), on 2026-11-11. GSConnect started
+and reported listening, but never answered an identity sent by unicast, even one sent from the
+phone to itself on 127.0.0.1. The phone also had the KDE Connect Android app 1.37.0
+(`org.kde.kdeconnect_tp`) installed, and it was running in the background.
+
+| Check | Result |
+| --- | --- |
+| `/proc/net/udp6`, read through `adb shell` | Two sockets on `[::]:1716`: GSConnect's and the app's. The app's showed 16,330 drops |
+| `/proc/net/tcp6` | The app listened on TCP 1716 and 1739; GSConnect had moved to TCP 1717 without a message |
+| GSConnect's own UDP socket, with logging added to `lan.js` | Bound and could send, as `gsconnect connect` showed, but its receive handler never ran |
+| App force-stopped, GSConnect restarted | Unicast from the phone to itself and from a PC on the LAN both answered |
+
+Both programs open UDP 1716 with `SO_REUSEADDR`, so neither bind fails. Linux then delivers each
+unicast datagram to only one of the sockets, and here that was the app's. Broadcasts reach both.
+The TCP ports, 1716 to 1764, cannot be shared across apps this way. A taken one is skipped and
+the identity carries the port actually bound, so they are not a compatibility problem.
+
+`gsconnect start` now refuses to start while UDP 1716 is bound by anything else, and names the
+app as the usual cause. On the S20 this was tested with a stand-in holding UDP 1716 (start
+refused), one holding only TCP 1716 and 1739 (started, discovery answered), and none (started,
+discovery answered). The app can still be a peer on a *different* device; that remains untested.
+
 ## Not tested
 
-- The **KDE Connect Android app** or an iOS peer. Neither is installed on the rig. SMS, contacts,
+- The **KDE Connect Android app** as a peer on another device, or an iOS peer. Neither was available. SMS, contacts,
   telephony and media control therefore have no result.
 - Native GNOME Shell: the extension's panel UI has not run natively. No native Shell existed during
   these tests. A separate port ([`docs/native/`](../native)) has since started one on the phone;

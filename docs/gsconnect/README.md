@@ -53,8 +53,8 @@ gsconnect stop
 ```
 
 The controller owns the daemon and its private session bus, which is separate from the PRoot
-desktop's. `stop` ends all of it. **While it runs, the phone listens on TCP and UDP 1716 on
-the LAN**. The [native desktop](../native/README.md#session-integrations) starts this controller
+desktop's. `stop` ends all of it. **While it runs, the phone listens on the LAN on UDP 1716
+and the first free TCP port from 1716 to 1764**. The [native desktop](../native/README.md#session-integrations) starts this controller
 automatically when installed, and stops its owned instance with the desktop. That hook can be
 disabled independently. Logs are in `~/.local/state/gsconnect/session.log`.
 
@@ -81,12 +81,19 @@ and similar tools that Android lacks, so replace them with commands that work he
 | Volume control | **Unavailable**: needs GNOME Shell's private `Gvc` library |
 | Browsing a peer's files (SFTP) | **Unsupported**: no `sshfs` or FUSE in Termux |
 | SMS, contacts, telephony | Not tested: these need the KDE Connect Android app as the peer |
+| KDE Connect Android app **on the same phone** | **Incompatible**: both need UDP 1716; see [below](#android-behaviour-to-expect). As a peer on another phone it is not tested |
 
 ## Android behaviour to expect
 
 - **With the screen off the phone did not hear UDP broadcasts**; unicast still worked. Existing
   connections and paired-device reconnects are unaffected. To find a new peer, wake the screen,
   or start from the phone, whose broadcasts still go out, or use `connect HOST`.
+- **Do not run the KDE Connect Android app on the same phone.** Both bind the fixed discovery
+  port, UDP 1716, and Android then delivers incoming identity packets to the app instead of
+  GSConnect, so the phone never answers discovery, even from itself. `gsconnect start` refuses
+  to start while UDP 1716 is taken; force-stop or uninstall the app first. The TCP ports,
+  1716-1764, do not clash this way: a taken one is skipped, as on a Galaxy S20, where the app
+  held TCP 1716 and 1739 and GSConnect listened on 1717.
 - **Discovery can switch itself off.** Upstream GSConnect disables discovery when a fourth
   unpaired device appears, and saves that. Paired devices keep working. Re-enable it in the
   settings window. Other GSConnect instances on your LAN apply the same rule to this phone.

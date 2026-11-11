@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 import re
 import signal
+import socket
 import subprocess
 import sys
 import time
@@ -139,7 +140,27 @@ def supervise(name):
             RECORD.unlink(missing_ok=True)
 
 
+def discovery_port_taken():
+    """Is UDP 1716 already bound, usually by the KDE Connect Android app?
+
+    Only this port matters. Discovery is fixed at UDP 1716, which both stacks bind with
+    SO_REUSEADDR, so GSConnect starts anyway while the kernel hands unicast identities to
+    only one socket. TCP ports 1716-1764 cannot be shared: a taken one is skipped and the
+    identity advertises the port actually bound.
+    """
+    with socket.socket(socket.AF_INET6, socket.SOCK_DGRAM) as probe:
+        try:
+            probe.bind(("::", 1716))
+        except OSError:
+            return True
+    return False
+
+
 def start_session(name):
+    if discovery_port_taken():
+        raise RuntimeError("UDP port 1716 is held by another app, usually the KDE Connect Android "
+                           "app, which then receives the discovery packets. Stop it first: "
+                           "Settings, Apps, KDE Connect, Force stop")
     STATE.mkdir(parents=True, exist_ok=True, mode=0o700)
     RUNTIME.mkdir(parents=True, exist_ok=True, mode=0o700)
     RUNTIME.chmod(0o700)
@@ -189,7 +210,7 @@ def main():
             print("GSConnect already running")
             return
         start_session(args.name or "")
-        print("GSConnect ready and listening on the LAN (TCP/UDP 1716). Pair: gsconnect ui")
+        print("GSConnect ready and listening on the LAN (UDP 1716, TCP 1716-1764). Pair: gsconnect ui")
         return
     if args.command == "ui" and not current:
         # A menu entry has no terminal to show "start it first" in.

@@ -87,8 +87,10 @@ Native Nautilus, [Code OSS](../code-oss/README.md), elementary Code, Firefox wit
 LibreOffice, mpv-x and [Mission Center](../mission-center/README.md) provide the application workflows.
 elementary Code carries the liveCD's theme-sync plugin, which matches its editor colors to the GTK theme
 when Code starts; after a theme change, Code shows the new colors from its next start.
-Ghostty is the only terminal, with its existing close-button limitation. It uses its package's own launcher and
-starts a login shell (`temp/docs/evidence/native/stock-launchers.txt`). Ghostty reads
+Ghostty is the only terminal, with its existing close-button limitation. Its private desktop entry
+starts the profile's Cairo wrapper directly, including for **New Window**. Package D-Bus activation
+is disabled because its service fails to execute on Termux:X11. The terminal still renders with OpenGL
+and starts a login shell. Ghostty reads
 `~/.config/livecd-native/ghostty/config.ghostty`, which installing keeps, and which
 loads the theme from `appearance.ghostty`, which installing replaces.
 Nautilus offers **Scripts → Open in Terminal**, passing

@@ -23,7 +23,7 @@ stopped, in native Termux, from this repository:
 python src/apply-overlays.py "Text Editor+Code OSS"
 ```
 
-This installs our `code-oss` recipe, `git`, `gh` and `gnome-keyring`, uses the profile wrapper, and installs the extensions below. The recipe resolves the two menu-entry placeholders during packaging; the overlay no longer repairs installed package metadata. It never replaces an existing `~/.vscode-oss/argv.json` or settings file, so
+This installs our `code-oss` recipe, its Open Remote - SSH extension, `git`, `gh` and `gnome-keyring`, and uses the profile wrapper. The recipe resolves the two menu-entry placeholders during packaging; the overlay no longer repairs installed package metadata. It never replaces an existing `~/.vscode-oss/argv.json` or settings file, so
 if you ran Code OSS before this, copy the two settings from
 [its `argv.json`](../../overlays/Text%20Editor+Code%20OSS/filesystem/termux/home-defaults/.vscode-oss/argv.json) into yours.
 
@@ -33,17 +33,28 @@ with, so each new desktop session asks for it again. Your saved sign-ins depend 
 ## What replaces what
 
 These were the most downloaded extensions on Open VSX for each feature when assessed
-(details (`temp/docs/evidence/code-oss/extensions.json`)). All are from verified publishers, ship no native code for Linux or
-Android, and pass signature checks when installed.
+(details (`temp/docs/evidence/code-oss/extensions.json`)). All are from verified publishers and ship no native code for Linux or
+Android.
+
+Four are packages, pinned to the version tested here and installed as built-in extensions, so they need no network
+and `pkg` updates them. `code-oss` recommends Open Remote - SSH, and `install.sh` installs it. The rest are optional:
+
+```sh
+pkg install code-oss-extension-vscode-sshfs code-oss-extension-vscode-pull-request-github code-oss-extension-vscode-github-actions
+```
+
+GitLens and Git Graph are not packaged, because their licenses do not allow redistributing them: Git Graph's grants no
+right to distribute, and GitLens bundles GitKraken's "plus" code, which may not be distributed. Install them from the
+Extensions view, which downloads them from Open VSX with signature checks.
 
 | In VS Code | Here | Tested |
 | --- | --- | --- |
 | Editing, terminal, tasks, Git | Built in | **Yes** |
-| GitHub pull requests and issues | GitHub Pull Requests | Installs and activates. Not signed in |
-| GitHub Actions | GitHub Actions | Installs and loads |
-| Git history, blame | GitLens, Git Graph | Installs and draws its graph. GitLens promotes its paid tier |
-| Remote - SSH | Open Remote - SSH | **Yes**, with [a server you build](SERVER.md) |
-| Remote files without a server | SSH FS | **Yes** |
+| GitHub pull requests and issues | GitHub Pull Requests (`code-oss-extension-vscode-pull-request-github`) | Installs and activates. Not signed in |
+| GitHub Actions | GitHub Actions (`code-oss-extension-vscode-github-actions`) | Installs and loads |
+| Git history, blame | GitLens, Git Graph, from the Extensions view | Installs and draws its graph. GitLens promotes its paid tier |
+| Remote - SSH | Open Remote - SSH (`code-oss-extension-open-remote-ssh`, installed) | **Yes**, with [a server you build](SERVER.md) |
+| Remote files without a server | SSH FS (`code-oss-extension-vscode-sshfs`) | **Yes** |
 | Remote Tunnels | **Nothing** | [See below](#remote-tunnels) |
 | Settings Sync, Copilot | **Nothing** | Not available in this build |
 

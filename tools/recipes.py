@@ -51,7 +51,7 @@ PLACEHOLDERS = {'@TERMUX_PREFIX@': '/data/data/com.termux/files/usr', '@TERMUX_H
 READ = '''set +u
 source "$1" >/dev/null
 printf '%s\\0' "$TERMUX_PKG_VERSION" "${TERMUX_PKG_SRCURL[*]}" "${TERMUX_PKG_SHA256[*]}" \
-    "$TERMUX_PKG_DEPENDS" "$TERMUX_PKG_BUILD_DEPENDS" "$TERMUX_PKG_SKIP_SRC_EXTRACT"
+    "$TERMUX_PKG_DEPENDS" "$TERMUX_PKG_BUILD_DEPENDS" "$TERMUX_PKG_SKIP_SRC_EXTRACT" "$TERMUX_PKG_ANTI_BUILD_DEPENDS"
 '''
 POST_GET_SOURCE = '''set -e
 termux_download() {
@@ -67,10 +67,13 @@ if declare -F termux_step_post_get_source >/dev/null; then termux_step_post_get_
 
 def read_recipe(name):
     output = subprocess.check_output(['bash', '-c', READ, 'read', str(PACKAGES / name / 'build.sh')], text=True)
-    version, urls, hashes, depends, build_depends, skip = output.split('\0')[:6]
+    version, urls, hashes, depends, build_depends, skip, anti = output.split('\0')[:7]
+
+    def names(text):
+        return {re.match(r'[^\s(]+', part.strip()).group() for part in re.split(r'[,|]', text) if part.strip()}
+    # The builder neither builds nor installs an anti-build dependency, so a set does not need it.
     return {'version': version, 'urls': urls.split(), 'hashes': hashes.split(), 'skip_extract': skip == 'true',
-            'depends': {re.match(r'[^\s(]+', part.strip()).group()
-                        for part in re.split(r'[,|]', depends + ',' + build_depends) if part.strip()}}
+            'depends': names(depends + ',' + build_depends) - names(anti)}
 
 
 def all_names():

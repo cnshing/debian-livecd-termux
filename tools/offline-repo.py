@@ -33,6 +33,10 @@ MIRROR = 'https://packages-cf.termux.dev/apt'
 GLIBC = f'{MIRROR}/termux-glibc glibc stable'
 # Hooks call apt-get themselves. These are the files that do, read for the names they install.
 HOOK_SCRIPTS = ['hooks/termux/*', 'browsers/install.sh']
+# install.sh's prebuilt/turnip/gpu-setup.py fetches these with apt-get download, without installing
+# them: Turnip at the installed Mesa's own version, and vulkan-tools.
+TURNIP = ('mesa-vulkan-icd-freedreno', 'mesa')
+DOWNLOADED = ['vulkan-tools']
 
 
 def listed(path):
@@ -136,6 +140,13 @@ def main():
     print('Resolving the default installation:', ' '.join(first), flush=True)
     if not resolve(first, '--no-install-recommends'):
         raise SystemExit('The default installation cannot be resolved from the current Termux repositories.')
+    versions = dict(chosen)
+    downloads = [f'{TURNIP[0]}={versions[TURNIP[1]]}', *DOWNLOADED]
+    print('Downloading for prebuilt/turnip/gpu-setup.py:', ' '.join(downloads), flush=True)
+    subprocess.run(apt + ['download', *downloads], cwd=debs, check=True)
+    for name in (TURNIP[0], *DOWNLOADED):
+        for deb in debs.glob(f'{name}_*.deb'):
+            chosen.add((name, urllib.parse.unquote(deb.name.split('_')[1])))
 
     extras = []
     for overlay in sorted(p for p in overlays.iterdir() if p.is_dir() and p.name not in default):

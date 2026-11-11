@@ -42,8 +42,10 @@ OVERLAY = REPO / 'overlays/Text Editor+Code OSS/filesystem/termux/home-defaults'
 PROBE = Path(__file__).resolve().parent / 'secret-probe'
 EXTENSIONS = Path.home() / '.vscode-oss/extensions'
 MAIN = 'lib/electron43/electron ' + str(PREFIX / 'lib/code-oss/code.mjs')
-EXPECTED = {'github.vscode-pull-request-github', 'github.vscode-github-actions', 'eamodio.gitlens',
-    'mhutchie.git-graph', 'jeanp413.open-remote-ssh', 'kelvin.vscode-sshfs'}
+# The packaged extensions this test uses. Only Open Remote - SSH is installed by default; first run
+# pkg install code-oss-extension-vscode-sshfs code-oss-extension-vscode-pull-request-github code-oss-extension-vscode-github-actions
+EXPECTED = {'github.vscode-pull-request-github', 'github.vscode-github-actions', 'jeanp413.open-remote-ssh', 'kelvin.vscode-sshfs'}
+BUILTIN = Path(os.environ.get('PREFIX', '/data/data/com.termux/files/usr')) / 'lib/code-oss/resources/app/extensions'
 SETTINGS = {'workbench.startupEditor': 'none', 'security.workspace.trust.enabled': False,
     'git.useEditorAsCommitInput': False, 'git.enableSmartCommit': True, 'extensions.autoUpdate': False}
 KEYRING_PASSWORD = 'scratch-keyring-password'
@@ -453,7 +455,9 @@ def local_checks(fixture, check, evidence):
     check('url_handler_registered', re.search(r'^x-scheme-handler/code-oss=.*code-oss-url-handler\.desktop', cache, re.M))
     listed = subprocess.run(['code-oss', '--extensions-dir', str(EXTENSIONS), '--list-extensions', '--show-versions'],
         env=fixture.env, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=120).stdout.split()
-    check('extensions_installed', EXPECTED <= {e.split('@')[0].lower() for e in listed}, listed)
+    builtin = [json.loads(path.read_text()) for path in BUILTIN.glob('*/package.json')]
+    found = {e.split('@')[0].lower() for e in listed} | {f"{m['publisher']}.{m['name']}".lower() for m in builtin}
+    check('extensions_installed', EXPECTED <= found, sorted(EXPECTED - found))
 
     work = fixture.scratch / 'work'
     (work / '.vscode').mkdir(parents=True)

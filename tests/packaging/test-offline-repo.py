@@ -27,6 +27,12 @@ class Seeds(unittest.TestCase):
                       for name in offline.hook_packages(overlay)]
         self.assertFalse([name for name in everything if name.startswith(('-', '$')) or name in ('install', 'apt-get')])
 
+    def test_turnip_downloads_match_gpu_setup(self):
+        setup = (ROOT / 'prebuilt/turnip/gpu-setup.py').read_text()
+        self.assertIn("['apt-get', 'download', '%s=' + %s, %s]" % (offline.TURNIP[0], offline.TURNIP[1],
+                      ', '.join(repr(name) for name in offline.DOWNLOADED)), setup)
+        self.assertIn("'-f=${Version}', 'mesa'", setup)
+
     def test_bootstrap_takes_literal_names(self):
         with tempfile.TemporaryDirectory() as directory:
             script = Path(directory) / 'scripts/generate-bootstraps.sh'

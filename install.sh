@@ -3,6 +3,8 @@
 #   bash install.sh [--repo-tarball FILE] [OPT-IN-OVERLAY...]
 # It fetches the compiled packages from this project's latest GitHub release, unless
 # --repo-tarball names a copy you already have, and unpacks them into a local apt repository.
+# An offline tarball (livecd-termux-repo-aarch64-offline.tar.gz) also carries every Termux package,
+# and apt then never contacts a mirror.
 set -euo pipefail
 test "${PREFIX:-}" = /data/data/com.termux/files/usr || { echo 'Run in native com.termux, outside PRoot.' >&2; exit 2; }
 test "$(dpkg --print-architecture)" = aarch64 || { echo 'The pinned GNOME runtime requires aarch64.' >&2; exit 2; }
@@ -80,6 +82,20 @@ ours=$(for recipe in "$repo"/packages/*/; do
     done
 done | tr '\n' ' ')
 printf 'Package: %s\nPin: release n=livecd\nPin-Priority: 1001\n' "$ours" > "$PREFIX/etc/apt/preferences.d/livecd"
+# An offline tarball also holds, as suite termux, every Termux package the installation can need.
+# apt, and every hook it starts, then reads only the two local suites, with a package list of their
+# own, so no mirror is contacted and Termux's own sources and lists stay as they were.
+offline=
+if test -f "$repo/repo/dists/termux/Release"; then
+    offline=$state/apt-offline
+    mkdir -p "$offline/lists/partial" "$offline/sources.list.d"
+    printf 'deb [trusted=yes] file://%s livecd main\ndeb [trusted=yes] file://%s termux main\n' \
+        "$repo/repo" "$repo/repo" > "$offline/sources.list"
+    printf 'Dir::Etc::SourceList "%s";\nDir::Etc::SourceParts "%s";\nDir::State::Lists "%s";\n' \
+        "$offline/sources.list" "$offline/sources.list.d" "$offline/lists" > "$offline/apt.conf"
+    export APT_CONFIG=$offline/apt.conf
+    echo "Installing offline, from $repo/repo alone."
+fi
 # Keep existing configuration files rather than stop at dpkg's question, and let the pin
 # replace a newer Termux build of one of our packages.
 apt=(apt-get -y --allow-downgrades -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold)
@@ -87,7 +103,7 @@ apt-get update
 # Termux's mirror picker can choose a mirror that stopped syncing; one served a ten-month-old index
 # without packages this desktop needs. Use Termux's own server then, as termux-change-repo can.
 index=$(ls "$PREFIX"/var/lib/apt/lists/*termux-main_dists_stable_*Release 2>/dev/null | head -n 1 || true)
-if test -n "$index" && test $(( $(date +%s) - $(date -d "$(sed -n 's/^Date: //p' "$index")" +%s) )) -gt 1209600; then
+if test -z "$offline" && test -n "$index" && test $(($(date +%s) - $(date -d "$(sed -n 's/^Date: //p' "$index")" +%s) )) -gt 1209600; then
     echo "The Termux mirror in $PREFIX/etc/apt/sources.list is out of date; using packages-cf.termux.dev."
     printf 'deb https://packages-cf.termux.dev/apt/termux-main stable main\n' > "$PREFIX/etc/apt/sources.list"
     apt-get update
@@ -131,5 +147,8 @@ dpkg-query -W > "$state/host-packages.tsv"
 printf '\nNative GNOME installed. Start: livecd start\n'
 printf 'Validate: livecd validate; stop: livecd stop\n'
 printf "Optional applications: apt list '?archive(^livecd\$)', then pkg install NAME\n"
+if test -n "$offline"; then
+    printf 'Without a network, install them from the offline repository: APT_CONFIG=%s pkg install NAME\n' "$offline/apt.conf"
+fi
 # Repeat what the preflight found, which the package output has scrolled away.
 if grep -q '^  WARN' "$common/preflight.txt"; then echo; cat "$common/preflight.txt"; fi

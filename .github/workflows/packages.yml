@@ -8,6 +8,16 @@
 #   Draft a release:          push a tag such as v1, or set release: v1 with packages left empty.
 #                             A new release starts as a draft; publish it by hand.
 #   Pushes and pull requests publish nothing.
+#   Which tarballs:           tarballs: net (the default), offline or both. net holds this project's
+#                             packages, and install.sh downloads the rest from Termux's mirrors. offline
+#                             adds every Termux package the installation can need, which this run's apt
+#                             resolves (tools/offline-repo.py), for an install with no network.
+#                             A release always includes net, as install.sh downloads it.
+#   Which mirror:             mirror: default (packages-cf.termux.dev), fastest, or a mirror of pkg's
+#                             list such as mirror.fcix.net (tools/termux-mirror.py). Used for the builder's
+#                             dependencies and the offline tarball's Termux packages.
+#   Pushes, tags and pull requests take both from the repository variables REPO_TARBALLS and
+#   TERMUX_MIRROR when set, under Settings > Secrets and variables > Actions > Variables.
 #
 # Each dependent set of recipes gets its own job, so unrelated packages build concurrently. A job
 # always includes the recipes from this repository that its target depends on, for example
@@ -35,12 +45,21 @@ on:
         description: Build the sets even if an earlier run already built them.
         type: boolean
         default: false
+      tarballs:
+        description: Apt repository tarballs to make. offline adds every Termux dependency.
+        type: choice
+        options: [net, offline, both]
+        default: net
+      mirror:
+        description: Termux mirror. default, fastest, or a name from pkg's list such as mirror.fcix.net.
+        required: false
+        default: default
   push:
     tags: ["v*"]
     branches: [main]
-    paths: ["packages/**", "src/**", "tools/recipes.py", "tools/termux-build.json", "tests/packaging/*nautilus*", ".github/workflows/packages.yml"]
+    paths: ["packages/**", "src/**", "tools/recipes.py", "tools/termux-build.json", "tools/make-apt-repo.sh", "tools/offline-repo.py", "tools/termux-mirror.py", "tests/packaging/test-offline-repo.py", "tests/packaging/*nautilus*", ".github/workflows/packages.yml"]
   pull_request:
-    paths: ["packages/**", "src/**", "tools/recipes.py", "tools/termux-build.json", "tests/packaging/*nautilus*", ".github/workflows/packages.yml"]
+    paths: ["packages/**", "src/**", "tools/recipes.py", "tools/termux-build.json", "tools/make-apt-repo.sh", "tools/offline-repo.py", "tools/termux-mirror.py", "tests/packaging/test-offline-repo.py", "tests/packaging/*nautilus*", ".github/workflows/packages.yml"]
 
 permissions:
   contents: read
@@ -62,6 +81,10 @@ jobs:
       release: ${{ steps.plan.outputs.release }}
       revision: ${{ steps.config.outputs.revision }}
       image: ${{ steps.config.outputs.image }}
+      net: ${{ steps.plan.outputs.net }}
+      offline: ${{ steps.plan.outputs.offline }}
+      mirror_main: ${{ steps.mirror.outputs.mirror_main }}
+      mirror_x11: ${{ steps.mirror.outputs.mirror_x11 }}
     steps:
     - uses: actions/checkout@v7
     - name: Test the AutoEq converter
@@ -94,15 +117,23 @@ jobs:
       run: python3 tests/camera/test-camera-controller.py
     - name: Test GNOME wallpaper registration
       run: python3 tests/packaging/test-settings-backgrounds.py
+    - name: Test the offline repository's dependency seeds
+      run: python3 tests/packaging/test-offline-repo.py
     - name: Read the shared builder pin
       id: config
       run: python3 tools/recipes.py config >> "$GITHUB_OUTPUT"
+    - name: Choose the Termux mirror
+      id: mirror
+      env:
+        MIRROR: ${{ inputs.mirror || vars.TERMUX_MIRROR || 'default' }}
+      run: python3 tools/termux-mirror.py "$MIRROR" >> "$GITHUB_OUTPUT"
     - name: Choose what to build
       id: plan
       env:
         INPUT_PACKAGES: ${{ inputs.packages }}
         INPUT_RELEASE: ${{ inputs.release }}
         INPUT_REBUILD: ${{ inputs.rebuild }}
+        TARBALLS: ${{ inputs.tarballs || vars.REPO_TARBALLS || 'net' }}
         GH_TOKEN: ${{ github.token }}
         DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
       run: |
@@ -112,6 +143,16 @@ jobs:
           release=$INPUT_RELEASE
         elif test "$GITHUB_REF_TYPE" = tag; then
           release=$GITHUB_REF_NAME
+        fi
+        case $TARBALLS in
+          net) net=true offline=false;;
+          offline) net=false offline=true;;
+          both) net=true offline=true;;
+          *) echo "::error::tarballs must be net, offline or both, not $TARBALLS."; exit 1;;
+        esac
+        if test -n "$release" && test "$net" != true; then
+          echo "::error::install.sh downloads a release's net tarball, so a release needs tarballs: net or both."
+          exit 1
         fi
         if test -z "$INPUT_PACKAGES"; then
           requested=$(python3 tools/recipes.py plan --all)
@@ -129,7 +170,8 @@ jobs:
         fi
         artifacts=$(printf '%s' "$requested" | python3 -c 'import json,sys; print(" ".join(job["artifact"] for job in json.load(sys.stdin)["include"]))')
         count=$(printf '%s' "$matrix" | python3 -c 'import json,sys; print(len(json.load(sys.stdin)["include"]))')
-        printf 'matrix=%s\ncount=%s\nartifacts=%s\nrelease=%s\n' "$matrix" "$count" "$artifacts" "$release" >> "$GITHUB_OUTPUT"
+        printf 'matrix=%s\ncount=%s\nartifacts=%s\nrelease=%s\nnet=%s\noffline=%s\n' \
+          "$matrix" "$count" "$artifacts" "$release" "$net" "$offline" >> "$GITHUB_OUTPUT"
         printf 'Building %s of the requested sets: %s\n' "$count" "$matrix"
 
   build:
@@ -182,6 +224,20 @@ jobs:
     - name: Add this repository's recipes
       if: steps.earlier.outputs.built != 'true'
       run: python3 tools/recipes.py prepare termux-packages
+    - name: Download dependencies from the chosen Termux mirror
+      if: steps.earlier.outputs.built != 'true'
+      env:
+        MIRROR_MAIN: ${{ needs.plan.outputs.mirror_main }}
+        MIRROR_X11: ${{ needs.plan.outputs.mirror_x11 }}
+      # The builder verifies each mirror's index with the pinned termux-keyring, as from its own host.
+      run: |
+        python3 - termux-packages/repo.json <<'EOF'
+        import json, os, sys
+        repos = json.load(open(sys.argv[1]))
+        repos['packages']['url'] = os.environ['MIRROR_MAIN']
+        repos['x11-packages']['url'] = os.environ['MIRROR_X11']
+        json.dump(repos, open(sys.argv[1], 'w'), indent=2)
+        EOF
     - name: Keep the builder's work directory on the runner, where it can be cached
       if: steps.earlier.outputs.built != 'true'
       run: |
@@ -303,11 +359,13 @@ jobs:
     if: >-
       ${{ !cancelled() && needs.plan.result == 'success'
       && (needs.build.result == 'success' || needs.build.result == 'skipped')
-      && (needs.plan.outputs.count != '0' || needs.plan.outputs.release != '') }}
+      && (needs.plan.outputs.count != '0' || needs.plan.outputs.release != '' || needs.plan.outputs.offline == 'true') }}
     runs-on: ubuntu-26.04
     permissions:
       contents: write
-      actions: read  # To download the sets earlier runs built.
+      actions: write  # To download the sets earlier runs built, and replace the offline packages' cache.
+    env:
+      OFFLINE_TARBALL: livecd-termux-repo-aarch64-offline.tar.gz
     steps:
     - uses: actions/checkout@v7
     - name: Collect every set's packages, from this run or the one that built them
@@ -334,25 +392,104 @@ jobs:
         if test -n "$(find debs -name 'android-firefox-video_*.deb' -print -quit)"; then
           python3 tests/packaging/check-browser-video-artifacts.py debs
         fi
-    - name: Build the apt repository tarball
+    - name: Build the apt repository
       run: |
         command -v apt-ftparchive >/dev/null || { sudo apt-get update; sudo apt-get install --yes apt-utils; }
         tools/make-apt-repo.sh debs repo
+    - name: Build the net tarball
+      if: needs.plan.outputs.net == 'true'
+      run: |
         tar -czf "$REPO_TARBALL" repo
         sha256sum "$REPO_TARBALL" > "$REPO_TARBALL.sha256"
     - uses: actions/upload-artifact@v7
+      if: needs.plan.outputs.net == 'true'
       with:
         name: livecd-termux-repo-aarch64
         path: |
           ${{ env.REPO_TARBALL }}
           ${{ env.REPO_TARBALL }}.sha256
         retention-days: 30
+
+    # Offline: this project's packages plus every Termux package an installation can need, from
+    # Termux's current repositories. tools/offline-repo.py has the rules.
+    - uses: actions/checkout@v7
+      if: needs.plan.outputs.offline == 'true'
+      with:
+        repository: termux/termux-packages
+        ref: ${{ needs.plan.outputs.revision }}
+        path: termux-packages
+        sparse-checkout: |
+          packages/termux-keyring
+          scripts/generate-bootstraps.sh
+        sparse-checkout-cone-mode: false
+    # Termux keeps each package file until it is superseded, so last run's downloads are mostly still
+    # current, and apt fetches only the rest. One entry is kept: it holds about 800 MB, and the build
+    # caches already take most of the repository's 10 GB.
+    - name: Restore the offline packages
+      id: offline-cache
+      if: needs.plan.outputs.offline == 'true'
+      uses: actions/cache/restore@v6
+      with:
+        path: offline-debs
+        key: termux-offline-debs-${{ github.run_id }}
+        restore-keys: termux-offline-debs-
+    - name: Add every Termux dependency
+      if: needs.plan.outputs.offline == 'true'
+      env:
+        MIRROR_MAIN: ${{ needs.plan.outputs.mirror_main }}
+        MIRROR_X11: ${{ needs.plan.outputs.mirror_x11 }}
+      run: |
+        python3 tools/offline-repo.py --main "$MIRROR_MAIN" --x11 "$MIRROR_X11" --cache offline-debs repo termux-packages
+        echo "OFFLINE_KEY=termux-offline-debs-$(ls offline-debs | sha256sum | cut -c1-16)" >> "$GITHUB_ENV"
+    - name: Save the offline packages
+      if: needs.plan.outputs.offline == 'true' && steps.offline-cache.outputs.cache-matched-key != env.OFFLINE_KEY
+      uses: actions/cache/save@v6
+      with:
+        path: offline-debs
+        key: ${{ env.OFFLINE_KEY }}
+    - name: Drop older offline package caches
+      if: needs.plan.outputs.offline == 'true'
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        gh cache list --repo "$GITHUB_REPOSITORY" --ref "$GITHUB_REF" --key termux-offline-debs- --limit 100 --json id,key \
+          --jq ".[] | select(.key != \"$OFFLINE_KEY\") | .id" | xargs -r -n1 gh cache delete --repo "$GITHUB_REPOSITORY"
+    - name: Build the offline tarball
+      if: needs.plan.outputs.offline == 'true'
+      # The packages are compressed already, so gzip's fastest level costs almost nothing in size.
+      run: |
+        tar -I 'gzip -1' -cf "$OFFLINE_TARBALL" repo
+        sha256sum "$OFFLINE_TARBALL" > "$OFFLINE_TARBALL.sha256"
+        ls -l "$OFFLINE_TARBALL"
+    - uses: actions/upload-artifact@v7
+      if: needs.plan.outputs.offline == 'true'
+      with:
+        name: livecd-termux-repo-aarch64-offline
+        path: |
+          ${{ env.OFFLINE_TARBALL }}
+          ${{ env.OFFLINE_TARBALL }}.sha256
+        compression-level: 0
+        retention-days: 30
+
     - name: Attach the packages to the release draft
       if: needs.plan.outputs.release != ''
       env:
         GH_TOKEN: ${{ github.token }}
         TAG: ${{ needs.plan.outputs.release }}
+        OFFLINE: ${{ needs.plan.outputs.offline }}
       run: |
         gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 ||
           gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --generate-notes --draft
-        gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" --clobber "$REPO_TARBALL" "$REPO_TARBALL.sha256"
+        files=("$REPO_TARBALL" "$REPO_TARBALL.sha256")
+        if test "$OFFLINE" = true; then
+          # GitHub refuses release files of 2 GiB or more. A larger tarball goes up in parts, which
+          # cat joins again; its .sha256 is for the joined file.
+          if test "$(stat -c %s "$OFFLINE_TARBALL")" -ge 2147483648; then
+            split -b 2000M -d -a 2 "$OFFLINE_TARBALL" "$OFFLINE_TARBALL.part"
+            files+=("$OFFLINE_TARBALL".part* "$OFFLINE_TARBALL.sha256")
+            echo "::warning::The offline tarball is over 2 GiB, so the release has it in parts: cat $OFFLINE_TARBALL.part* > $OFFLINE_TARBALL"
+          else
+            files+=("$OFFLINE_TARBALL" "$OFFLINE_TARBALL.sha256")
+          fi
+        fi
+        gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" --clobber "${files[@]}"

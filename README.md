@@ -58,6 +58,12 @@ repository, installs them and applies the default overlays. To use a release tar
 have, run `bash debian-livecd-termux/install.sh --repo-tarball FILE`. Its log is
 `~/.local/state/livecd/install.log`.
 
+An offline tarball, `livecd-termux-repo-aarch64-offline.tar.gz`, also carries every Termux package
+the installation can need. Given one with `--repo-tarball`, apt installs from it alone and never
+contacts a mirror. If a release has it in parts, join them first:
+`cat livecd-termux-repo-aarch64-offline.tar.gz.part* > livecd-termux-repo-aarch64-offline.tar.gz`.
+Some overlays still download files that are not apt packages, such as browser extensions.
+
 Then start the desktop. It opens the Termux:X11 app:
 
 ```sh

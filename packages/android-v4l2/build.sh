@@ -4,6 +4,7 @@ TERMUX_PKG_LICENSE="MIT"
 TERMUX_PKG_LICENSE_FILE="COPYING, LICENSE, android-v4l2-LICENSE"
 TERMUX_PKG_MAINTAINER="@cnshing"
 TERMUX_PKG_VERSION="0.1.0"
+TERMUX_PKG_REVISION=1
 # pw-v4l2 is built from the same PipeWire release as Termux's pipewire package, against its ABI.
 TERMUX_PKG_SRCURL="https://gitlab.freedesktop.org/pipewire/pipewire/-/archive/1.4.9/pipewire-1.4.9.tar.bz2"
 TERMUX_PKG_SHA256=e606aa3f6d53ec4c56fe35034d35cadfe0bbea1a5275e4e006dd7d1abaec6b92
@@ -28,9 +29,14 @@ termux_step_make() {
 		pipewire-v4l2/src/pipewire-v4l2.c pipewire-v4l2/src/v4l2-func.c $pw_flags -lm $LDFLAGS -o libpw-v4l2.so
 	$CC $CPPFLAGS $CFLAGS -Wall -shared -fPIC -U_FORTIFY_SOURCE \
 		"$TERMUX_PKG_BUILDER_DIR/v4l2.c" -ldl $LDFLAGS -o libandroid-v4l2.so
+	# Android's NDK libraries are found before $PREFIX/lib, which holds
+	# libandroid-stub's libmediandk.so and libbinder_ndk.so. Those load a second
+	# copy of Android's media and binder libraries in their own namespace, and
+	# Parcels passed between the two copies abort the camera's first capture
+	# session (seen on an Exynos Galaxy S20 with Android 13).
 	# shellcheck disable=SC2086
 	$CC $CPPFLAGS $CFLAGS -Wall "$TERMUX_PKG_BUILDER_DIR/camera-node.c" $pw_flags \
-		-lcamera2ndk -lmediandk -ldl $LDFLAGS -o camera-node
+		-lcamera2ndk -lmediandk -ldl -Wl,-rpath=/system/lib64 $LDFLAGS -o camera-node
 	$CC $CPPFLAGS $CFLAGS -Wall "$TERMUX_PKG_BUILDER_DIR/camera-list.c" \
 		-lcamera2ndk $LDFLAGS -o camera-list
 }

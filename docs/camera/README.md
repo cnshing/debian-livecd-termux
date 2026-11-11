@@ -35,7 +35,11 @@ Android camera → NDK Camera2 + AImageReader (Termux UID) → camera-node, one 
   device files it left, and starts everything over if PipeWire or WirePlumber
   exits. It stops with the session. Its programs run without
   `LD_LIBRARY_PATH`, which would load libandroid-stub's `libmediandk.so` in
-  place of Android's. Logs: `~/.local/state/android-v4l2/`.
+  place of Android's. For the same reason `camera-node` searches
+  `/system/lib64` before `$PREFIX/lib`. The stub loads a second copy of
+  Android's media and binder libraries, and on a Galaxy S20 (Exynos 990,
+  Android 13) that aborted every capture session. Logs:
+  `~/.local/state/android-v4l2/`.
 - **`camera-node`** publishes its device only once PipeWire has registered the
   node. When Android takes the camera away, the node keeps the same device and
   name and reopens that camera once no other camera of ours is open. Without

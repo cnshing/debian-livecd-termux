@@ -23,6 +23,9 @@ def panvk(abi):
 def use_panvk(env, abi):
     """Make PanVK the only Vulkan driver a process sees, with the libraries it loads."""
     icd = panvk(abi)
+    if icd is None:
+        raise RuntimeError('Install mesa-vulkan-icd-panvk-kbase and check access to /dev/mali0')
+    icd_library(icd, PANVK / abi)
     env.update(VK_DRIVER_FILES=str(icd), VK_ICD_FILENAMES=str(icd))
     # Bionic: versioned names for Termux's X11 libraries. glibc: newer xcb/Wayland
     # than Chrome bundles, so they must come first.
@@ -37,20 +40,49 @@ def use_panvk(env, abi):
     env[key] = ':'.join(filter(None, [str(directory), *inherited]))
 
 
+def icd_library(icd, root):
+    try:
+        library = Path(json.loads(icd.read_text())['ICD']['library_path'])
+    except (OSError, ValueError, KeyError, TypeError) as error:
+        raise RuntimeError('Invalid native Vulkan ICD: ' + str(icd)) from error
+    library = (library if library.is_absolute() else icd.parent / library).resolve()
+    if not library.is_file() or not library.is_relative_to(root.resolve()):
+        raise RuntimeError('Invalid native Vulkan driver path: ' + str(library))
+    return library
+
+
+def zink_driver():
+    # Preserve the Turnip path on Qualcomm; Mali uses the packaged kbase ICD.
+    if mali_usable() and not os.access('/dev/kgsl-3d0', os.R_OK | os.W_OK):
+        return 'panvk'
+    return 'turnip'
+
+
+def legacy_drawing(renderer):
+    # PanVK's accepted desktop transport is MIT-SHM. Raw DRI3 remains a probe.
+    return renderer == 'software' or zink_driver() == 'panvk'
+
+
 def process_gpu(pid):
     """Inspect the actual process, rather than inferring GPU use from its launcher."""
     proc = Path('/proc') / str(pid)
-    drivers = sorted({line.split()[-1] for line in (proc / 'maps').read_text().splitlines()
-                      if 'libvulkan_freedreno.so' in line})
+    maps = (proc / 'maps').read_text().splitlines()
+    turnip = sorted({line.split()[-1] for line in maps if 'libvulkan_freedreno.so' in line})
+    panfrost = sorted({line.split()[-1] for line in maps if 'libvulkan_panfrost.so' in line})
     devices = []
     for path in (proc / 'fd').iterdir():
         try:
             target = os.readlink(path)
-            if target == '/dev/kgsl-3d0':
+            if target in ('/dev/kgsl-3d0', '/dev/mali0'):
                 devices.append({'fd': int(path.name), 'path': target})
         except OSError:
             pass
-    return {'pid': pid, 'turnip_libraries': drivers, 'kgsl_devices': devices}
+    kgsl = [fd for fd in devices if fd['path'] == '/dev/kgsl-3d0']
+    mali = [fd for fd in devices if fd['path'] == '/dev/mali0']
+    driver = 'panvk' if panfrost and mali else 'turnip' if turnip and kgsl else None
+    return {'pid': pid, 'driver': driver, 'libraries': sorted(turnip + panfrost),
+            'devices': devices, 'turnip_libraries': turnip, 'kgsl_devices': kgsl,
+            'panvk_libraries': panfrost, 'mali_devices': mali}
 
 
 def preferred_renderer():
@@ -69,7 +101,8 @@ def apply_renderer(env, renderer):
                 'MESA_LOADER_DRIVER_OVERRIDE', 'VK_DRIVER_FILES', 'VK_ICD_FILENAMES',
                 'LIBGL_KOPPER_DISABLE', 'LIBGL_KOPPER_DRI2', 'ZINK_DEBUG',
                 'ZINK_DESCRIPTORS', 'TU_DEBUG', 'DRI_PRIME', 'MESA_VK_DEVICE_SELECT',
-                'vblank_mode', 'MESA_VK_WSI_PRESENT_MODE', 'MESA_VK_WSI_DEBUG', 'COGL_DRIVER'):
+                'vblank_mode', 'MESA_VK_WSI_PRESENT_MODE', 'MESA_VK_WSI_DEBUG', 'COGL_DRIVER',
+                'PANVK_KBASE_DRI3', 'LIVECD_NATIVE_VULKAN_DRIVER'):
         env.pop(key, None)
     env['LIVECD_NATIVE_RENDERER'] = renderer
     if renderer == 'software':
@@ -79,12 +112,15 @@ def apply_renderer(env, renderer):
         if software_icd.is_file():
             env['VK_DRIVER_FILES'] = str(software_icd)
     else:
-        if not ICD.is_file():
-            raise RuntimeError('Install the native GPU profile with python prebuilt/turnip/gpu-setup.py first')
-        driver = Path(json.loads(ICD.read_text())['ICD']['library_path'])
-        if not driver.is_file() or not driver.is_relative_to(GPU.resolve()):
-            raise RuntimeError('Invalid private native Turnip driver path')
+        driver = zink_driver()
+        if driver == 'panvk':
+            use_panvk(env, 'bionic')
+        else:
+            if not ICD.is_file():
+                raise RuntimeError('Install the native GPU profile with python prebuilt/turnip/gpu-setup.py first')
+            icd_library(ICD, GPU)
+            env.update(VK_DRIVER_FILES=str(ICD), VK_ICD_FILENAMES=str(ICD))
         env.update(GALLIUM_DRIVER='zink', MESA_LOADER_DRIVER_OVERRIDE='zink',
-                   VK_DRIVER_FILES=str(ICD), VK_ICD_FILENAMES=str(ICD), GSK_RENDERER='gl',
+                   LIVECD_NATIVE_VULKAN_DRIVER=driver, GSK_RENDERER='gl',
                    COGL_DRIVER='gles2')
     return env

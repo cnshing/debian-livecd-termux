@@ -225,7 +225,9 @@ jobs:
         path: termux-packages
     - name: Add this repository's recipes
       if: steps.earlier.outputs.built != 'true'
-      run: python3 tools/recipes.py prepare termux-packages
+      env:
+        PACKAGES: ${{ matrix.packages }}
+      run: python3 tools/recipes.py prepare termux-packages $PACKAGES
     - name: Download dependencies from the chosen Termux mirror
       if: steps.earlier.outputs.built != 'true'
       env:

@@ -29,6 +29,7 @@ build triangle -I"$src/offscreen" "$out/triangle-dump.c"
 build triangle-vb -I"$src/offscreen" "$out/triangle-vb-dump.c"
 build triangle-const -I"$src/offscreen" "$out/triangle-const-dump.c"
 build sync -I"$src/compute" "$src/sync/sync_test.c"
+build sync-fd "$here/sync-fd.c"
 build handshake -I"$kb" "$src/kbase-probe/handshake.c"
 rm "$out"/triangle*-dump.c
 {
@@ -37,5 +38,5 @@ rm "$out"/triangle*-dump.c
   if [ -n "$ndk" ]; then echo "ndk=$(sed -n 's/^Pkg.Revision *= *//p' "$ndk/source.properties")"
   else echo "cc=$("$cc" --version | head -1)"; fi
 } > "$out/PROVENANCE"
-(cd "$out" && sha256sum enumerate compute triangle triangle-vb triangle-const sync handshake > SHA256SUMS)
+(cd "$out" && sha256sum enumerate compute triangle triangle-vb triangle-const sync sync-fd handshake > SHA256SUMS)
 cat "$out/PROVENANCE" "$out/SHA256SUMS"

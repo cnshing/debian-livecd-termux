@@ -7,6 +7,7 @@ or stops the managed desktop. See docs/browsers/fullscreen-investigation.md.
 """
 import argparse
 import functools
+import fcntl
 import http.server
 import importlib.util
 import json
@@ -111,6 +112,23 @@ def live_state():
         (Path(os.environ['TMPDIR']) / '.X11-unix').glob('X*'))}
 
 
+def compositor_origin(box, frame_extents):
+    """Use X11 client shadow extents when Chrome includes them in outer size."""
+    if frame_extents is None:
+        return
+    left, right, top, bottom = frame_extents
+    box['rootX'] = box['screenX'] + left / box['dpr']
+    box['rootY'] = box['screenY'] + box['outerHeight'] - box['innerHeight'] - bottom / box['dpr']
+
+
+def active_frame_extents():
+    window = subprocess.run(['xdotool', 'getactivewindow'], capture_output=True, text=True, check=True).stdout.strip()
+    value = subprocess.run(['xprop', '-id', window, '_GTK_FRAME_EXTENTS'],
+                           capture_output=True, text=True, check=True).stdout
+    match = re.search(r'= (\d+), (\d+), (\d+), (\d+)', value)
+    return tuple(map(int, match.groups())) if match else None
+
+
 def worker(args):
     spec = importlib.util.spec_from_file_location('browser_probe', Path(__file__).with_name('test-browsers.py'))
     probe = importlib.util.module_from_spec(spec)
@@ -200,8 +218,9 @@ disable() { global.compositor.enable_unredirect(); }
             Path(f'/proc/{shell.pid}/maps').read_text().splitlines()
             if any(name in line for name in ('libmutter-cogl', 'libvulkan_freedreno', 'swrast_dri', 'zink_dri'))})
         time.sleep(3)
-        if args.composited_fullscreen and 'LIVECD_PRIVATE_FULLSCREEN_REDIRECTED' not in (args.out / 'shell.log').read_text():
-            raise RuntimeError('Private fullscreen capture extension did not activate')
+        if args.composited_fullscreen:
+            wait_for(lambda: 'LIVECD_PRIVATE_FULLSCREEN_REDIRECTED' in
+                     (args.out / 'shell.log').read_text(), 20)
         if shell.poll() is not None:
             raise RuntimeError(f'GNOME Shell exited during startup: {shell.returncode}')
         subprocess.run(['xdotool', 'key', 'Escape'], check=True)
@@ -222,6 +241,18 @@ disable() { global.compositor.enable_unredirect(); }
 
         browser.receive = receive_media
         browser.call('Media.enable')
+        result['webgl_probe'] = browser.evaluate("""(() => {
+const result={};for(const name of ['webgl','webgl2']) {
+const canvas=document.createElement('canvas');canvas.width=canvas.height=16;
+const gl=canvas.getContext(name,{antialias:false});
+if(!gl){result[name]={available:false};continue;}
+const debug=gl.getExtension('WEBGL_debug_renderer_info');
+gl.clearColor(1,0,0,1);gl.clear(gl.COLOR_BUFFER_BIT);
+const pixel=new Uint8Array(4);gl.readPixels(0,0,1,1,gl.RGBA,gl.UNSIGNED_BYTE,pixel);
+result[name]={available:true,version:gl.getParameter(gl.VERSION),
+renderer:debug?gl.getParameter(debug.UNMASKED_RENDERER_WEBGL):gl.getParameter(gl.RENDERER),
+pixel:Array.from(pixel),error:gl.getError(),lost:gl.isContextLost()};
+}return result;})()""")
         # SystemInfo belongs to the browser target, not the page target.
         page_socket = browser.sock
         browser.sock = None
@@ -419,9 +450,11 @@ b=(outerWidth-innerWidth)/2;return {left:r.left+(r.width-w)/2,top:r.top+(r.heigh
 width:w,height:h,dpr:devicePixelRatio,rootX:screenX+b,rootY:screenY+outerHeight-innerHeight-b,
 innerWidth,innerHeight,outerWidth,outerHeight,screenX,screenY}})()'''
                     box = browser.evaluate(box_expression)
+                    extents = active_frame_extents()
+                    compositor_origin(box, extents)
                     paths = {}
                     record = {'requested_frame': number, 'fullscreen': index == 0, 'seek': seek,
-                              'layout_before_capture': box, 'layers': {}}
+                              'layout_before_capture': box, 'gtk_frame_extents': extents, 'layers': {}}
                     case['pixels'].append(record)
                     # Read actual presentation first. DevTools screenshotting may
                     # temporarily resize/repaint the browser's compositor surface.
@@ -537,7 +570,21 @@ return {left:r.left+(r.width-w)/2,top:r.top+(r.height-h)/2,width:w,height:h,dpr:
         for pid in probe.tagged(tag):
             try:
                 command = Path(f'/proc/{pid}/cmdline').read_bytes().split(b'\0')
-                result['browser_processes'].append({'pid': pid, 'command': [c.decode(errors='replace') for c in command if c]})
+                proc = Path(f'/proc/{pid}')
+                drivers = sorted({line.split()[-1] for line in (proc / 'maps').read_text(errors='replace').splitlines()
+                    if any(name in line.lower() for name in ('vulkan', 'mali', 'angle', 'libegl', 'libgles',
+                                                            'libgallium', 'termuxva', 'libva.'))})
+                devices = {}
+                for fd in (proc / 'fd').iterdir():
+                    try:
+                        target = os.readlink(fd)
+                        if target.startswith(('/dev/mali', '/dev/kgsl', '/dev/dri')):
+                            devices[fd.name] = target
+                    except OSError:
+                        pass
+                result['browser_processes'].append({'pid': pid,
+                    'command': [c.decode(errors='replace') for c in command if c],
+                    'driver_libraries': drivers, 'gpu_device_fds': devices})
             except OSError:
                 pass
         result['shell_exit_before_cleanup'] = shell.poll() if shell else None
@@ -628,6 +675,11 @@ def main():
     else:
         args.out.mkdir(parents=True, exist_ok=False)
     print('OUTPUT', args.out, flush=True)
+    # Keep display allocation and before/after process snapshots exclusive.
+    # Separate invocations otherwise race on X sockets and count each other's
+    # private desktops as changes to shared state. The parent owns this lock.
+    session_lock = (Path(os.environ['TMPDIR']) / 'livecd-fullscreen-test.lock').open('a')
+    fcntl.flock(session_lock, fcntl.LOCK_EX)
     before = live_state()
     sys.path.insert(0, str(Path.home() / '.local/lib/livecd-native'))
     from desktop import environment

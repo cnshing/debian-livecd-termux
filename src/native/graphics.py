@@ -6,6 +6,29 @@ from pathlib import Path
 PREFIX = Path('/data/data/com.termux/files/usr')
 GPU = Path.home() / '.local/opt/livecd-native/gpu'
 ICD = GPU / 'share/vulkan/icd.d/freedreno_icd.aarch64.json'
+# mesa-vulkan-icd-panvk-kbase: PanVK on Android's own Mali kernel driver, per ABI.
+PANVK = PREFIX / 'lib/panvk-kbase'
+
+
+def mali_usable():
+    return os.access('/dev/mali0', os.R_OK | os.W_OK)
+
+
+def panvk(abi):
+    """The packaged PanVK ICD for a Bionic or glibc process, if this phone's Mali GPU is usable."""
+    icd = PANVK / abi / 'panfrost_icd.json'
+    return icd if icd.is_file() and mali_usable() else None
+
+
+def use_panvk(env, abi):
+    """Make PanVK the only Vulkan driver a process sees, with the libraries it loads."""
+    icd = panvk(abi)
+    env.update(VK_DRIVER_FILES=str(icd), VK_ICD_FILENAMES=str(icd))
+    # Bionic: versioned names for Termux's X11 libraries. glibc: newer xcb/Wayland
+    # than Chrome bundles, so they must come first.
+    key, directory = (('LD_LIBRARY_PATH', icd.parent / 'x11') if abi == 'bionic'
+                      else ('BIONILUX_LIBRARY_PATH', icd.parent / 'lib'))
+    env[key] = ':'.join(filter(None, [str(directory), env.get(key)]))
 
 
 def process_gpu(pid):

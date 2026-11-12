@@ -3,6 +3,15 @@
 Raw capture paths beginning with `temp/` refer to local files excluded from Git.
 See the [privacy notes](../privacy.md).
 
+The Turnip results below target the Adreno rig. For Exynos 990 / Mali-G77,
+see the [x1s investigation](X1S-GPU-VERIFICATION.md): native per-application
+Vulkan and Android GLES through VirGL work without ANGLE, while current Zink
+and mpv's Vulkan backend failed on that firmware. mpv's explicit GLES route now
+passes VP9/H.264/HEVC rendering and MediaCodec pixel checks. The Turnip/browser
+acceptance results below apply to the Adreno rig, not to x1s. The
+[no-ANGLE browser follow-up](X1S-BROWSER-VERIFICATION.md) records the remaining
+Chrome/Chromium rendering and hardware-video blockers.
+
 The desktop's existing Turnip/Zink renderer remains the common native GPU layer.
 The shared application launcher adds video support through ABI-specific private
 drivers and the existing Termux:VA MediaCodec daemon. Native Termux libraries

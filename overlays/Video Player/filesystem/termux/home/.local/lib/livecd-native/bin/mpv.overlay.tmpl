@@ -1,0 +1,12 @@
+#!/data/data/com.termux/files/usr/bin/python
+import os
+from pathlib import Path
+import sys
+
+prefix = Path('/data/data/com.termux/files/usr')
+shared = Path.home() / '.local/lib/livecd-native/acceleration.py'
+command = [str(prefix / 'bin/mpv'),
+           '--config-dir=' + str(Path.home() / '.config/livecd-native/mpv'), *sys.argv[1:]]
+if shared.is_file():
+    os.execv(sys.executable, [sys.executable, str(shared), 'run', '--profile', 'mpv', '--', *command])
+os.execv(command[0], command)

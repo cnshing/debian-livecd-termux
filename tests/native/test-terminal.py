@@ -44,6 +44,10 @@ def main():
         result = request('terminal', cwd=str(folder))
         window = next(iter(wait(lambda: windows() - before)))
         subprocess.run(['xdotool', 'windowactivate', '--sync', window], check=True)
+        wait(lambda: subprocess.check_output(['xdotool', 'getactivewindow'], text=True).strip() == window)
+        # A mapped GTK window can precede Ghostty's PTY/input initialization.
+        # Typing immediately dropped the leading "python" in the second window.
+        time.sleep(2)
         marker = STATE / ('terminal-' + action + '.json')
         marker.unlink(missing_ok=True)
         command = 'python -c ' + __import__('shlex').quote(

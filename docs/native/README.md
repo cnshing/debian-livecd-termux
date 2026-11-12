@@ -25,7 +25,7 @@ stages the Turnip GPU driver on Qualcomm GPUs and audits the recursive ELF depen
 rejects a running session, and a rerun finishes an interrupted one.
 
 ```sh
-livecd start                       # Zink on Qualcomm GPUs, otherwise software
+livecd start                       # saved renderer; software before GPU selection on Mali
 livecd status
 livecd validate
 livecd stop
@@ -281,6 +281,43 @@ path; its GLX path produced black application windows on this rig. GTK4 uses its
 GL renderer. GPU sessions start Termux:X11 without `-legacy-drawing`; software
 sessions retain the earlier display configuration. This does not establish a
 zero-copy display path or hardware video decoding.
+
+## Native PanVK + Zink on Mali
+
+On Mali phones, `--renderer zink` selects the packaged
+`mesa-vulkan-icd-panvk-kbase` Bionic ICD. The installer includes that package
+when `/dev/mali0` is readable and writable. Existing installations can install
+it with `pkg install mesa-vulkan-icd-panvk-kbase`. Use this repository's Mesa
+26.2.6-101 or later with its native-fence capability fix.
+
+```sh
+livecd stop
+livecd start --renderer zink
+livecd validate
+livecd select                      # save the validated renderer
+# Subsequent starts use the saved PanVK/Zink selection:
+livecd start
+```
+
+The desktop uses Mutter's GLES compositor and GTK's GL renderer over Zink,
+with MIT-SHM presentation and Termux:X11's legacy drawing mode. The packaged
+X11 soname aliases are scoped to PanVK's library lookup. Explicit `$PREFIX/lib`
+entries are removed from that lookup to avoid shadowing Android's Binder
+library. Raw DRI3 remains experimental. `livecd validate` checks the actual
+PanVK mapping and Mali descriptor, as well as the accelerated GL renderer;
+software rendering does not qualify as a GPU pass.
+
+Ghostty 1.4 needs OpenGL 4.3; the tested PanVK path exposes 4.2. The terminal
+launcher probes the core GL version and uses llvmpipe for Ghostty when required,
+while keeping the desktop on PanVK. The menu launcher and `livecd terminal`
+share this policy. This is a terminal fallback, not a terminal GPU pass.
+
+The integrated path uses the upstream release driver pinned by the package.
+The experimental point-size driver variant is excluded because it failed GTK
+presentation. The 30-minute soak remains pending. See
+[PanVK desktop integration](PANVK-DESKTOP.md) for validation and remaining limits.
+
+## Native renderer recovery
 
 Recovery and per-application overrides stay native:
 

@@ -176,6 +176,7 @@ def worker(args):
     os.environ['DBUS_SYSTEM_BUS_ADDRESS'] = os.environ['DBUS_SESSION_BUS_ADDRESS']
     out = args.out
     children, logs = [], []
+    terminal = None
     result = {'mode': args.mode, 'display': os.environ['DISPLAY'], 'captures': []}
     def check_displays():
         displays = {p.name for p in (Path(os.environ['TMPDIR']) / '.X11-unix').glob('X*')}
@@ -234,7 +235,12 @@ disable() { global.compositor.enable_unredirect(); }
                 '--gtk-single-instance=false', '--title=PanVK G77 Ghostty',
                 '--working-directory=' + str(out), '-e', 'bash', '--noprofile', '--norc',
                 str(shell_script)], 'ghostty', env=terminal_env)
-            wait(ready.exists)
+            def terminal_ready():
+                code = terminal.poll()
+                if code is not None:
+                    raise RuntimeError('Private Ghostty exited before shell readiness: ' + str(code))
+                return ready.exists()
+            wait(terminal_ready)
             def terminal_window():
                 if terminal.poll() is not None:
                     raise RuntimeError('Private Ghostty exited: ' + str(terminal.returncode))
@@ -243,7 +249,11 @@ disable() { global.compositor.enable_unredirect(); }
             wid = wait(terminal_window)[-1]
             run(['xdotool', 'windowactivate', '--sync', wid])
             time.sleep(2)
-            gpu = audit(terminal.pid)
+            try:
+                gpu = audit(terminal.pid)
+            except OSError as error:
+                result['ghostty_audit_error'] = repr(error)
+                gpu = {'pid': terminal.pid}
             result['ghostty'] = dict(gpu, software_control=args.ghostty_software, window=wid)
             result['ghostty']['geometry'] = run(['xdotool', 'getwindowgeometry', '--shell', wid], capture_output=True, text=True).stdout
             result['ghostty']['active'] = run(['xdotool', 'getactivewindow'], capture_output=True, text=True).stdout.strip()
@@ -260,7 +270,12 @@ disable() { global.compositor.enable_unredirect(); }
             run(['xdotool', 'key', 'Return'])
             time.sleep(2)
             screenshot(out / 'ghostty-after-input.png')
-            wait(identity.exists)
+            def identity_ready():
+                code = terminal.poll()
+                if code is not None:
+                    raise RuntimeError('Private Ghostty exited while waiting for input: ' + str(code))
+                return identity.exists()
+            wait(identity_ready)
             data = json.loads(identity.read_text())
             assert data['uid'] == os.getuid() and data['gl_override'] is None, data
             gpu = audit(terminal.pid)
@@ -382,6 +397,17 @@ disable() { global.compositor.enable_unredirect(); }
         result['error'] = traceback.format_exc()
         print(result['error'], flush=True)
     finally:
+        if terminal is not None:
+            result.setdefault('ghostty', {}).update(
+                pid=terminal.pid, returncode_before_cleanup=terminal.poll())
+            if terminal.poll() is None:
+                try:
+                    proc = Path('/proc') / str(terminal.pid)
+                    result['ghostty']['last_status'] = (proc / 'status').read_text()
+                    result['ghostty']['threads'] = {t.name: (t / 'wchan').read_text()
+                        for t in (proc / 'task').iterdir()}
+                except OSError as error:
+                    result['ghostty']['diagnostic_error'] = repr(error)
         (out / 'result.json').write_text(json.dumps(result, indent=2) + '\n')
         for p in reversed(children):
             stop(p)

@@ -184,10 +184,10 @@ def worker(args):
             result['foreign_displays'] = sorted(set(result.get('foreign_displays', [])) | (displays - expected))
             if not args.allow_other_displays:
                 raise RuntimeError('Another private display appeared: ' + repr(result['foreign_displays']))
-    def start(command, name):
+    def start(command, name, env=None):
         log = (out / (name + '.log')).open('w')
         logs.append(log)
-        p = subprocess.Popen(command, stdout=log, stderr=log)
+        p = subprocess.Popen(command, stdout=log, stderr=log, env=env)
         children.append(p)
         return p
     try:
@@ -220,15 +220,21 @@ disable() { global.compositor.enable_unredirect(); }
         if args.ghostty_probe:
             # Direct binary: exercise GPU rendering, bypassing the installed
             # software compatibility wrapper. Only this private display is used.
-            old_gsk = os.environ.get('GSK_RENDERER')
-            os.environ['GSK_RENDERER'] = 'cairo'
+            ready = out / 'ghostty-shell-ready'
+            shell_script = out / 'ghostty-shell.sh'
+            shell_script.write_text("printf '\\033[32mG77 port terminal ready\\033[0m\\n'\n"
+                + 'touch ' + shlex.quote(str(ready)) + '\n'
+                + "export PS1='g77-port$ '\nexec bash --noprofile --norc -i\n")
+            terminal_env = os.environ.copy()
+            terminal_env['GSK_RENDERER'] = args.ghostty_gsk
+            if args.ghostty_software:
+                from graphics import apply_renderer
+                terminal_env = apply_renderer(terminal_env, 'software')
             terminal = start([str(Path(os.environ['PREFIX']) / 'bin/ghostty'),
                 '--gtk-single-instance=false', '--title=PanVK G77 Ghostty',
-                '--working-directory=' + str(out), '-e', 'bash', '--noprofile', '--norc'], 'ghostty')
-            if old_gsk is None:
-                os.environ.pop('GSK_RENDERER', None)
-            else:
-                os.environ['GSK_RENDERER'] = old_gsk
+                '--working-directory=' + str(out), '-e', 'bash', '--noprofile', '--norc',
+                str(shell_script)], 'ghostty', env=terminal_env)
+            wait(ready.exists)
             def terminal_window():
                 if terminal.poll() is not None:
                     raise RuntimeError('Private Ghostty exited: ' + str(terminal.returncode))
@@ -237,22 +243,35 @@ disable() { global.compositor.enable_unredirect(); }
             wid = wait(terminal_window)[-1]
             run(['xdotool', 'windowactivate', '--sync', wid])
             time.sleep(2)
+            gpu = audit(terminal.pid)
+            result['ghostty'] = dict(gpu, software_control=args.ghostty_software, window=wid)
+            result['ghostty']['geometry'] = run(['xdotool', 'getwindowgeometry', '--shell', wid], capture_output=True, text=True).stdout
+            result['ghostty']['active'] = run(['xdotool', 'getactivewindow'], capture_output=True, text=True).stdout.strip()
+            screenshot(out / 'ghostty-before-input.png')
             identity = out / 'ghostty-identity.json'
             code = ('import os,json; from pathlib import Path; '
-                'print("\\033[32mPANVK G77 GHOSTTY GPU INPUT PASS\\033[0m"); '
+                'print("\\033[32mPANVK G77 GHOSTTY INPUT PASS\\033[0m"); '
                 'Path(' + repr(str(identity)) + ').write_text(json.dumps(dict(uid=os.getuid(), '
                 'home=str(Path.home()), experiment=os.environ.get("PANVK_G77_LWG"), '
                 'gl_override=os.environ.get("MESA_GL_VERSION_OVERRIDE"))))')
-            run(['xdotool', 'type', '--clearmodifiers', '--delay', '5', 'python -c ' + shlex.quote(code)])
+            command_file = out / 'ghostty-command.py'
+            command_file.write_text(code + '\n')
+            run(['xdotool', 'type', '--clearmodifiers', '--delay', '5', 'python ' + shlex.quote(str(command_file))])
             run(['xdotool', 'key', 'Return'])
+            time.sleep(2)
+            screenshot(out / 'ghostty-after-input.png')
             wait(identity.exists)
             data = json.loads(identity.read_text())
             assert data['uid'] == os.getuid() and data['gl_override'] is None, data
             gpu = audit(terminal.pid)
             driver = json.loads(Path(os.environ['VK_DRIVER_FILES']).read_text())['ICD']['library_path']
-            assert driver in gpu['libraries'], gpu
-            assert any(fd['target'] == '/dev/mali0' for fd in gpu['devices']), gpu
-            result['ghostty'] = dict(gpu, identity=data, window=wid)
+            if args.ghostty_software:
+                assert driver not in gpu['libraries'], gpu
+                assert not any(fd['target'] == '/dev/mali0' for fd in gpu['devices']), gpu
+            else:
+                assert driver in gpu['libraries'], gpu
+                assert any(fd['target'] == '/dev/mali0' for fd in gpu['devices']), gpu
+            result['ghostty'].update(identity=data)
             time.sleep(1)
             screenshot(out / 'ghostty.png')
             run(['xdotool', 'type', '--clearmodifiers', 'exit'])
@@ -443,7 +462,9 @@ def parent(args):
              '--mode', args.mode, '--out', str(args.out), '--cycles', str(args.cycles),
              '--restart-cycles', str(args.restart_cycles), '--soak-seconds', str(args.soak_seconds),
              *(['--allow-other-displays'] if args.allow_other_displays else []),
-             *(['--ghostty-probe'] if args.ghostty_probe else [])],
+             *(['--ghostty-probe'] if args.ghostty_probe else []),
+             *(['--ghostty-software'] if args.ghostty_software else []),
+             '--ghostty-gsk', args.ghostty_gsk],
              env=env, start_new_session=True)
         code = session.wait(timeout=480 + args.soak_seconds)
     finally:
@@ -478,6 +499,8 @@ if __name__ == '__main__':
     parser.add_argument('--mode', choices=('shm', 'raw'), default='shm')
     parser.add_argument('--server', choices=('lorie', 'xvfb'), default='lorie')
     parser.add_argument('--cycles', type=int, default=20)
+    parser.add_argument('--ghostty-gsk', choices=('cairo', 'gl'), default='cairo')
+    parser.add_argument('--ghostty-software', action='store_true', help='Software control for the Ghostty probe')
     parser.add_argument('--ghostty-probe', action='store_true', help='Check direct GPU Ghostty on the private display')
     parser.add_argument('--restart-cycles', type=int, default=0)
     parser.add_argument('--soak-seconds', type=int, default=0)

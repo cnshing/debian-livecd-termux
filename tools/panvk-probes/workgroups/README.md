@@ -30,7 +30,9 @@ python workgroups/run.py --baseline /private/libvulkan_panfrost.so \
   --patched /private/patched/libvulkan_panfrost.so --out /private/results-new
 ```
 
-The runner tests baseline and opt-out controls before enabling the pass. It
+The runner tests 128/256-invocation baseline and opt-out controls before enabling
+the pass. Larger workgroups are tested only with the pass enabled, since register
+pressure can lower the original hardware residency limit. It
 never dispatches beyond advertised limits. Each successful case checks all 16
 output words per invocation against a CPU oracle: local/global IDs, workgroup
 sizes, multiple dispatch groups, shared-memory atomics and barriers, subgroup

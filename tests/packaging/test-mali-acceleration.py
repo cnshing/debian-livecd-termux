@@ -123,6 +123,13 @@ class PanVKBrowsers(unittest.TestCase):
         self.assertEqual(env['LD_LIBRARY_PATH'].split(':')[0], str(self.panvk / 'bionic/x11'))
         self.assertNotIn('TU_DEBUG', env)
 
+    def test_chromium_from_the_desktop_never_sees_libandroid_stub(self):
+        # The desktop session's library path, as a launched browser inherits it.
+        os.environ['LD_LIBRARY_PATH'] = '/gnome-48/lib:' + str(acceleration.PREFIX / 'lib')
+        _, env = acceleration.prepare('chromium', ['/chromium'], 'bionic', 'off')
+        paths = env['LD_LIBRARY_PATH'].split(':')
+        self.assertEqual(paths, [str(self.panvk / 'bionic/x11'), '/gnome-48/lib'])
+
     def test_chrome_uses_glibc_panvk_ahead_of_its_own_libraries(self):
         argv, env = acceleration.prepare('chrome', ['/chrome'], 'glibc', 'off')
         self.assertTrue(argv[0].endswith('/bionilux'))

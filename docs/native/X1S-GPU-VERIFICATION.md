@@ -88,6 +88,15 @@ drivers, not PanVK. The current
 list G77. There is no packaged, supported PanVK route established here for
 Samsung's existing kernel interface. Rooting alone would not supply one.
 
+**Update 2026-11-11:** that route now exists. Zenith's PanVK fork
+(`panvk-kbase-android` v26.3.1) talks to Android's own `mali_kbase` through
+`/dev/mali0`, needing no root or kernel change. On this phone it reports Mali-G77
+MC11 (`0x90800011`), kbase JM 11.35, stock atom layout (stride 56), ION memory and
+Vulkan 1.3, and passes compute, offscreen, sync and X11 presentation checks; Zink on
+it gives GL 4.2 / GLES 3.1. It is packaged as `mesa-vulkan-icd-panvk-kbase` and
+used by the browsers ([X1S-BROWSER-VERIFICATION.md](X1S-BROWSER-VERIFICATION.md)).
+The desktop does not use it yet.
+
 The Vulkan dump lacks `VK_KHR_dynamic_rendering`, `VK_KHR_maintenance5`, both
 robustness2 extensions and `VK_EXT_border_color_swizzle`, which appear in current
 [Zink minimum requirements](https://docs.mesa3d.org/drivers/zink.html).
@@ -240,4 +249,3 @@ artifact. The installed Chromium already matches an earlier VA-API-enabled CI
 build. See the [browser follow-up](X1S-BROWSER-VERIFICATION.md) for final serial
 Chrome/Chromium tests and the Moto Pad reference analysis. No browser hardware
 acceptance pass is claimed.
-

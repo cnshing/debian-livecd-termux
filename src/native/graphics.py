@@ -28,7 +28,13 @@ def use_panvk(env, abi):
     # than Chrome bundles, so they must come first.
     key, directory = (('LD_LIBRARY_PATH', icd.parent / 'x11') if abi == 'bionic'
                       else ('BIONILUX_LIBRARY_PATH', icd.parent / 'lib'))
-    env[key] = ':'.join(filter(None, [str(directory), env.get(key)]))
+    inherited = env.get(key, '').split(':')
+    if abi == 'bionic':
+        # The desktop session names $PREFIX/lib, where libandroid-stub's libbinder_ndk.so
+        # would shadow Android's: the driver's libnativewindow -> /system/lib64/libui.so then
+        # fails to load. Termux programs find $PREFIX/lib through their RUNPATH anyway.
+        inherited = [p for p in inherited if p and Path(p).resolve() != (PREFIX / 'lib').resolve()]
+    env[key] = ':'.join(filter(None, [str(directory), *inherited]))
 
 
 def process_gpu(pid):

@@ -1,9 +1,46 @@
-# Chrome and Chromium on x1s: no-ANGLE qualification
+# Chrome and Chromium on x1s
 
-**Both browsers were tested. Neither passes hardware rendering/video acceptance
-under the no-ANGLE constraint.** Native Chromium can use Mali Vulkan for Skia
-rasterization, but its display compositing and video decoding remain software.
-Google Chrome starts through Bionilux; its Vulkan bridge does not initialize.
+## Current state (2026-11-11): ANGLE on PanVK
+
+**Both browsers now render on the GPU.** The user approved ANGLE on PanVK, a different stack
+from the earlier ANGLE-over-vendor-driver failures. `mesa-vulkan-icd-panvk-kbase` packages
+Zenith's PanVK, which drives the stock kernel's `/dev/mali0` (Mali-G77, kbase JM 11.35) with
+Vulkan 1.3. The shared launcher gives Chromium and Chrome ANGLE's Vulkan back end on it
+whenever the package is installed and `/dev/mali0` is usable, whatever the desktop renderer.
+
+| Through the installed `chromium-browser` / `google-chrome` | Chromium 156 | Chrome |
+| --- | --- | --- |
+| GPU compositing, WebGL 1/2, WebGPU | enabled | enabled |
+| Renderer | `ANGLE (ARM, Vulkan 1.3.363 (Mali-G77 MC11), panvk)` | same |
+| WebGL readback, compositor capture | correct | correct |
+| Hardware video decoding | **no**: software VP9/H.264 decoders | **no**, same |
+| Hardware video encoding | **no**: no encode profiles advertised | not run |
+
+Why video is still software:
+
+- **Decoding.** Chromium (with ANGLE on Vulkan) imports each decoded frame as a dma-buf, via
+  `vaExportSurfaceHandle`. On Mali, Termux:VA's only usable bridge backend is `sw` (llvmpipe),
+  whose surfaces are CPU memory: export fails (`resource_get_handle failed`, Chromium:
+  `invalid VASurfaceID`) and both browsers fall back to software. `TERMUX_VA_CONTIGUOUS_DMABUF=1`
+  allocates the ION dma-buf, but llvmpipe cannot import it. The fix is in the Termux:VA Mesa
+  bridge: dma-buf-backed CPU surfaces (ION here) that it can export, which PanVK can import
+  (`VK_EXT_external_memory_dma_buf`, DRM format modifiers). Not started.
+- **Encoding.** Chromium on Linux encodes through VA-API only with the
+  `AcceleratedVideoEncoder` feature, which no launcher enables on any phone. With it, the
+  private daemon lists `OMX.Exynos.AVC/HEVC/VP9.Encoder` and Chromium creates and drops a
+  VA encoder, but advertises no encode profiles, so WebCodecs `prefer-hardware` is
+  unsupported. Chromium requires CBR rate control (and packed headers for H.264) on the
+  driver's encode config; what Termux:VA reports there has not been checked. Browser
+  encoding was never qualified on Adreno either ([ENCODING.md](ENCODING.md)).
+
+Evidence: local `temp/gpu-x1s/panvk-runs/30-37*` and `BROWSER-GL-DECISION.md`.
+
+## Earlier no-ANGLE qualification
+
+**Both browsers were tested. Neither passed hardware rendering/video acceptance
+under the no-ANGLE constraint.** Native Chromium could use Mali Vulkan for Skia
+rasterization, but its display compositing and video decoding remained software.
+Google Chrome started through Bionilux; its Vulkan bridge did not initialize.
 Firefox workloads remain skipped under the user's instruction.
 
 See [the device investigation](X1S-GPU-VERIFICATION.md) for firmware and the

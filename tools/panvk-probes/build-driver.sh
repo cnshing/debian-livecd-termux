@@ -22,6 +22,10 @@ export HOST_TOOLS="$zenith/build/host-tools-ci/bin"
 export PATH="$HOST_TOOLS:$PATH"
 if [ "$kind" = android ]; then
   export X11_INCLUDE="$deps/include"
+  bash "$zenith/scripts/prepare-x11-headers.sh" "$zenith/work/android-deps-x11"
+  # Only the generated header-only .pc files may enter the NDK target.
+  # Host pkg-config paths otherwise override pkg_config_libdir in the cross file.
+  unset PKG_CONFIG_PATH
   MESA="$mesa" BDIR="$zenith/build/android-ci" DDIR="$out" \
     bash "$zenith/scripts/build-android.sh" --profile g615-v11-csf --api 29 \
       --ndk "${ANDROID_NDK_LATEST_HOME:-${ANDROID_NDK_HOME:?missing NDK}}"

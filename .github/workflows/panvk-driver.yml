@@ -14,6 +14,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: panvk-source-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   ZENITH_COMMIT: cf70e02b918e1864cbcd746a7fefa57b96c673ce
 

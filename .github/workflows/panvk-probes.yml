@@ -9,7 +9,11 @@ on:
   push:
     paths:
     - .github/workflows/panvk-probes.yml
-    - tools/panvk-probes/**
+    - tools/panvk-probes/build.sh
+    - tools/panvk-probes/build-features.sh
+    - tools/panvk-probes/add-dump.py
+    - tools/panvk-probes/glibc-deps.sh
+    - tools/panvk-probes/sync-fd.c
 
 permissions:
   contents: read

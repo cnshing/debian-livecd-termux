@@ -24,6 +24,14 @@ int main(int argc, char **argv)
    uint32_t count = 1;
    VkPhysicalDevice physical;
    if (enumerate(instance, &count, &physical) || count != 1) return 1;
+   PFN_vkGetPhysicalDeviceProperties2 get_properties =
+      (PFN_vkGetPhysicalDeviceProperties2)gipa(instance, "vkGetPhysicalDeviceProperties2");
+   VkPhysicalDeviceDriverProperties driver = {.sType=VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES};
+   VkPhysicalDeviceProperties2 device_props = {.sType=VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2,
+      .pNext=&driver};
+   get_properties(physical, &device_props);
+   printf("device=%s driverID=%u driverName=%s driverInfo=%s\n",
+      device_props.properties.deviceName, driver.driverID, driver.driverName, driver.driverInfo);
    VkExternalSemaphoreHandleTypeFlagBits types[] = {
       VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_FD_BIT,
       VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_SYNC_FD_BIT};

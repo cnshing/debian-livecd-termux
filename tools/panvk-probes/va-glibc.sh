@@ -15,7 +15,7 @@ apt-get install -y -qq --no-install-recommends build-essential meson ninja-build
   libdrm-dev libva-dev zlib1g-dev libzstd-dev libexpat1-dev libx11-dev libx11-xcb-dev libxext-dev \
   libxfixes-dev libxcb1-dev libxcb-dri3-dev libxcb-present-dev libxcb-randr0-dev libxcb-sync-dev \
   libxcb-xfixes0-dev libxcb-shm0-dev libxcb-dri2-0-dev libxcb-glx0-dev libxshmfence-dev libxrandr-dev \
-  libwayland-dev wayland-protocols >/dev/null
+  libwayland-dev libwayland-egl-backend-dev wayland-protocols >/dev/null
 work=$(mktemp -d); cd "$work"
 curl -sSfL -o mesa.tar.gz "https://codeload.github.com/lfdevs/mesa-for-android-container/tar.gz/$commit"
 echo "$sha  mesa.tar.gz" | sha256sum -c -

@@ -1,0 +1,23 @@
+Ignore the application's GALLIUM_DRIVER in this private VA build.
+
+Applications set GALLIUM_DRIVER for their own Mesa: Firefox on Mali VirGL needs
+virpipe, and the Adreno desktop uses zink. This Mesa holds only freedreno, zink
+and softpipe, and its software screen picker stops at the first driver named by
+GALLIUM_DRIVER, so the Termux:VA software backend failed with "llvmpipe screen
+creation failed" inside any such process. Read TERMUX_VA_GALLIUM_DRIVER
+instead; unset, the picker falls back to softpipe as for other VA clients.
+
+--- a/src/gallium/auxiliary/target-helpers/sw_helper.h
++++ b/src/gallium/auxiliary/target-helpers/sw_helper.h
+@@ -74,7 +74,10 @@
+ {
+    UNUSED bool only_sw = debug_get_bool_option("LIBGL_ALWAYS_SOFTWARE", false);
+    const char *drivers[] = {
+-      (sw_vk ? "" : debug_get_option("GALLIUM_DRIVER", "")),
++      /* Termux:VA: GALLIUM_DRIVER belongs to the application's own Mesa (virpipe, zink,
++       * llvmpipe), which this private VA build may lack; naming a missing driver here
++       * would stop the search. Only TERMUX_VA_GALLIUM_DRIVER selects one. */
++      (sw_vk ? "" : debug_get_option("TERMUX_VA_GALLIUM_DRIVER", "")),
+ #if defined(GALLIUM_D3D12)
+       (sw_vk || only_sw) ? "" : "d3d12",
+ #endif

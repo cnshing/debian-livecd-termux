@@ -11,6 +11,7 @@ p = argparse.ArgumentParser()
 p.add_argument('--abi', choices=('android', 'glibc'), required=True)
 p.add_argument('--out', type=Path, required=True)
 p.add_argument('--driver', type=Path)
+p.add_argument('--basic', action='store_true', help='Run enumerate/compute/triangles/sync controls instead')
 a = p.parse_args()
 a.out.mkdir(parents=True, exist_ok=False)
 home = Path.home()
@@ -30,10 +31,15 @@ tests += [('phase7-compute', [case]) for case in ('quads', 'linear', 'fma', 'rel
 if a.abi == 'android':
     tests += [(name, []) for name in ('ahb', 'ahb_linear', 'ahb_render', 'ahb_vendor', 'ahb_vendor_linear', 'fdimport', 'fdimport_mtk')]
     tests += [('ahb_linear', ['read'])]
+if a.basic:
+    features = pan / ('probes' if a.abi == 'android' else 'glibc/probes')
+    tests = [(name, []) for name in ('enumerate', 'compute', 'triangle', 'triangle-vb',
+                                    'triangle-const', 'sync', 'sync-fd')]
 results = {'abi': a.abi, 'driver': str(driver), 'tests': []}
 for name, args in tests:
     label = '-'.join([name, *args])
     binary = features / name
+    env['TRIANGLE_DUMP'] = str(a.out / (label + '.rgba'))
     command = ['timeout', '-k', '5', '45']
     if a.abi == 'glibc':
         command.append('bionilux')

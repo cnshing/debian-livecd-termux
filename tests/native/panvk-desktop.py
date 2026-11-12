@@ -21,7 +21,8 @@ sys.path.insert(0, str(HOME / 'gpu-x1s/browser-tests/browsers'))
 
 
 def run(command, **kwargs):
-    return subprocess.run(command, check=True, timeout=25, **kwargs)
+    kwargs.setdefault('check', True)
+    return subprocess.run(command, timeout=25, **kwargs)
 
 
 def wait(check, seconds=40):
@@ -88,7 +89,8 @@ def audit(pid):
         except OSError:
             pass
     return {'pid': pid, 'libraries': sorted({s.split()[-1] for s in maps.splitlines()
-            if any(k in s for k in ('panfrost', 'gallium', 'EGL', 'GLES', 'mutter-cogl', 'angle'))}),
+            if any(k in s for k in ('panfrost', 'gallium', 'EGL', 'GLES', 'mutter-cogl',
+                                   'angle', 'libX11', 'libxcb', 'libxshmfence'))}),
             'devices': devices, 'fd_count': len(list((proc / 'fd').iterdir())),
             'status': (proc / 'status').read_text()}
 
@@ -174,6 +176,13 @@ def worker(args):
     out = args.out
     children, logs = [], []
     result = {'mode': args.mode, 'display': os.environ['DISPLAY'], 'captures': []}
+    def check_displays():
+        displays = {p.name for p in (Path(os.environ['TMPDIR']) / '.X11-unix').glob('X*')}
+        expected = {'X0', 'X' + os.environ['DISPLAY'][1:]}
+        if displays - expected:
+            result['foreign_displays'] = sorted(set(result.get('foreign_displays', [])) | (displays - expected))
+            if not args.allow_other_displays:
+                raise RuntimeError('Another private display appeared: ' + repr(result['foreign_displays']))
     def start(command, name):
         log = (out / (name + '.log')).open('w')
         logs.append(log)
@@ -224,14 +233,17 @@ disable() { global.compositor.enable_unredirect(); }
         app = start([sys.executable, __file__, '--gtk', '--out', str(out)], 'gtk')
         wait(lambda: (out / 'gtk-state.json').exists())
         window = wait(lambda: run(['xdotool', 'search', '--name', '^PanVK GTK4 oracle$'],
-                                  capture_output=True, text=True).stdout.strip().splitlines())[-1]
+                                  check=False, capture_output=True, text=True).stdout.strip().splitlines())[-1]
         result['gtk_initial'] = json.loads((out / 'gtk-state.json').read_text())
         result['gtk_process'] = audit(app.pid)
         phase = 0
         for cycle in range(args.cycles):
             for full in (False, True):
+                check_displays()
                 phase += 1
-                (out / 'command.json').write_text(json.dumps({'phase': phase, 'fullscreen': full}))
+                command_file = out / 'command.tmp'
+                command_file.write_text(json.dumps({'phase': phase, 'fullscreen': full}))
+                command_file.replace(out / 'command.json')
                 wait(lambda: json.loads((out / 'gtk-state.json').read_text())['phase'] == phase)
                 if not full:
                     width, height = ((641, 359), (803, 451), (527, 317), (960, 541))[cycle % 4]
@@ -246,6 +258,8 @@ disable() { global.compositor.enable_unredirect(); }
                     'geometry': geometry, 'wm_state': props, 'fullscreen_requested': full})
                 if shell.poll() is not None or app.poll() is not None:
                     raise RuntimeError('Shell or GTK application exited')
+            if (cycle + 1) % 5 == 0:
+                print('CYCLES', cycle + 1, 'OF', args.cycles, flush=True)
         result['shell_end'] = audit(shell.pid)
         result['gtk_end'] = audit(app.pid)
         if args.soak_seconds:
@@ -266,6 +280,7 @@ disable() { global.compositor.enable_unredirect(); }
             begin = time.monotonic()
             index = 0
             while time.monotonic() - begin < args.soak_seconds:
+                check_displays()
                 for name, proc in (('shell', shell), ('cube', cube), ('gears', gears)):
                     if proc.poll() is not None:
                         result['unexpected_process_exit'] = {'name': name, 'pid': proc.pid,
@@ -320,10 +335,12 @@ def parent(args):
     fs = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(fs)
     args.out.mkdir(parents=True, exist_ok=False)
+    print('OUTPUT', args.out, flush=True)
     lock = (Path(os.environ['TMPDIR']) / 'livecd-fullscreen-test.lock').open('a')
+    print('Waiting for the shared private-display lock', flush=True)
     fcntl.flock(lock, fcntl.LOCK_EX)
     before = fs.live_state()
-    if any(name != 'X0' for name in before['displays']):
+    if not args.allow_other_displays and any(name != 'X0' for name in before['displays']):
         raise RuntimeError('Another private X display is active; wait for its owner to finish: ' +
                            repr(before['displays']))
     status_before = run([str(HOME / '.local/bin/livecd'), 'status'], capture_output=True, text=True).stdout
@@ -381,7 +398,8 @@ def parent(args):
         (args.out / 'environment.json').write_text(json.dumps(env, indent=2))
         session = subprocess.Popen(['dbus-run-session', '--', sys.executable, __file__, '--worker',
              '--mode', args.mode, '--out', str(args.out), '--cycles', str(args.cycles),
-             '--restart-cycles', str(args.restart_cycles), '--soak-seconds', str(args.soak_seconds)],
+             '--restart-cycles', str(args.restart_cycles), '--soak-seconds', str(args.soak_seconds),
+             *(['--allow-other-displays'] if args.allow_other_displays else [])],
              env=env, start_new_session=True)
         code = session.wait(timeout=480 + args.soak_seconds)
     finally:
@@ -421,6 +439,8 @@ if __name__ == '__main__':
     parser.add_argument('--driver', type=Path)
     parser.add_argument('--mesa-lib-dir', type=Path)
     parser.add_argument('--no-xlibs', action='store_true', help='Verify the rebuilt driver uses Termux sonames directly')
+    parser.add_argument('--allow-other-displays', action='store_true',
+                        help='Record other private displays without rejecting a short correctness run')
     parser.add_argument('--worker', action='store_true')
     parser.add_argument('--gtk', action='store_true')
     args = parser.parse_args()
@@ -428,5 +448,7 @@ if __name__ == '__main__':
         parser.error('cycles must be positive; restart and soak counts must be nonnegative')
     if args.server == 'xvfb' and args.mode == 'raw':
         parser.error('raw DRI3 requires the private lorie server')
+    if args.allow_other_displays and args.soak_seconds:
+        parser.error('overlapping displays are supported only for short correctness checks')
     signal.signal(signal.SIGTERM, lambda signum, frame: sys.exit(128 + signum))
     sys.exit(gtk(args.out) if args.gtk else worker(args) if args.worker else parent(args))

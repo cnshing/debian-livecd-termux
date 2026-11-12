@@ -77,3 +77,20 @@ jobs:
       with:
         name: panvk-glibc-deps-aarch64
         path: out/
+
+  # Research: the Termux:VA bridge for glibc (Google Chrome) with dma-buf software surfaces.
+  va-glibc:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 45
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions/checkout@v4
+      with:
+        ref: main
+        path: main
+    - name: Build in Debian trixie
+      run: docker run --rm -v "$PWD:/w" -w /w debian:trixie bash tools/panvk-probes/va-glibc.sh main out-va
+    - uses: actions/upload-artifact@v4
+      with:
+        name: termux-va-glibc-aarch64
+        path: out-va/

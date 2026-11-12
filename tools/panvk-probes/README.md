@@ -16,7 +16,9 @@ toolchain pin.
 through p0175, then builds Android API 29 and arm64 glibc ICDs in CI. It retains
 an unmodified baseline and a `patched/` variant. The variant uses Termux's X11
 sonames and configures v9 per-vertex point sizes. glibc's variant RUNPATH is
-postprocessed to `$ORIGIN`; this is recorded in `PATCHES.txt`.
+postprocessed to `$ORIGIN`; this is recorded in `PATCHES.txt`. Each build job
+reconstructs and asserts base tree `4a8e9a8cbb34b9fb91a9ad2040319aceb075b973`
+before applying the local patch series.
 
 `prepare-rc5-tree.sh` makes timestamped commits. Compare reconstructed Git
 **tree** IDs, patch inputs, and runtime readbacks. The release's
@@ -49,6 +51,9 @@ captures and process resource audits. This tests concurrent stability, not
 individual-workload performance. Increase the outer timeout for a soak.
 `--driver /absolute/path/libvulkan_panfrost.so` selects a private rebuilt ICD;
 `--mesa-lib-dir /private/extraction/lib` selects a privately extracted Mesa.
+`--no-xlibs` removes the private X11 soname symlink directory to check the
+rebuilt Android driver's Termux sonames directly; this presentation check
+remains pending in the recorded continuation.
 
 The harness takes the existing fullscreen-test lock, allocates a private
 display, D-Bus and XDG paths, disables the private battery shell helper, and
@@ -56,6 +61,10 @@ compares shared desktop/daemon process start times and status before and after.
 It terminates only its children and services carrying its exact test marker,
 checking process start times before signaling escaped services. It also removes
 the private lorie socket/lock. Internal workers refuse the live display.
+The harness conservatively refuses other private displays and checks for new
+ones during cycles and soaks. This supports attribution of failures and
+resource measurements; another display alone does not invalidate correct
+pixels. GTK commands are replaced atomically to avoid partial JSON reads.
 
 Retrieve `result.json`, `isolation.json`, logs, and PNGs. On the host:
 
@@ -64,7 +73,8 @@ python3 tests/native/check-panvk-desktop.py /path/to/retrieved/output
 ```
 
 The checker requires PanVK maps and Mali FDs in Shell and GTK4, correct window
-and fullscreen geometry, and 100 color samples per captured GTK4 frame. It
+and fullscreen geometry, and every quadrant interior pixel plus 100 distributed
+color samples per captured GTK4 frame. It
 rejects a deliberately stale color phase as a negative control. Shell,
 Nautilus, and Settings captures also require visual inspection. Passing these
 checks does not qualify all applications, codecs, browsers, or device families.
@@ -74,6 +84,9 @@ The wider runner is `tests/native/run-panvk-features.py`. Place the compiled
 `--abi android` or `--abi glibc` with a fresh output directory. Each process has
 its own kill timeout. Exit zero is recorded separately from rendered-pixel
 acceptance; unsupported extensions and missing DMA heaps are not successes.
+`--driver /absolute/path/libvulkan_panfrost.so` selects a rebuilt ICD.
+`--basic` runs enumerate, compute, three triangle readbacks, sync, and sync-fd
+from `panvk/probes/` (Android) or `panvk/glibc/probes/` instead of the wider suite.
 `graphics-software-control` deliberately selects a CPU device and must never
 be counted as hardware evidence. The original graphics test's thresholds stay
 unchanged, and `FEATURE_DUMP=/path/file.rgba` enables its 64x64 RGBA dump.
@@ -85,3 +98,6 @@ from WSI-owned buffers; successful presentation does not qualify app AHB import.
 Keep builds in CI. Do not run the reference `build-glibc.sh` on an x86 host: its
 fallback dispatches to a rooted phone chroot. Do not run Firefox workloads or
 select ANGLE under this research scope.
+
+See [the continuation results](../../docs/native/PANVK-X1S-RESEARCH.md) for
+validated short runs, the failed partial soak, and remaining acceptance.

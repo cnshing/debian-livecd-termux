@@ -9,6 +9,7 @@ on:
     - tools/panvk-probes/prepare-driver.sh
     - tools/panvk-probes/driver-deps.sh
     - tools/panvk-probes/build-driver.sh
+    - tools/panvk-probes/driver-patches/**
 
 permissions:
   contents: read
@@ -67,7 +68,7 @@ jobs:
           libllvmspirvlib-18-dev spirv-tools glslang-tools libdrm-dev libexpat1-dev zlib1g-dev \
           libxcb1-dev libxcb-dri3-dev libxcb-present-dev libxcb-shm0-dev libxcb-sync-dev \
           libxcb-xfixes0-dev libxcb-randr0-dev libx11-dev libx11-xcb-dev libxshmfence-dev \
-          libwayland-dev wayland-protocols bison flex
+          libwayland-dev wayland-protocols bison flex patchelf
         python3 -m venv --system-site-packages .venv
         .venv/bin/pip install 'meson>=1.7,<2'
         echo "$PWD/.venv/bin" >> "$GITHUB_PATH"

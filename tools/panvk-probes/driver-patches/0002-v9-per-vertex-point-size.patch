@@ -1,0 +1,37 @@
+Honor gl_PointSize in the Valhall v9 JM malloc-vertex path.
+
+The release leaves point_size_array_format at NONE and uses the rasterizer
+line width for every primitive. With an 11-pixel shader point after a
+5-pixel line, the wider graphics test renders a 5x5 point. Follow the
+Panfrost JM path: select FP16 point sizes from the vertex packet and use
+the fixed width only for lines (defaulting to 1 for other primitives).
+
+--- a/src/panfrost/vulkan/jm/panvk_vX_cmd_draw.c
++++ b/src/panfrost/vulkan/jm/panvk_vX_cmd_draw.c
+@@ -4775,6 +4775,8 @@
+    const struct vk_rasterization_state *rs = &dyns->rs;
+    enum mesa_prim reduced = u_reduced_prim(info->prim);
+    bool polygon = reduced == MESA_PRIM_TRIANGLES;
++   const bool writes_point_size =
++      info->prim == MESA_PRIM_POINTS && vs->info.vs.writes_point_size;
+    float z_min, z_max;
+    if (info->viewport_clamp)
+       v9_viewport_depth_range(cmdbuf, info->viewport_clamp - 1, &z_min, &z_max);
+@@ -4800,6 +4802,8 @@
+ 
+    pan_section_pack(job.cpu, MALLOC_VERTEX_JOB, PRIMITIVE, cfg) {
+       cfg.draw_mode = v9_translate_prim(info->prim);
++      if (writes_point_size)
++         cfg.point_size_array_format = MALI_POINT_SIZE_ARRAY_FORMAT_FP16;
+       cfg.allow_rotating_primitives = polygon;
+       cfg.primitive_restart = false;
+       cfg.low_depth_cull = cfg.high_depth_cull =
+@@ -4839,7 +4843,7 @@
+    }
+    v9_emit_scissor(cmdbuf, pan_section_ptr(job.cpu, MALLOC_VERTEX_JOB, SCISSOR));
+    pan_section_pack(job.cpu, MALLOC_VERTEX_JOB, PRIMITIVE_SIZE, cfg) {
+-      cfg.fixed_sized = rs->line.width;
++      cfg.fixed_sized = reduced == MESA_PRIM_LINES ? rs->line.width : 1.0f;
+    }
+    pan_section_pack(job.cpu, MALLOC_VERTEX_JOB, INDICES, cfg) {
+       cfg.address = info->index.buffer_dev_addr

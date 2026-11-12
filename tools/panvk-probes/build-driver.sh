@@ -55,3 +55,34 @@ cp "$zenith/work/ci-deps/PACKAGES.sha256" "$out/DEPENDENCIES.sha256"
 } > "$out/BUILD.txt"
 (cd "$out" && sha256sum libvulkan_panfrost.so > SHA256SUMS)
 cat "$out/BUILD.txt" "$out/DYNAMIC.txt" "$out/SHA256SUMS"
+
+# Keep the unmodified reconstructed driver above as the equivalence control.
+# Build our small series incrementally with the same code generators and deps.
+mkdir -p "$out/patched"
+for patch in "$here"/driver-patches/*.patch; do
+  git -C "$mesa" apply --check "$patch"
+  git -C "$mesa" apply "$patch"
+  git -C "$mesa" add -u
+  git -C "$mesa" commit -q -m "livecd: $(basename "$patch")"
+done
+if [ "$kind" = android ]; then
+  MESA="$mesa" BDIR="$zenith/build/android-ci" DDIR="$out/patched" \
+    bash "$zenith/scripts/build-android.sh" --profile g615-v11-csf --api 29 \
+      --ndk "${ANDROID_NDK_LATEST_HOME:-${ANDROID_NDK_HOME:?missing NDK}}"
+else
+  ninja -j4 -C "$zenith/build/glibc-ci"
+  cp "$zenith/build/glibc-ci/src/panfrost/vulkan/libvulkan_panfrost.so" "$out/patched/"
+  llvm-strip-18 "$out/patched/libvulkan_panfrost.so"
+  # The research artifact carries no CI build path in RUNPATH. Its runtime
+  # dependencies are supplied privately beside it or via BIONILUX_LIBRARY_PATH.
+  patchelf --set-rpath '$ORIGIN' "$out/patched/libvulkan_panfrost.so"
+fi
+{
+  echo "mesa-commit=$(git -C "$mesa" rev-parse HEAD)"
+  echo "mesa-tree=$(git -C "$mesa" rev-parse HEAD^{tree})"
+  sha256sum "$here"/driver-patches/*.patch
+  if [ "$kind" = glibc ]; then echo 'postprocess=patchelf --set-rpath $ORIGIN'; fi
+} > "$out/patched/PATCHES.txt"
+readelf -d "$out/patched/libvulkan_panfrost.so" > "$out/patched/DYNAMIC.txt"
+(cd "$out/patched" && sha256sum libvulkan_panfrost.so > SHA256SUMS)
+cat "$out/patched/PATCHES.txt" "$out/patched/DYNAMIC.txt" "$out/patched/SHA256SUMS"

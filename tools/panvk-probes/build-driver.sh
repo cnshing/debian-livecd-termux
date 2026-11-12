@@ -5,6 +5,7 @@ kind=$1
 zenith=$(realpath "$2")
 out=$(realpath -m "$3")
 here=$(dirname "$(realpath "$0")")
+patch_dir=${PANVK_DRIVER_PATCH_DIR:-$here/driver-patches}
 mkdir -p "$out"
 mesa="$zenith/work/mesa"
 test -f "$mesa/.panvk-patchlevel"
@@ -63,7 +64,7 @@ cat "$out/BUILD.txt" "$out/DYNAMIC.txt" "$out/SHA256SUMS"
 # Keep the unmodified reconstructed driver above as the equivalence control.
 # Build our small series incrementally with the same code generators and deps.
 mkdir -p "$out/patched"
-for patch in "$here"/driver-patches/*.patch; do
+for patch in "$patch_dir"/*.patch; do
   git -C "$mesa" apply --check "$patch"
   git -C "$mesa" apply "$patch"
   git -C "$mesa" add -u
@@ -84,7 +85,7 @@ fi
 {
   echo "mesa-commit=$(git -C "$mesa" rev-parse HEAD)"
   echo "mesa-tree=$(git -C "$mesa" rev-parse HEAD^{tree})"
-  sha256sum "$here"/driver-patches/*.patch
+  sha256sum "$patch_dir"/*.patch
   if [ "$kind" = glibc ]; then echo 'postprocess=patchelf --set-rpath $ORIGIN'; fi
 } > "$out/patched/PATCHES.txt"
 readelf -d "$out/patched/libvulkan_panfrost.so" > "$out/patched/DYNAMIC.txt"

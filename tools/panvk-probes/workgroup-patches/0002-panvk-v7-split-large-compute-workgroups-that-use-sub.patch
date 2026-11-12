@@ -1,0 +1,107 @@
+From 38a63ba8b2ad20b205e28d9721555f84dade78f7 Mon Sep 17 00:00:00 2001
+From: soulexit <metehan.tanriverdi01@gmail.com>
+Date: Wed, 28 Oct 2026 20:36:00 +0300
+Subject: [PATCH 44/45] panvk/v7: split large compute workgroups that use
+ subgroup operations
+
+panvk_lower_large_workgroup left shaders with subgroup operations at
+their API workgroup size, so 1024-invocation workgroups reached the G76,
+which runs far fewer per core: wrong results (a test with 1024
+invocations, subgroup ops, shared memory and a barrier: 1280 of 5120
+invocations wrong) and, in Eden running NieR:Automata, a GPU context
+fault right after such dispatches.
+
+Copy c of the split acts as logical invocation hw_index + c * H, so the
+lanes of a hardware subgroup are consecutive logical invocations of one
+copy: a valid subgroup. Allow subgroup operations and rewrite subgroup
+ID and count from the logical index. Only the global invocation index
+still keeps a shader unsplit.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/panfrost/vulkan/panvk_vX_shader.c | 45 +++++++++++++--------------
+ 1 file changed, 21 insertions(+), 24 deletions(-)
+
+diff --git a/src/panfrost/vulkan/panvk_vX_shader.c b/src/panfrost/vulkan/panvk_vX_shader.c
+index 9cd7bee..042da8c 100644
+--- a/src/panfrost/vulkan/panvk_vX_shader.c
++++ b/src/panfrost/vulkan/panvk_vX_shader.c
+@@ -1089,31 +1089,16 @@ lwg_instr_blocks(nir_instr *instr)
+    if (instr->type != nir_instr_type_intrinsic)
+       return false;
+    switch (nir_instr_as_intrinsic(instr)->intrinsic) {
+-   case nir_intrinsic_load_subgroup_id:
+-   case nir_intrinsic_load_num_subgroups:
+-   case nir_intrinsic_load_subgroup_invocation:
+    case nir_intrinsic_load_global_invocation_index:
+-   case nir_intrinsic_vote_any:
+-   case nir_intrinsic_vote_all:
+-   case nir_intrinsic_vote_feq:
+-   case nir_intrinsic_vote_ieq:
+-   case nir_intrinsic_ballot:
+-   case nir_intrinsic_read_invocation:
+-   case nir_intrinsic_read_first_invocation:
+-   case nir_intrinsic_shuffle:
+-   case nir_intrinsic_shuffle_xor:
+-   case nir_intrinsic_shuffle_up:
+-   case nir_intrinsic_shuffle_down:
+-   case nir_intrinsic_quad_broadcast:
+-   case nir_intrinsic_quad_swap_horizontal:
+-   case nir_intrinsic_quad_swap_vertical:
+-   case nir_intrinsic_quad_swap_diagonal:
+-   case nir_intrinsic_reduce:
+-   case nir_intrinsic_inclusive_scan:
+-   case nir_intrinsic_exclusive_scan:
+-   case nir_intrinsic_elect:
+       return true;
+    default:
++      /* Subgroup operations are fine: a hardware subgroup's lanes are
++       * consecutive hardware indices of one copy, so consecutive logical
++       * invocations, which is a valid subgroup. Subgroup ID and count are
++       * rewritten with the other IDs (lwg_rewrite_ids). Leaving such a
++       * shader unsplit sent 1024-invocation workgroups to the G76, beyond
++       * its thread and stack slots per core (Eden, NieR:Automata: the
++       * context faulted right after their dispatches). */
+       return false;
+    }
+ }
+@@ -1145,7 +1130,9 @@ lwg_rewrite_ids(nir_builder *b, nir_function_impl *impl, nir_def *lin,
+          if (intr->intrinsic != nir_intrinsic_load_local_invocation_index &&
+              intr->intrinsic != nir_intrinsic_load_local_invocation_id &&
+              intr->intrinsic != nir_intrinsic_load_global_invocation_id &&
+-             intr->intrinsic != nir_intrinsic_load_workgroup_size)
++             intr->intrinsic != nir_intrinsic_load_workgroup_size &&
++             intr->intrinsic != nir_intrinsic_load_subgroup_id &&
++             intr->intrinsic != nir_intrinsic_load_num_subgroups)
+             continue;
+ 
+          b->cursor = nir_before_instr(instr);
+@@ -1165,6 +1152,16 @@ lwg_rewrite_ids(nir_builder *b, nir_function_impl *impl, nir_def *lin,
+          case nir_intrinsic_load_global_invocation_id:
+             repl = nir_iadd(b, nir_imul(b, nir_load_workgroup_id(b), size), lid);
+             break;
++         case nir_intrinsic_load_subgroup_id:
++            repl = nir_udiv(b, lin, nir_load_subgroup_size(b));
++            break;
++         case nir_intrinsic_load_num_subgroups: {
++            nir_def *sg = nir_load_subgroup_size(b);
++            repl = nir_udiv(b, nir_iadd_imm(b, sg,
++                                            lsize[0] * lsize[1] * lsize[2] - 1),
++                            sg);
++            break;
++         }
+          default:
+             repl = size;
+             break;
+@@ -1226,7 +1223,7 @@ panvk_lower_large_workgroup(nir_shader *nir, unsigned max_hw)
+    if (!ok) {
+       util_dynarray_fini(&barriers);
+       mesa_logw("panvk: %u-invocation workgroup: barrier in control flow or "
+-                "subgroup ops, left as is", n);
++                "global invocation index, left as is", n);
+       return false;
+    }
+ 
+-- 
+2.43.0
+

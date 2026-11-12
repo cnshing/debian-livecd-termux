@@ -1,0 +1,47 @@
+From d3cd9a8b0f9f735efac012add0cd3a35b1f4b12a Mon Sep 17 00:00:00 2001
+From: soulexit <metehan.tanriverdi01@gmail.com>
+Date: Wed, 4 Nov 2026 01:04:14 +0300
+Subject: [PATCH 61/62] panvk: large workgroups: give each logical invocation
+ its own globals
+
+A compute workgroup larger than the core holds is run as K copies per
+hardware invocation, each region between barriers cloned K times. Only
+function temporaries were cloned per copy: module-level temporaries
+(SPIR-V Private, which is where DXVK keeps the D3D registers r0, r1,
+...) stayed one per hardware invocation, so values crossing a barrier
+were overwritten by the other copies.
+
+Assassin's Creed IV (DXVK, a 512-invocation compute shader run as 4 x
+128 on the Mali-G76) computed a loop bound from such a value after a
+barrier and ran until the kernel stopped the job: the GPU hung and the
+game froze. nir_lower_global_vars_to_local() now makes them function
+temporaries before the copies are made. tests/lwg global-variable
+variant: 49 151 of 61 440 results wrong before, 0 after.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/panfrost/vulkan/panvk_vX_shader.c | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/src/panfrost/vulkan/panvk_vX_shader.c b/src/panfrost/vulkan/panvk_vX_shader.c
+index a7a80fc..c3f30cc 100644
+--- a/src/panfrost/vulkan/panvk_vX_shader.c
++++ b/src/panfrost/vulkan/panvk_vX_shader.c
+@@ -1199,6 +1199,14 @@ panvk_lower_large_workgroup(nir_shader *nir, unsigned max_hw)
+ 
+    nir_function_impl *impl = nir_shader_get_entrypoint(nir);
+    nir_lower_returns_impl(impl);
++   /* Module-level temporaries (SPIR-V Private: DXVK's D3D registers r0, r1,
++    * ...) are per invocation too: made function temporaries here, they are
++    * cloned per copy below (or become SSA). Left global, the K copies of a
++    * hardware invocation shared them across the barriers, so every copy
++    * but one read another copy's values: Assassin's Creed IV's 512-
++    * invocation compute shader computed a loop bound from such a value
++    * and ran until the kernel stopped the job (lost device). */
++   nir_lower_global_vars_to_local(nir);
+    nir_lower_vars_to_ssa(nir);
+    /* Built-ins are still variable loads here: make them intrinsics first so
+     * the invocation-position reads can be rewritten per copy. */
+-- 
+2.43.0
+

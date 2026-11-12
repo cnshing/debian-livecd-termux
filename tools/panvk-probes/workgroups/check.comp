@@ -1,0 +1,61 @@
+#version 450
+#extension GL_KHR_shader_subgroup_basic : require
+#extension GL_KHR_shader_subgroup_arithmetic : require
+#extension GL_KHR_shader_subgroup_ballot : require
+#ifndef X
+#define X 1024
+#define Y 1
+#define Z 1
+#endif
+#define N (X * Y * Z)
+layout(local_size_x = X, local_size_y = Y, local_size_z = Z) in;
+layout(std430, binding = 0) buffer Out { uint out_data[]; };
+shared uint values[N];
+shared uint sum;
+// Private module variables must remain distinct for each logical invocation.
+uint saved;
+void main() {
+   uint i = gl_LocalInvocationIndex;
+   uint g = gl_WorkGroupID.x + 3u * gl_WorkGroupID.y;
+   saved = i * 3u + g * 17u + 1u;
+   if (i == 0u) sum = 0u;
+   values[i] = saved;
+   barrier();
+   atomicAdd(sum, i);
+   uint neighbour = values[N - 1u - i];
+   uint live = saved ^ neighbour;
+   barrier();
+#ifdef NESTED
+   // Valid uniform control flow, deliberately outside the port's supported subset.
+   for (uint j = 0u; j < gl_NumWorkGroups.z; j++) {
+      values[i] += j;
+      barrier();
+   }
+#endif
+   uint sg = gl_SubgroupSize;
+   uint base = i - i % sg;
+   uint count = min(sg, N - base);
+   uint expected = base * count + count * (count - 1u) / 2u;
+   uint flags = 0u;
+   if (gl_SubgroupID == i / sg) flags |= 1u;
+   if (gl_NumSubgroups == (N + sg - 1u) / sg) flags |= 2u;
+   if (subgroupAdd(i) == expected) flags |= 4u;
+   if (subgroupBallotBitCount(subgroupBallot(true)) == count) flags |= 8u;
+   uint o = (g * N + i) * 16u;
+   out_data[o + 0u] = i;
+   out_data[o + 1u] = gl_LocalInvocationID.x;
+   out_data[o + 2u] = gl_LocalInvocationID.y;
+   out_data[o + 3u] = gl_LocalInvocationID.z;
+   out_data[o + 4u] = gl_GlobalInvocationID.x;
+   out_data[o + 5u] = gl_GlobalInvocationID.y;
+   out_data[o + 6u] = gl_GlobalInvocationID.z;
+   out_data[o + 7u] = gl_WorkGroupSize.x;
+   out_data[o + 8u] = gl_WorkGroupSize.y;
+   out_data[o + 9u] = gl_WorkGroupSize.z;
+   out_data[o + 10u] = g;
+   out_data[o + 11u] = neighbour;
+   out_data[o + 12u] = sum;
+   out_data[o + 13u] = saved;
+   out_data[o + 14u] = flags;
+   out_data[o + 15u] = live;
+}

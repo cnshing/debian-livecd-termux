@@ -1,7 +1,8 @@
 # x1s PanVK continuation: desktop and driver validation
 
 Continuation of `temp/gpu-x1s/PANVK-REST-HANDOFF.md`, 2026-11-11. Research branch:
-`research/panvk-kbase-probes`. The managed desktop remains in software mode.
+`research/panvk-kbase-probes`. The earlier primary runs preserved the managed
+software desktop; the later stopped-state checkpoint is recorded below.
 
 ## Private desktop results
 
@@ -145,10 +146,43 @@ accepted as passes. External semaphore import/export remains unsupported.
 Evidence: `panvk-runs/basic-{android,glibc}-rebuilt-{base,patched}/`,
 `wider-glibc-rebuilt-base/`, `wider-{android,glibc}-rebuilt-patched/`, and
 `55-final-identity-graphics.txt` / `56-android-graphics-dump.txt`.
-The Termux-soname patch compiled successfully, but presentation with the rebuilt
-Android ICD **without the private X11 symlinks remains unverified**. Other
-private display activity prevented the harness's conservative exclusive check.
-This does not invalidate the earlier pixel-correctness results.
+### Rebuilt Android X11 check: loading passes, patched presentation fails
+
+At the user's request, short correctness checks proceeded regardless of other
+private displays, recording overlap separately. Without the X11 symlink
+directory, the patched ICD starts private GNOME and maps the normal Termux
+`libxcb`, `libX11-xcb`, extension libraries and `libxshmfence`, alongside the
+expected rebuilt PanVK and private Mesa libraries. A direct `RTLD_NOW` check
+loads all nine unversioned libraries and resolves all 89 symbols required by
+the pinned `wsi_x11_dlopen.c`; none are missing. Device driver/Mesa checksums
+match the CI artifacts. X11 library loading therefore passes.
+
+The patched driver's GTK4 presentation nevertheless fails on both raw DRI3
+and SHM with `zink: could not create swapchain` and `GLXBadCurrentWindow`.
+Restoring the X11 symlink directory produces the same failure. During one
+failure the audit attempted to inspect an exiting GTK process and received
+`PermissionError` on its FDs; its GTK log identifies the presentation error.
+An earlier attempt also exposed an xdotool search race, now corrected to
+retry when the window has not appeared yet.
+
+The release Android ICD and the rebuilt **unmodified baseline**, tested with
+the same private Mesa 26.2.6-101, each complete two window/fullscreen cycles
+and produce four correct captures (maximum channel error zero). Those controls
+overlap other private activity, and their broad before/after snapshots differ;
+they establish pixel correctness rather than exclusive isolation. The patched
+variant's failures also reproduce with unchanged snapshots. This isolates an
+unresolved presentation regression to the patched variant under the tested
+setup; it does not identify which patch or interaction causes it. The two-patch
+series needs separate-variant bisection before desktop acceptance. The passing
+offscreen point-size workload does not override this failure.
+
+Evidence: `panvk-runs/desktop-rebuilt-patched-{raw-short,raw-short2,shm-short,raw-xlibs-control}/`,
+`desktop-release-current-control/`, `desktop-rebuilt-base-raw-control/`, and
+logs 57–68. `68-x11-symbol-check.txt` records the direct library check.
+No patched driver was installed globally. At the later continuation checkpoint,
+the managed desktop and earlier shared-daemon PIDs were already absent; status
+reported stopped. They were not restarted. This differs from the unchanged
+live-state snapshots retained for the earlier primary validation runs.
 
 ## Soak pending and remaining acceptance
 
@@ -176,7 +210,9 @@ resource audits, thermal readings, and attributable crash/error logs. Separate
 X displays share GPU, CPU, memory and thermal resources: competing activity
 limits performance and failure attribution, but its presence alone does not
 disprove a correct captured frame. The harness now refuses other private
-displays conservatively and detects them during a run.
+displays conservatively and detects them during a run. Short correctness checks
+can explicitly allow overlap with `--allow-other-displays`; this option is
+rejected for soaks.
 
 Production packaging, automatic renderer selection, full application/fresh
 install acceptance, other-device regression acceptance, browser presentation,

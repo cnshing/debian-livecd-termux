@@ -52,8 +52,12 @@ individual-workload performance. Increase the outer timeout for a soak.
 `--driver /absolute/path/libvulkan_panfrost.so` selects a private rebuilt ICD;
 `--mesa-lib-dir /private/extraction/lib` selects a privately extracted Mesa.
 `--no-xlibs` removes the private X11 soname symlink directory to check the
-rebuilt Android driver's Termux sonames directly; this presentation check
-remains pending in the recorded continuation.
+rebuilt Android driver's Termux sonames directly. Loading passed, but the
+patched variant failed GTK swapchain creation; see the results report.
+`check-x11-libraries.py /path/to/pinned/wsi_x11_dlopen.c` checks all nine
+unversioned dlopen names and the source's required symbols from plain Termux.
+Run with `LD_LIBRARY_PATH` and `LD_PRELOAD` unset; this checks loading, not
+presentation or GPU correctness.
 
 The harness takes the existing fullscreen-test lock, allocates a private
 display, D-Bus and XDG paths, disables the private battery shell helper, and
@@ -65,6 +69,9 @@ The harness conservatively refuses other private displays and checks for new
 ones during cycles and soaks. This supports attribution of failures and
 resource measurements; another display alone does not invalidate correct
 pixels. GTK commands are replaced atomically to avoid partial JSON reads.
+`--allow-other-displays` records overlap without rejecting a short correctness
+run; it cannot be used for a soak. Broad snapshot differences remain reported
+as isolation failures, independently of the captured-pixel results.
 
 Retrieve `result.json`, `isolation.json`, logs, and PNGs. On the host:
 

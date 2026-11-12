@@ -55,6 +55,19 @@ for name in sync-features compute-features graphics-features texture-features ph
   if [ "$name" = graphics-features ]; then source="$out/graphics-features-dump.c"; fi
   "$cc" -std=gnu11 -O2 -Wall -Wextra -I"$vk" -I"$shaders" -I"$src" "$source" -ldl -lm -pthread -o "$out/$name"
 done
+python3 - "$src/vk_test.h" "$out/vk-test-control.h" <<'PY'
+import pathlib, sys
+source = pathlib.Path(sys.argv[1]).read_text()
+needle = 'if (strstr(c->props.deviceName, "Mali"))'
+assert source.count(needle) == 1
+source = source.replace(needle, 'if (c->props.deviceType == VK_PHYSICAL_DEVICE_TYPE_CPU)')
+source = source.replace('no Mali device', 'no CPU software control device')
+pathlib.Path(sys.argv[2]).write_text(source)
+PY
+"$cc" -std=gnu11 -O2 -Wall -Wextra -I"$vk" -I"$shaders" -I"$src" \
+  -include "$out/vk-test-control.h" "$out/graphics-features-dump.c" -ldl -lm -pthread \
+  -o "$out/graphics-software-control"
+rm "$out/vk-test-control.h"
 rm "$out/graphics-features-dump.c"
 if [ -n "${CC:-}" ]; then
   "$cc" -O2 -Wall "$zenith/tests/x11-shm/x11_shm_present_test.c" -lxcb -lxcb-shm -o "$out/x11-shm"

@@ -16,7 +16,7 @@ import tempfile
 import time
 import uuid
 
-from graphics import apply_renderer, preferred_renderer
+from graphics import apply_renderer, legacy_drawing, preferred_renderer
 from integrations import Integrations
 
 PREFIX = Path('/data/data/com.termux/files/usr')
@@ -372,7 +372,7 @@ def run(safe, renderer='software'):
     try:
         ENDPOINT.unlink(missing_ok=True)
         if subprocess.run(['xdpyinfo'], env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode:
-            display_command = ['termux-x11', DISPLAY] + (['-legacy-drawing'] if renderer == 'software' else [])
+            display_command = ['termux-x11', DISPLAY] + (['-legacy-drawing'] if legacy_drawing(renderer) else [])
             children.append(subprocess.Popen(display_command, env=env, start_new_session=True))
         deadline = time.monotonic() + 15
         while subprocess.run(['xdpyinfo'], env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode:

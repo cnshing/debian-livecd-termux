@@ -96,7 +96,10 @@ class PanVKBrowsers(unittest.TestCase):
         self.panvk = self.tmp / 'panvk-kbase'
         for abi in ('bionic', 'glibc'):
             (self.panvk / abi).mkdir(parents=True)
-            (self.panvk / abi / 'panfrost_icd.json').write_text('{}')
+            driver = self.panvk / abi / 'libvulkan_panfrost.so'
+            driver.touch()
+            (self.panvk / abi / 'panfrost_icd.json').write_text(
+                '{"ICD": {"library_path": "libvulkan_panfrost.so"}}')
         receipt = self.tmp / 'build-source.json'
         receipt.write_text('0010-clip-pixmap-damage')
         for patch in (

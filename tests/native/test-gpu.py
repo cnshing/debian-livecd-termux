@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import re
 import shlex
+import shutil
 import subprocess
 import sys
 import time
@@ -12,7 +13,7 @@ import time
 sys.path.insert(0, str(Path.home() / '.local/lib/livecd-native'))
 from capture import screenshot
 from desktop import STATE, request, bus_call
-from graphics import GPU, process_gpu
+from graphics import GPU, process_gpu, zink_driver
 from gi.repository import GLib
 
 
@@ -56,7 +57,8 @@ def named_window(name):
 
 def gpu_process(pid):
     result = process_gpu(pid)
-    assert result['turnip_libraries'] and result['kgsl_devices'], result
+    assert result['driver'] == zink_driver(), result
+    assert result['libraries'] and result['devices'], result
     return result
 
 
@@ -71,10 +73,13 @@ def main():
     status = request('status')
     assert status['renderer'] == 'zink'
     result = {'status': status, 'shell': gpu_process(status['shell'])}
-    result['vulkan'] = subprocess.check_output([str(GPU / 'bin/vulkaninfo'), '--summary'], text=True, timeout=20)
-    assert 'Turnip Adreno (TM) 640' in result['vulkan']
+    driver = zink_driver()
+    tools = GPU / 'bin' if driver == 'turnip' else Path(shutil.which('vulkaninfo') or '/missing/vulkaninfo').parent
+    result['vulkan'] = subprocess.check_output([str(tools / 'vulkaninfo'), '--summary'], text=True, timeout=20)
+    expected = 'Mali' if driver == 'panvk' else 'Turnip Adreno'
+    assert expected in result['vulkan']
     result['opengl'] = subprocess.check_output(['glxinfo', '-B'], text=True, timeout=20)
-    assert 'Accelerated: yes' in result['opengl'] and 'Turnip Adreno' in result['opengl']
+    assert 'Accelerated: yes' in result['opengl'] and 'zink' in result['opengl'] and expected in result['opengl']
     children, logs = [], []
 
     def launch(name, arguments):
@@ -136,7 +141,7 @@ def main():
         assert 'AO: [pulse]' in result['video']['log']
         print('VIDEO_GPU_PASS', flush=True)
 
-        cube = launch('cube', [str(GPU / 'bin/vkcube'), '--wsi', 'xcb', '--width', '300', '--height', '300'])
+        cube = launch('cube', [str(tools / 'vkcube'), '--wsi', 'xcb', '--width', '300', '--height', '300'])
         # These upstream demos do not reliably publish _NET_WM_PID.
         activate(wait(lambda: named_window('^Vkcube X11$')))
         result['cube'] = gpu_process(cube.pid)

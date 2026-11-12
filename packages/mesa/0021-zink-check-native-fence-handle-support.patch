@@ -1,0 +1,32 @@
+Zink must query SYNC_FD support before advertising native fence FDs.
+
+PanVK's kbase backend exposes VK_KHR_external_semaphore_fd but reports no
+import/export support for SYNC_FD. Checking the extension name alone makes
+EGL advertise EGL_ANDROID_native_fence_sync, and Mutter then repeatedly asks
+for exportable semaphores that fail with VK_ERROR_INVALID_EXTERNAL_HANDLE.
+Keep the normal synchronous fallback when this handle type is unsupported.
+
+--- a/src/gallium/drivers/zink/zink_screen.c
++++ b/src/gallium/drivers/zink/zink_screen.c
+@@ -781,6 +781,21 @@
+    caps->native_fence_fd =
+       screen->instance_info->have_KHR_external_semaphore_capabilities &&
+       screen->info.have_KHR_external_semaphore_fd;
++   if (caps->native_fence_fd) {
++      VkPhysicalDeviceExternalSemaphoreInfo info = {
++         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTERNAL_SEMAPHORE_INFO,
++         .handleType = VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_SYNC_FD_BIT,
++      };
++      VkExternalSemaphoreProperties props = {
++         .sType = VK_STRUCTURE_TYPE_EXTERNAL_SEMAPHORE_PROPERTIES,
++      };
++      VKSCR(GetPhysicalDeviceExternalSemaphoreProperties)(screen->pdev, &info, &props);
++      const VkExternalSemaphoreFeatureFlags required =
++         VK_EXTERNAL_SEMAPHORE_FEATURE_IMPORTABLE_BIT |
++         VK_EXTERNAL_SEMAPHORE_FEATURE_EXPORTABLE_BIT;
++      caps->native_fence_fd =
++         (props.externalSemaphoreFeatures & required) == required;
++   }
+    caps->resource_from_user_memory = screen->info.have_EXT_external_memory_host;
+ 
+    caps->surface_reinterpret_blocks =

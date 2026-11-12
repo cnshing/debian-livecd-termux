@@ -1,0 +1,43 @@
+name: PanVK kbase probes
+
+# Builds the pinned zenithblue-oss/panvk-kbase-android C tests for Android
+# (Bionic, API 29) so they can run on a stock-kernel Mali phone against the
+# release libvulkan_panfrost.so. Research only; nothing here is packaged.
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+    - .github/workflows/panvk-probes.yml
+    - tools/panvk-probes/**
+
+permissions:
+  contents: read
+
+env:
+  ZENITH_REPO: zenithblue-oss/panvk-kbase-android
+  ZENITH_COMMIT: cf70e02b918e1864cbcd746a7fefa57b96c673ce
+  VULKAN_HEADERS_TAG: v1.4.309
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions/checkout@v4
+      with:
+        repository: ${{ env.ZENITH_REPO }}
+        ref: ${{ env.ZENITH_COMMIT }}
+        path: zenith
+    - uses: actions/checkout@v4
+      with:
+        repository: KhronosGroup/Vulkan-Headers
+        ref: ${{ env.VULKAN_HEADERS_TAG }}
+        path: vulkan-headers
+    - name: Build Android probes
+      run: bash tools/panvk-probes/build.sh zenith vulkan-headers out
+    - uses: actions/upload-artifact@v4
+      with:
+        name: panvk-probes-android-aarch64
+        path: out/

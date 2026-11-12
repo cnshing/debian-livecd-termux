@@ -49,8 +49,20 @@ jobs:
     timeout-minutes: 10
     steps:
     - uses: actions/checkout@v4
+    - uses: actions/checkout@v4
+      with:
+        repository: ${{ env.ZENITH_REPO }}
+        ref: ${{ env.ZENITH_COMMIT }}
+        path: zenith
+    - uses: actions/checkout@v4
+      with:
+        repository: KhronosGroup/Vulkan-Headers
+        ref: ${{ env.VULKAN_HEADERS_TAG }}
+        path: vulkan-headers
     - name: Fetch and unpack
       run: bash tools/panvk-probes/glibc-deps.sh out
+    - name: Build glibc probes
+      run: CC=gcc bash tools/panvk-probes/build.sh zenith vulkan-headers out/probes
     - uses: actions/upload-artifact@v4
       with:
         name: panvk-glibc-deps-aarch64

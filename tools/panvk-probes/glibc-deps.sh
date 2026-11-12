@@ -9,15 +9,28 @@ apt-get download "${pkgs[@]}"
 mkdir -p root "$out/lib"
 for deb in *.deb; do dpkg-deb -x "$deb" root; done
 cp -P root/usr/lib/aarch64-linux-gnu/lib{xcb-dri3,xcb-present,xcb-xfixes,xcb-sync,xcb-randr,xshmfence}.so.* "$out/lib/"
-find root -name 'libSPIRV-Tools*' | sort
-spirv=$(find root -name 'libSPIRV-Tools-shared.so*' -type f | head -1)
-[ -n "$spirv" ] || { echo "no shared SPIRV-Tools library in spirv-tools" >&2; exit 1; }
-cp "$spirv" "$out/lib/"
-# The ICD's NEEDED entry is the unversioned build-tree name.
-ln -s "$(basename "$spirv")" "$out/lib/libSPIRV-Tools.so"
+# Ubuntu ships SPIRV-Tools only as static archives. Link the C API into a
+# shared library under the ICD's unversioned NEEDED name; build the matching
+# upstream tag if the archive is not position-independent.
+spirv_link() {
+  g++ -shared -o "$out/lib/libSPIRV-Tools.so" -Wl,-soname,libSPIRV-Tools.so \
+    -Wl,--whole-archive "$1" -Wl,--no-whole-archive -Wl,--no-undefined
+}
+if ! spirv_link root/usr/lib/aarch64-linux-gnu/libSPIRV-Tools.a; then
+  echo "static archive is not PIC; building SPIRV-Tools from source"
+  git clone -q --depth 1 -b v2025.1.rc1 https://github.com/KhronosGroup/SPIRV-Tools.git spirv
+  git clone -q --depth 1 -b vulkan-sdk-1.4.309.0 https://github.com/KhronosGroup/SPIRV-Headers.git spirv/external/spirv-headers
+  cmake -S spirv -B spirv/build -DCMAKE_BUILD_TYPE=Release -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+    -DSPIRV_SKIP_TESTS=ON -DSPIRV_SKIP_EXECUTABLES=ON -DSPIRV_WERROR=OFF >/dev/null
+  cmake --build spirv/build --target SPIRV-Tools-static -j"$(nproc)" >/dev/null
+  spirv_link spirv/build/source/libSPIRV-Tools.a
+  echo "spirv-tools-source=v2025.1.rc1" >> "$out/PROVENANCE.spirv"
+fi
+nm -D --defined-only "$out/lib/libSPIRV-Tools.so" | grep -E ' spv(BinaryToText|ContextCreate|DiagnosticDestroy|DiagnosticPrint|TextDestroy)$'
 {
   for deb in *.deb; do echo "$deb $(sha256sum < "$deb" | cut -d' ' -f1)"; done
   echo "glibc-required=$(objdump -T "$out"/lib/*.so* | grep -o 'GLIBC_2\.[0-9]*' | sort -V | tail -1)"
-} > "$out/PROVENANCE"
+  cat "$out/PROVENANCE.spirv" 2>/dev/null || true
+} > "$out/PROVENANCE"; rm -f "$out/PROVENANCE.spirv"
 (cd "$out/lib" && sha256sum $(find . -type f | sort)) > "$out/SHA256SUMS"
 cat "$out/PROVENANCE"; ls -l "$out/lib"

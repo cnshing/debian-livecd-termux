@@ -2,13 +2,18 @@
 # Usage: glibc-deps.sh <out dir>. Runs on an arm64 Ubuntu runner.
 set -euo pipefail
 mkdir -p "$1"; out=$(realpath "$1"); work=$(mktemp -d)
-pkgs=(libxcb-dri3-0 libxcb-present0 libxcb-xfixes0 libxcb-sync1 libxcb-randr0 libxshmfence1 spirv-tools)
 cd "$work"
+# The ICD uses xcb DRI3 1.4/Present 1.4 (libxcb >= 1.17) and wl_fixes
+# (wayland >= 1.24); Chrome bundles libwayland-client 1.23 and Ubuntu 24.04
+# has libxcb 1.15, so these come from Debian sid.
+docker run --rm -v "$work:/w" -w /w debian:sid sh -ec '
+  apt-get update -qq
+  apt-get download libxcb1 libxcb-dri3-0 libxcb-present0 libxcb-xfixes0 libxcb-sync1 libxcb-randr0 libxshmfence1 libwayland-client0'
 sudo apt-get update -qq
-apt-get download "${pkgs[@]}"
+apt-get download spirv-tools
 mkdir -p root "$out/lib"
 for deb in *.deb; do dpkg-deb -x "$deb" root; done
-cp -P root/usr/lib/aarch64-linux-gnu/lib{xcb-dri3,xcb-present,xcb-xfixes,xcb-sync,xcb-randr,xshmfence}.so.* "$out/lib/"
+cp -P root/usr/lib/aarch64-linux-gnu/lib{xcb,xcb-dri3,xcb-present,xcb-xfixes,xcb-sync,xcb-randr,xshmfence,wayland-client}.so.* "$out/lib/"
 # Ubuntu ships SPIRV-Tools only as static archives. Link the C API into a
 # shared library under the ICD's unversioned NEEDED name; build the matching
 # upstream tag if the archive is not position-independent.

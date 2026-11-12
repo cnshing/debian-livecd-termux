@@ -12,7 +12,7 @@ import time
 
 sys.path.insert(0, str(Path.home() / '.local/lib/livecd-native'))
 from capture import screenshot
-from desktop import STATE, request, bus_call
+from desktop import PREFIX, STATE, request, bus_call
 from graphics import GPU, process_gpu, zink_driver
 from gi.repository import GLib
 
@@ -74,7 +74,9 @@ def main():
     assert status['renderer'] == 'zink'
     result = {'status': status, 'shell': gpu_process(status['shell'])}
     driver = zink_driver()
-    tools = GPU / 'bin' if driver == 'turnip' else Path(shutil.which('vulkaninfo') or '/missing/vulkaninfo').parent
+    if driver == 'panvk' and not (shutil.which('vulkaninfo') and shutil.which('vkcube')):
+        raise RuntimeError('Install vulkan-tools or put the staged Vulkan tools on PATH for this test')
+    tools = GPU / 'bin' if driver == 'turnip' else Path(shutil.which('vulkaninfo')).parent
     result['vulkan'] = subprocess.check_output([str(tools / 'vulkaninfo'), '--summary'], text=True, timeout=20)
     expected = 'Mali' if driver == 'panvk' else 'Turnip Adreno'
     assert expected in result['vulkan']
@@ -117,16 +119,28 @@ def main():
         wait(marker.exists)
         identity = json.loads(marker.read_text())
         assert identity == {'uid': os.getuid(), 'cwd': str(Path.home())}, identity
-        result['ghostty'] = dict(gpu_process(terminal['pid']), identity=identity)
+        terminal_graphics = process_gpu(terminal['pid'])
+        raw_env = (Path('/proc') / str(terminal['pid']) / 'environ').read_bytes().split(b'\0')
+        software_terminal = b'LIVECD_NATIVE_RENDERER=software' in raw_env
+        if software_terminal:
+            version = re.search(r'OpenGL core profile version string: (\d+)\.(\d+)', result['opengl'])
+            assert driver == 'panvk' and version and tuple(map(int, version.groups())) < (4, 3)
+            assert not terminal_graphics['libraries'] and b'GALLIUM_DRIVER=llvmpipe' in raw_env
+        else:
+            gpu_process(terminal['pid'])
+        result['ghostty'] = dict(terminal_graphics, identity=identity,
+                                 renderer='software' if software_terminal else 'zink')
         screenshot(STATE / 'gpu-ghostty.png')
         subprocess.run(['xdotool', 'type', '--clearmodifiers', 'exit'], check=True)
         subprocess.run(['xdotool', 'key', 'Return'], check=True)
         wait(lambda: not window(terminal['pid']))
-        print('GHOSTTY_GPU_PASS', flush=True)
+        print('GHOSTTY_SOFTWARE_PASS' if software_terminal else 'GHOSTTY_GPU_PASS', flush=True)
 
         video = Path.home() / 'Documents/livecd-native-validation/video.mp4'
         assert video.is_file(), 'Run test-media.py to create the video fixture first'
-        player = launch('mpv', ['mpv', '--title=Native GPU Video', '--loop-file=inf',
+        # Exercise this ICD directly; the normal Mali media profile independently
+        # selects the previously qualified Android GLES/MediaCodec route.
+        player = launch('mpv', [str(PREFIX / 'bin/mpv'), '--title=Native GPU Video', '--loop-file=inf',
             '--vo=gpu-next', '--gpu-api=vulkan', '--gpu-context=x11vk', '--hwdec=no',
             '--ao=pulse', '--msg-level=vo/gpu-next=v', str(video)])
         wid = wait(lambda: window(player.pid))
@@ -143,7 +157,7 @@ def main():
 
         cube = launch('cube', [str(tools / 'vkcube'), '--wsi', 'xcb', '--width', '300', '--height', '300'])
         # These upstream demos do not reliably publish _NET_WM_PID.
-        activate(wait(lambda: named_window('^Vkcube X11$')))
+        activate(wait(lambda: named_window('^([Vv]kcube X11|[Vv]kcube)$')))
         result['cube'] = gpu_process(cube.pid)
         screenshot(STATE / 'gpu-cube.png')
         gears = launch('gears', ['stdbuf', '-oL', 'glxgears', '-info', '-geometry', '300x300'])

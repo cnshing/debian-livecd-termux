@@ -1,0 +1,48 @@
+name: Native controller package
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  controller:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 20
+    steps:
+    - uses: actions/checkout@v7
+    - name: Test controller and profile routing
+      run: |
+        python3 tests/native/test-graphics.py
+        python3 tests/native/test-terminal.py
+        python3 tests/native/test-desktop-status.py
+        python3 tests/packaging/test-packaging.py
+        python3 tests/packaging/test-mali-acceleration.py
+    - name: Read the shared builder pin
+      id: config
+      run: python3 tools/recipes.py config >> "$GITHUB_OUTPUT"
+    - uses: actions/checkout@v7
+      with:
+        repository: termux/termux-packages
+        ref: ${{ steps.config.outputs.revision }}
+        path: termux-packages
+    - name: Stage the controller recipe
+      run: python3 tools/recipes.py prepare termux-packages livecd-desktop
+    - name: Build the platform-independent controller with the standard builder
+      working-directory: termux-packages
+      env:
+        TERMUX_BUILDER_IMAGE_NAME: ${{ steps.config.outputs.image }}
+      run: |
+        # There is no compilation or build dependency here. Keep declared runtime
+        # dependencies in the .deb; APT checks them at installation. The normal
+        # Packages workflow still rebuilds the full dependency set for releases.
+        test "$(sed -n 's/^TERMUX_PKG_PLATFORM_INDEPENDENT=//p' x11-packages/livecd-desktop/build.sh)" = true
+        test "$(sed -n 's/^TERMUX_PKG_SKIP_SRC_EXTRACT=//p' x11-packages/livecd-desktop/build.sh)" = true
+        ! grep -q '^TERMUX_PKG_BUILD_DEPENDS=' x11-packages/livecd-desktop/build.sh
+        ./scripts/run-docker.sh ./build-package.sh -s -a aarch64 livecd-desktop
+    - uses: actions/upload-artifact@v7
+      with:
+        name: native-controller-${{ github.sha }}
+        path: termux-packages/output/livecd-desktop_*.deb
+        if-no-files-found: error

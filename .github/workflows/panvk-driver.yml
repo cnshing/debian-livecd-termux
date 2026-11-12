@@ -2,6 +2,13 @@ name: PanVK source rebuild
 
 on:
   workflow_dispatch:
+  push:
+    branches: [research/panvk-kbase-probes]
+    paths:
+    - .github/workflows/panvk-driver.yml
+    - tools/panvk-probes/prepare-driver.sh
+    - tools/panvk-probes/driver-deps.sh
+    - tools/panvk-probes/build-driver.sh
 
 permissions:
   contents: read

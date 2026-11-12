@@ -7,7 +7,7 @@ TERMUX_PKG_VERSION="26.2.6"
 # Termux's Mesa with the vtest winsys made thread-safe (0020), so applications whose GL
 # contexts live on several threads, such as Firefox, work on the Mali VirGL path.
 # A revision of its own: at Termux's 26.2.6, APT would keep Termux's build.
-TERMUX_PKG_REVISION=100
+TERMUX_PKG_REVISION=101
 TERMUX_PKG_SRCURL="https://archive.mesa3d.org/mesa-${TERMUX_PKG_VERSION}.tar.xz"
 TERMUX_PKG_SHA256=b9436b3e1a8be76fbd4823dc884f90596ab7c6ac5e1867a305e66ffccfb31a92
 TERMUX_PKG_AUTO_UPDATE=true

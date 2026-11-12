@@ -10,12 +10,13 @@ mesa="$zenith/work/mesa"
 test -f "$mesa/.panvk-patchlevel"
 bash "$here/driver-deps.sh" "$zenith/work/ci-deps"
 deps="$zenith/work/ci-deps/root/usr"
-export PKG_CONFIG_PATH="$deps/lib/aarch64-linux-gnu/pkgconfig:$deps/share/pkgconfig"
+triplet=$(gcc -dumpmachine)
+export PKG_CONFIG_PATH="$deps/lib/$triplet/pkgconfig:$deps/share/pkgconfig"
 export PANVK_JOBS=4
 # The native code generators are built from the same reconstructed tree.
 export CC=clang-18 CXX=clang++-18
 export LLVM_CONFIG=llvm-config-18
-export PATH="/usr/lib/llvm-18/bin:$PATH"
+export PATH="$deps/bin:/usr/lib/llvm-18/bin:$PATH"
 bash "$zenith/scripts/bootstrap-host-tools.sh" --mesa "$mesa" --out "$zenith/build/host-tools-ci"
 export HOST_TOOLS="$zenith/build/host-tools-ci/bin"
 export PATH="$HOST_TOOLS:$PATH"

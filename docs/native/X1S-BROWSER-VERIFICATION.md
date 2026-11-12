@@ -13,18 +13,24 @@ whenever the package is installed and `/dev/mali0` is usable, whatever the deskt
 | GPU compositing, WebGL 1/2, WebGPU | enabled | enabled |
 | Renderer | `ANGLE (ARM, Vulkan 1.3.363 (Mali-G77 MC11), panvk)` | same |
 | WebGL readback, compositor capture | correct | correct |
-| Hardware video decoding | **no**: software VP9/H.264 decoders | **no**, same |
+| Hardware video decoding | **VP9 yes** (android-vaapi 3, below); HEVC and H.264 software | **no**: its glibc VA driver lacks the fix |
 | Hardware video encoding | **no**: no encode profiles advertised | not run |
 
 Why video is still software:
 
 - **Decoding.** Chromium (with ANGLE on Vulkan) imports each decoded frame as a dma-buf, via
-  `vaExportSurfaceHandle`. On Mali, Termux:VA's only usable bridge backend is `sw` (llvmpipe),
-  whose surfaces are CPU memory: export fails (`resource_get_handle failed`, Chromium:
-  `invalid VASurfaceID`) and both browsers fall back to software. `TERMUX_VA_CONTIGUOUS_DMABUF=1`
-  allocates the ION dma-buf, but llvmpipe cannot import it. The fix is in the Termux:VA Mesa
-  bridge: dma-buf-backed CPU surfaces (ION here) that it can export, which PanVK can import
-  (`VK_EXT_external_memory_dma_buf`, DRM format modifiers). Not started.
+  `vaExportSurfaceHandle`. On Mali, Termux:VA's only usable bridge backend is software
+  (softpipe), whose surfaces were malloc'd, so export failed (`invalid VASurfaceID`).
+  android-vaapi revision 3 gives that backend a winsys whose surfaces are ION dma-bufs
+  (`packages/android-vaapi/tva_ion_winsys.h`). Native Chromium VP9 then passes with
+  `VaapiVideoDecoder`: six fullscreen cycles, 188 frames, none dropped, numbered frames 12 and 36
+  correct at the browser and compositor layers, served by Android's VP9 decoder. Turning off the
+  bridge's end-of-picture wait makes the frame check fail, so that wait stays.
+  HEVC: Exynos's decoder returns its first frame only after about 18 pictures, so the bridge's
+  bounded per-picture wait fails and Chromium falls back to FFmpeg. Native Chromium passes only
+  VP9 on Adreno too; this is a bridge limitation, not Mali's. H.264 hardware decoding is off by
+  default (`disabled_va_codecs`). Chrome uses lfdevs' prebuilt glibc VA driver, which needs the
+  same winsys in a glibc build.
 - **Encoding.** Chromium on Linux encodes through VA-API only with the
   `AcceleratedVideoEncoder` feature, which no launcher enables on any phone. With it, the
   private daemon lists `OMX.Exynos.AVC/HEVC/VP9.Encoder` and Chromium creates and drops a

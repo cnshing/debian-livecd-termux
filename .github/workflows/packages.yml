@@ -118,7 +118,7 @@ jobs:
     - name: Test native Turnip and PanVK desktop selection
       run: python3 tests/native/test-graphics.py
     - name: Test Ghostty context compatibility
-      run: python3 tests/native/test-terminal.py
+      run: python3 tests/native/test-terminal-environment.py
     - name: Test the camera supervisor and its desktop wiring
       run: python3 tests/camera/test-camera-controller.py
     - name: Test GNOME wallpaper registration

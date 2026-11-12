@@ -2,6 +2,13 @@ name: Native controller package
 
 on:
   workflow_dispatch:
+  push:
+    branches: [feat/panvk-desktop]
+    paths:
+    - .github/workflows/native-controller.yml
+    - src/native/**
+    - packages/livecd-desktop/**
+    - tests/native/test-terminal-environment.py
 
 permissions:
   contents: read
@@ -15,7 +22,7 @@ jobs:
     - name: Test controller and profile routing
       run: |
         python3 tests/native/test-graphics.py
-        python3 tests/native/test-terminal.py
+        python3 tests/native/test-terminal-environment.py
         python3 tests/native/test-desktop-status.py
         python3 tests/packaging/test-packaging.py
         python3 tests/packaging/test-mali-acceleration.py

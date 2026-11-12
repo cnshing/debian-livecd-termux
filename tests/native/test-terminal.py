@@ -1,48 +1,70 @@
-#!/usr/bin/env python3
-"""Check Ghostty context compatibility without changing the compositor's mode."""
+#!/data/data/com.termux/files/usr/bin/python
+"""Real native terminal identity, literal paths, shell exit and WM close."""
+import json
+import os
 from pathlib import Path
 import subprocess
 import sys
-import unittest
-from unittest import mock
+import time
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'src/native'))
-import terminal
+sys.path.insert(0, str(Path.home() / '.local/lib/livecd-native'))
+from desktop import STATE, request, process_identity
 
 
-class Terminal(unittest.TestCase):
-    def test_low_version_panvk_uses_software_only_for_the_terminal(self):
-        original = {'LIVECD_NATIVE_VULKAN_DRIVER': 'panvk', 'LIVECD_NATIVE_RENDERER': 'zink',
-                    'VK_DRIVER_FILES': '/panvk.json', 'GALLIUM_DRIVER': 'zink'}
-        result = subprocess.CompletedProcess([], 0, 'OpenGL core profile version string: 4.2 (Core Profile)')
-        with mock.patch.object(terminal.subprocess, 'run', return_value=result):
-            env = terminal.environment(original)
-        self.assertEqual(original['GALLIUM_DRIVER'], 'zink')
-        self.assertEqual(env['GALLIUM_DRIVER'], 'llvmpipe')
-        self.assertEqual(env['LIVECD_NATIVE_RENDERER'], 'software')
-        self.assertNotIn('VK_ICD_FILENAMES', env)
-        self.assertEqual(env['GSK_RENDERER'], 'cairo')
+def windows():
+    result = subprocess.run(['xdotool', 'search', '--onlyvisible', '--class', 'ghostty'], text=True, capture_output=True)
+    return set(result.stdout.splitlines())
 
-    def test_supported_panvk_keeps_gpu_rendering(self):
-        result = subprocess.CompletedProcess([], 0, 'OpenGL core profile version string: 4.6 (Core Profile)')
-        with mock.patch.object(terminal.subprocess, 'run', return_value=result):
-            env = terminal.environment({'LIVECD_NATIVE_VULKAN_DRIVER': 'panvk', 'GALLIUM_DRIVER': 'zink'})
-        self.assertEqual(env['GALLIUM_DRIVER'], 'zink')
 
-    def test_failed_or_unreadable_probe_uses_the_working_software_path(self):
-        for result in (subprocess.CompletedProcess([], 1, ''), subprocess.CompletedProcess([], 0, 'unknown')):
-            with self.subTest(result=result), mock.patch.object(terminal.subprocess, 'run', return_value=result):
-                self.assertEqual(terminal.environment({'LIVECD_NATIVE_VULKAN_DRIVER': 'panvk'})['GALLIUM_DRIVER'], 'llvmpipe')
-        with mock.patch.object(terminal.subprocess, 'run', side_effect=subprocess.TimeoutExpired('glxinfo', 10)):
-            self.assertEqual(terminal.environment({'LIVECD_NATIVE_VULKAN_DRIVER': 'panvk'})['GALLIUM_DRIVER'], 'llvmpipe')
+def wait(predicate):
+    for _ in range(100):
+        value = predicate()
+        if value:
+            return value
+        time.sleep(0.1)
+    raise AssertionError('Terminal did not reach the expected state')
 
-    def test_turnip_and_software_do_not_need_a_probe(self):
-        with mock.patch.object(terminal.subprocess, 'run') as run:
-            for source in ({'LIVECD_NATIVE_VULKAN_DRIVER': 'turnip', 'GALLIUM_DRIVER': 'zink'},
-                           {'GALLIUM_DRIVER': 'llvmpipe'}):
-                self.assertEqual(terminal.environment(source)['GALLIUM_DRIVER'], source['GALLIUM_DRIVER'])
-        run.assert_not_called()
+
+def gone(pid):
+    try:
+        return process_identity(pid)[0] == 'Z'
+    except (FileNotFoundError, ProcessLookupError):
+        return True
+    except OSError:
+        # A process part-way through exiting can answer EIO before /proc drops it.
+        return True
+
+
+def main():
+    folder = Path.home() / "Documents/Termux 漢字 'quotes' $(touch LIVECD_SHOULD_NOT_EXIST)"
+    folder.mkdir(exist_ok=True)
+    records = []
+    for action in ('exit', 'windowquit'):
+        before = windows()
+        result = request('terminal', cwd=str(folder))
+        window = next(iter(wait(lambda: windows() - before)))
+        subprocess.run(['xdotool', 'windowactivate', '--sync', window], check=True)
+        marker = STATE / ('terminal-' + action + '.json')
+        marker.unlink(missing_ok=True)
+        command = 'python -c ' + __import__('shlex').quote(
+            'import json,os,pathlib;pathlib.Path(' + repr(str(marker)) + ').write_text(json.dumps({"cwd":os.getcwd(),"uid":os.getuid(),"shell":os.getppid()}))')
+        subprocess.run(['xdotool', 'type', '--clearmodifiers', '--delay', '1', command], check=True)
+        subprocess.run(['xdotool', 'key', 'Return'], check=True)
+        wait(marker.exists)
+        identity = json.loads(marker.read_text())
+        assert identity['cwd'] == str(folder) and identity['uid'] == os.getuid(), identity
+        if action == 'exit':
+            subprocess.run(['xdotool', 'type', '--clearmodifiers', 'exit'], check=True)
+            subprocess.run(['xdotool', 'key', 'Return'], check=True)
+        else:
+            subprocess.run(['xdotool', 'windowquit', window], check=True)
+        wait(lambda: window not in windows())
+        wait(lambda: gone(result['pid']))
+        wait(lambda: gone(identity['shell']))
+        assert not (Path.home() / 'LIVECD_SHOULD_NOT_EXIST').exists()
+        records.append({'action': action, 'identity': identity, 'window_closed': True, 'launcher_exited': True, 'shell_exited': True})
+    print(json.dumps({'ok': True, 'checks': records}, indent=2))
 
 
 if __name__ == '__main__':
-    unittest.main()
+    main()

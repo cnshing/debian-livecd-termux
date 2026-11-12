@@ -46,7 +46,10 @@ class Packaging(unittest.TestCase):
 
     def test_chromium_builds_alone_with_its_dependencies_and_longest_timeout(self):
         jobs = {job['name']: job for job in recipes.plan(recipes.all_names())['include']}
+        # Chromium builds against Termux's own mesa; this repository's behaviour-only mesa builds alone.
         self.assertEqual(jobs['chromium']['packages'], 'libva chromium')
+        self.assertEqual(jobs['mesa']['packages'], 'mesa')
+        self.assertFalse(any('mesa' in job['packages'].split() for name, job in jobs.items() if name != 'mesa'))
         self.assertEqual(jobs['chromium']['timeout'], 360)
         self.assertTrue(jobs['chromium']['exact'])
         # Other users of libva build it themselves, first, with the ordinary limits.
@@ -181,6 +184,14 @@ class Packaging(unittest.TestCase):
                 self.assertEqual((upstream / 'original.patch').read_text(), 'retained upstream patch\n')
                 self.assertFalse((upstream / 'helper.py').is_symlink())
                 self.assertEqual((upstream / 'helper.py').read_text(), source.read_text())
+                # A behaviour-only override stays out of other jobs' builders, even after full staging.
+                with mock.patch.object(recipes, 'BEHAVIOUR_ONLY', {'example'}):
+                    recipes.prepare_builder(checkout, ['other'])
+                    self.assertEqual((upstream / 'build.sh').read_text(), original)
+                    self.assertFalse((upstream / 'helper.py').exists())
+                    self.assertEqual((upstream / 'original.patch').read_text(), 'retained upstream patch\n')
+                    recipes.prepare_builder(checkout, ['example'])
+                    self.assertIn('TERMUX_PKG_REVISION=1', (upstream / 'build.sh').read_text())
                 metadata = json.loads((package / 'upstream.json').read_text())
                 metadata['remove_files'] = {'original.patch': hashlib.sha256(
                     b'retained upstream patch\n').hexdigest()}

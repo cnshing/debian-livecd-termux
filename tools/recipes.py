@@ -5,7 +5,7 @@
   recipes.py unbuilt < MATRIX          Drop the sets an earlier run already built, for CI.
   recipes.py artifact NAME             Print the download URL of a set's packages from an earlier run.
   recipes.py check-patches [NAME...]   Apply each recipe's patches to its pinned source.
-  recipes.py prepare CHECKOUT         Stage recipes in the pinned Termux checkout.
+  recipes.py prepare CHECKOUT [NAME...]  Stage recipes in the pinned Termux checkout for building NAME.
   recipes.py order NAME...            Print packages and local dependencies in build order.
   recipes.py host-packages NAME...    Print the build-machine packages a cross build of NAME needs.
   recipes.py config                   Print the builder revision and image for CI.
@@ -39,6 +39,11 @@ TIMEOUT, SEPARATE_TIMEOUT = 350, 360
 # rather than compiling the pinned builder's older one. These recipes still need the builder's exact
 # versions: Chromium's host tools must match its source, and a newer release would break the build.
 EXACT_DEPENDENCIES = {'chromium'}
+# Overrides that change only how a package behaves, not the headers or libraries others build against:
+# mesa only adds locking inside its VirGL vtest client. Recipes that depend on one build against
+# Termux's own recipe of that name instead, so it gets a job of its own and Chromium's exact-version
+# build does not compile it.
+BEHAVIOUR_ONLY = {'mesa'}
 # Build-machine libraries that a recipe's own tools link when it is cross-compiled. They are installed
 # in the builder container before the build, since termux-packages refuses sudo inside a recipe.
 HOST_PACKAGES = {'lsp-plugins-lv2': ['libcairo2-dev', 'libsndfile1-dev']}
@@ -101,7 +106,7 @@ def plan(names):
     """One job per dependent set: a job holds its targets and the recipes they need from here."""
     revision = json.loads(BUILD_CONFIG.read_text())['revision']
     ours = set(all_names())
-    needs = {name: read_recipe(name)['depends'] & ours for name in ours}
+    needs = {name: read_recipe(name)['depends'] & (ours - BEHAVIOUR_ONLY) for name in ours}
     selected, pending = set(), list(names)
     while pending:
         name = pending.pop()
@@ -192,8 +197,11 @@ def build_order(names):
     return [name for group in plan(checked(names))['include'] for name in group['packages'].split()]
 
 
-def prepare_builder(checkout):
-    """Retain upstream source patches and helpers when overlaying a recipe."""
+def prepare_builder(checkout, packages=None):
+    """Retain upstream source patches and helpers when overlaying a recipe.
+
+    With PACKAGES, a behaviour-only recipe outside them keeps Termux's own recipe, restored from the
+    checkout if an earlier staging replaced it."""
     checkout = Path(checkout).resolve()
     config = json.loads(BUILD_CONFIG.read_text())
     revision = subprocess.check_output(['git', '-C', str(checkout), 'rev-parse', 'HEAD'], text=True).strip()
@@ -206,6 +214,11 @@ def prepare_builder(checkout):
             original = subprocess.check_output(['git', '-C', str(checkout), 'show', 'HEAD:' + upstream['path']])
             if upstream['revision'] != revision or hashlib.sha256(original).hexdigest() != upstream['sha256']:
                 raise RuntimeError('Pinned upstream recipe changed: ' + name)
+            if packages is not None and name in BEHAVIOUR_ONLY and name not in packages:
+                shutil.rmtree(checkout / 'x11-packages' / name, ignore_errors=True)
+                subprocess.check_call(['git', '-C', str(checkout), 'checkout', '-q', 'HEAD', '--',
+                                       str(Path(upstream['path']).parent)])
+                continue
             for relative, expected in upstream.get('remove_files', {}).items():
                 path = Path(relative)
                 if path.is_absolute() or '..' in path.parts or (PACKAGES / name / path).exists():
@@ -316,7 +329,9 @@ def main():
     commands.add_parser('unbuilt')
     commands.add_parser('artifact').add_argument('name')
     commands.add_parser('check-patches').add_argument('names', nargs='*')
-    commands.add_parser('prepare').add_argument('checkout')
+    preparer = commands.add_parser('prepare')
+    preparer.add_argument('checkout')
+    preparer.add_argument('names', nargs='*')
     commands.add_parser('order').add_argument('names', nargs='+')
     commands.add_parser('host-packages').add_argument('names', nargs='+')
     commands.add_parser('config')
@@ -334,7 +349,7 @@ def main():
         if artifact:
             print(artifact['archive_download_url'])
     elif args.command == 'prepare':
-        prepare_builder(args.checkout)
+        prepare_builder(args.checkout, args.names or None)
     elif args.command == 'order':
         print(' '.join(build_order(args.names)))
     elif args.command == 'host-packages':

@@ -55,7 +55,7 @@ if ! test -d "$builder/.git"; then
     git clone --filter=blob:none --no-checkout "$repository" "$builder"
     git -C "$builder" checkout --detach "$revision"
 fi
-"$python" "$repo/tools/recipes.py" prepare "$builder"
+"$python" "$repo/tools/recipes.py" prepare "$builder" "${packages[@]}"
 case " ${packages[*]} " in
     *' chromium '*)
         recipe_version() { (set +u; source "$1"; printf '%s' "$TERMUX_PKG_VERSION"); }

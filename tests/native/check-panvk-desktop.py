@@ -27,7 +27,21 @@ def check_capture(folder, capture, stale=False):
     phase = state['phase'] + int(stale)
     colors = [(255, 255 if phase % 2 else 0, 0), (0, 255, 0), (0, 0, 255), (255, 255, 255)]
     maximum = 0
+    interior_pixels = 0
     for i, color in enumerate(colors):
+        # Check every interior pixel too. Keep a two-pixel inset around
+        # boundaries, including the one-pixel split difference at odd sizes.
+        x0 = x + (i % 2) * w // 2 + 2
+        x1 = x + (i % 2 + 1) * w // 2 - 2
+        y0 = y + (i // 2) * h // 2 + 2
+        y1 = y + (i // 2 + 1) * h // 2 - 2
+        expected = bytes(color) * (x1 - x0)
+        for row in range(y0, y1):
+            start = (row * image_w + x0) * 3
+            actual = raw[start:start + len(expected)]
+            if actual != expected:
+                maximum = max(maximum, max(abs(a - b) for a, b in zip(actual, expected)))
+            interior_pixels += x1 - x0
         for fx in (.15, .3, .5, .7, .85):
             for fy in (.15, .3, .5, .7, .85):
                 px = x + int((i % 2 + fx) * w / 2)
@@ -35,7 +49,8 @@ def check_capture(folder, capture, stale=False):
                 difference = max(abs(a - b) for a, b in zip(pixel(px, py), color))
                 maximum = max(maximum, difference)
     assert maximum <= 8, f'color error {maximum}: {path.name}'
-    return {'path': path.name, 'maximum_channel_error': maximum, 'samples': 100}
+    return {'path': path.name, 'maximum_channel_error': maximum, 'samples': 100,
+            'interior_pixels_checked': interior_pixels}
 
 
 def check(folder):

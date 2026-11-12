@@ -24,5 +24,7 @@ test "$(cat "$mesa/.panvk-patchlevel")" = p0175
   echo 'NOTE: release SOURCE.json provides no tree hash; matching the release label is not proof of content equivalence.'
 } > "$out/SOURCE.txt"
 git -C "$mesa" log --format='%h %s' > "$out/PATCHES.txt"
-tar -C "$zenith" -I 'zstd -T0' -cf "$out/prepared-source.tar.zst" work/mesa
+if [ "${PANVK_SKIP_ARCHIVE:-0}" != 1 ]; then
+  tar -C "$zenith" -I 'zstd -T0' -cf "$out/prepared-source.tar.zst" work/mesa
+fi
 cat "$out/SOURCE.txt"

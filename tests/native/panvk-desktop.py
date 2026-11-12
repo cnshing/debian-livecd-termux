@@ -89,7 +89,7 @@ def audit(pid):
             pass
     return {'pid': pid, 'libraries': sorted({s.split()[-1] for s in maps.splitlines()
             if any(k in s for k in ('panfrost', 'gallium', 'EGL', 'GLES', 'mutter-cogl', 'angle'))}),
-            'devices': devices,
+            'devices': devices, 'fd_count': len(list((proc / 'fd').iterdir())),
             'status': (proc / 'status').read_text()}
 
 
@@ -268,6 +268,8 @@ disable() { global.compositor.enable_unredirect(); }
             while time.monotonic() - begin < args.soak_seconds:
                 for name, proc in (('shell', shell), ('cube', cube), ('gears', gears)):
                     if proc.poll() is not None:
+                        result['unexpected_process_exit'] = {'name': name, 'pid': proc.pid,
+                                                            'returncode': proc.returncode}
                         raise RuntimeError('Soak process exited: ' + name)
                 elapsed = time.monotonic() - begin
                 sample = {'elapsed': elapsed, 'processes': {name: audit(proc.pid) for name, proc in
@@ -321,6 +323,9 @@ def parent(args):
     lock = (Path(os.environ['TMPDIR']) / 'livecd-fullscreen-test.lock').open('a')
     fcntl.flock(lock, fcntl.LOCK_EX)
     before = fs.live_state()
+    if any(name != 'X0' for name in before['displays']):
+        raise RuntimeError('Another private X display is active; wait for its owner to finish: ' +
+                           repr(before['displays']))
     status_before = run([str(HOME / '.local/bin/livecd'), 'status'], capture_output=True, text=True).stdout
     env = environment('software')
     for key in ('LIVECD_NATIVE_SESSION', 'XAUTHORITY', 'LIBGL_ALWAYS_SOFTWARE'):
@@ -341,7 +346,7 @@ def parent(args):
     # Explicit $PREFIX/lib shadows Android platform dependencies: libui then
     # fails its libbinder_ndk version requirement. Default Termux lookup still
     # finds Termux libraries; keep only the private GNOME and X11 paths here.
-    env['LD_LIBRARY_PATH'] = ':'.join([str(PAN / 'android/xlibs'), *(
+    env['LD_LIBRARY_PATH'] = ':'.join([*([] if args.no_xlibs else [str(PAN / 'android/xlibs')]), *(
         p for p in env['LD_LIBRARY_PATH'].split(':') if p != os.environ['PREFIX'] + '/lib')])
     if args.mesa_lib_dir:
         libraries = args.mesa_lib_dir.resolve(strict=True)
@@ -390,6 +395,7 @@ def parent(args):
             except subprocess.TimeoutExpired:
                 os.killpg(session.pid, signal.SIGKILL)
                 session.wait(timeout=5)
+        server_exit_before_cleanup = server.poll() if server else None
         stop(server)
         cleaned = cleanup_tagged(args.out)
         for path in (f'.X11-unix/X{display}', f'.X{display}-lock'):
@@ -398,6 +404,7 @@ def parent(args):
         status_after = run([str(HOME / '.local/bin/livecd'), 'status'], capture_output=True, text=True).stdout
         isolation = {'before': before, 'after': after, 'status_before': status_before,
                      'status_after': status_after, 'cleaned_orphan_pids': cleaned,
+                     'server_exit_before_cleanup': server_exit_before_cleanup,
                      'ok': before == after and status_before == status_after}
         (args.out / 'isolation.json').write_text(json.dumps(isolation, indent=2))
     return code if isolation['ok'] else 1
@@ -413,6 +420,7 @@ if __name__ == '__main__':
     parser.add_argument('--soak-seconds', type=int, default=0)
     parser.add_argument('--driver', type=Path)
     parser.add_argument('--mesa-lib-dir', type=Path)
+    parser.add_argument('--no-xlibs', action='store_true', help='Verify the rebuilt driver uses Termux sonames directly')
     parser.add_argument('--worker', action='store_true')
     parser.add_argument('--gtk', action='store_true')
     args = parser.parse_args()

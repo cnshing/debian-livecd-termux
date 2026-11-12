@@ -17,7 +17,7 @@ permissions:
 env:
   ZENITH_REPO: zenithblue-oss/panvk-kbase-android
   ZENITH_COMMIT: cf70e02b918e1864cbcd746a7fefa57b96c673ce
-  VULKAN_HEADERS_TAG: v1.4.309
+  VULKAN_HEADERS_TAG: v1.4.363
 
 jobs:
   build:
@@ -37,6 +37,8 @@ jobs:
         path: vulkan-headers
     - name: Build Android probes
       run: bash tools/panvk-probes/build.sh zenith vulkan-headers out
+    - name: Build wider Android feature and AHB probes
+      run: bash tools/panvk-probes/build-features.sh zenith vulkan-headers out/features
     - uses: actions/upload-artifact@v4
       with:
         name: panvk-probes-android-aarch64
@@ -63,6 +65,8 @@ jobs:
       run: bash tools/panvk-probes/glibc-deps.sh out
     - name: Build glibc probes
       run: CC=gcc bash tools/panvk-probes/build.sh zenith vulkan-headers out/probes
+    - name: Build wider glibc feature probes
+      run: CC=gcc bash tools/panvk-probes/build-features.sh zenith vulkan-headers out/features
     - uses: actions/upload-artifact@v4
       with:
         name: panvk-glibc-deps-aarch64

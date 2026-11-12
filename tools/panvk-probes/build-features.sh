@@ -35,9 +35,30 @@ else
   ndk=${ANDROID_NDK_LATEST_HOME:-${ANDROID_NDK_HOME:?no NDK}}
   cc="$ndk/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android29-clang"
 fi
+# Preserve the upstream graphics oracle, but make the complete image available
+# to distinguish a faulty sample/threshold from an actual rasterization error.
+python3 - "$src/graphics-features.c" "$out/graphics-features-dump.c" <<'PY'
+import pathlib, sys
+source = pathlib.Path(sys.argv[1]).read_text()
+needle = '   vkUnmapMemory(c.device,rb.memory);int ok='
+assert source.count(needle) == 1
+source = source.replace(needle, '''   const char *dump = getenv("FEATURE_DUMP");
+   if (dump) {
+      FILE *file = fopen(dump, "wb");
+      if (!file || fwrite(px, 4, W * H, file) != W * H || fclose(file)) return 1;
+   }
+''' + needle)
+pathlib.Path(sys.argv[2]).write_text(source)
+PY
 for name in sync-features compute-features graphics-features texture-features phase7-compute phase7-api bc-format-probe; do
-  "$cc" -std=gnu11 -O2 -Wall -Wextra -I"$vk" -I"$shaders" "$src/$name.c" -ldl -lm -pthread -o "$out/$name"
+  source="$src/$name.c"
+  if [ "$name" = graphics-features ]; then source="$out/graphics-features-dump.c"; fi
+  "$cc" -std=gnu11 -O2 -Wall -Wextra -I"$vk" -I"$shaders" -I"$src" "$source" -ldl -lm -pthread -o "$out/$name"
 done
+rm "$out/graphics-features-dump.c"
+if [ -n "${CC:-}" ]; then
+  "$cc" -O2 -Wall "$zenith/tests/x11-shm/x11_shm_present_test.c" -lxcb -lxcb-shm -o "$out/x11-shm"
+fi
 if [ -z "${CC:-}" ]; then
   for name in ahb ahb_linear ahb_render ahb_vendor ahb_vendor_linear fdimport fdimport_mtk; do
     "$cc" -std=gnu11 -O2 -Wall -I"$vk" "$zenith/tests/ahb/$name.c" -ldl -landroid -lm -o "$out/$name"

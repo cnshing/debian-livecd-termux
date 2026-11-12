@@ -66,7 +66,9 @@ jobs:
     - name: Build glibc probes
       run: CC=gcc bash tools/panvk-probes/build.sh zenith vulkan-headers out/probes
     - name: Build wider glibc feature probes
-      run: CC=gcc bash tools/panvk-probes/build-features.sh zenith vulkan-headers out/features
+      run: |
+        sudo apt-get install -y libxcb1-dev libxcb-shm0-dev
+        CC=gcc bash tools/panvk-probes/build-features.sh zenith vulkan-headers out/features
     - uses: actions/upload-artifact@v4
       with:
         name: panvk-glibc-deps-aarch64

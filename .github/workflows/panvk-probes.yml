@@ -41,3 +41,17 @@ jobs:
       with:
         name: panvk-probes-android-aarch64
         path: out/
+
+  # Runtime libraries the glibc PanVK ICD needs that Chrome's bundled lib/
+  # lacks. Taken from Ubuntu's arm64 archive with their package versions.
+  glibc-deps:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 10
+    steps:
+    - uses: actions/checkout@v4
+    - name: Fetch and unpack
+      run: bash tools/panvk-probes/glibc-deps.sh out
+    - uses: actions/upload-artifact@v4
+      with:
+        name: panvk-glibc-deps-aarch64
+        path: out/

@@ -10,6 +10,33 @@ Read [ENCODING.md](ENCODING.md) for the design and the Adreno results, and
 what works, what is blocked and by what, and what to do next. Paths under `temp/` are local
 files that Git ignores.
 
+## Acceptance in progress (2026-11-13)
+
+The Linux/Bionic WebCodecs adapter now has a shared-memory input patch in
+`packages/chromium/0100-termux-webcodecs-shmem.patch` (Chromium revision 2).
+It selects both `kShmem` and CPU frame preparation; its Chromium regression test
+covers ordinary CPU and mappable shared-image frames. The patch applies to the
+prepared source, but that C++ regression test has not been compiled or run.
+
+The patched browser is building in [Packages CI run 43421748237](https://github.com/cnshing/debian-livecd-termux/actions/runs/43421748237)
+on the single CI branch `fix/chromium-webcodecs-shmem`. The S20 still has revision 1.
+A fresh isolated baseline on its installed stack passed H.264 (283 browser frames,
+285 daemon packets) and VP9 (280 browser frames, 282 daemon packets), with correct
+received colours and no GPU crash. The daemon names Exynos hardware encoders for
+both sessions. This baseline does not accept the WebCodecs fix.
+
+Firefox WebCodecs was also probed through its installed launcher and a private
+profile/display. With `hardwareAcceleration: "prefer-hardware"` and constant
+bitrate, `isConfigSupported` returned false for `avc1.42001f`, `vp09.00.10.08`,
+and `hvc1.1.6.L93.B0`. No encoder session was opened. The `HWENC` profile listing
+therefore still does not establish an accepted Firefox encode.
+
+Next: stage the CI binary privately and run WebCodecs with constant bitrate and
+software decode/pixel checks, followed by the H.264/VP9 WebRTC loopback. Stop the
+owned browser at the first GPU fatal error. Enable encoding by default only after
+acceptance; prebuilt Chrome does not carry this patch. Local evidence and probe
+copies are in `temp/gpu-x1s/encoding-acceptance-20261113/`.
+
 ## How encoding reaches the hardware
 
 Every client goes the same way; only the first hop differs.

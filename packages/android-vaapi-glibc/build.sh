@@ -60,7 +60,8 @@ termux_step_post_get_source() {
 }
 
 termux_step_make() {
-	bash "$TERMUX_PKG_BUILDER_DIR/build-mali.sh" mesa-mali sysroot mali-build mali-stage
+	termux_setup_meson
+	TERMUX_MESON="$TERMUX_MESON" bash "$TERMUX_PKG_BUILDER_DIR/build-mali.sh" mesa-mali sysroot mali-build mali-stage
 	# glibc shared objects, built with Clang's own linker and no C library: they only call into
 	# the process's glibc.
 	local name

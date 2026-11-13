@@ -179,6 +179,11 @@ def video_environment(env, selected, abi, config):
         # CPU surfaces do not disable MediaCodec hardware codec execution.
         # The KGSL/dma-buf import settings are specific to the Adreno stack.
         env['TERMUX_VA_GPU_BACKEND'] = 'sw'
+        # Exynos's HEVC decoder holds back as many pictures as the rebuilt SPS declares:
+        # more than Firefox submits before waiting for the first, and any at all fails
+        # Chromium's wait for each picture. Declaring none returns each picture as it is
+        # decoded. See X1S-FIREFOX-VIDEO.md.
+        env['TERMUX_VA_HEVC_REORDER_PICS'] = '0'
     else:
         env.update(TERMUX_VA_GPU_BACKEND='kgsl', TERMUX_VA_X11_DRI3='1',
                    TERMUX_VA_CONTIGUOUS_DMABUF='1')
@@ -357,12 +362,6 @@ def prepare(profile, command, abi, video_override):
                 '0' if os.environ.get('LIVECD_VA_DISABLE_COMPLETION') == '1' else '1')
         if profile == 'firefox':
             env.setdefault('MOZ_DRM_DEVICE', video_device())
-            if env['MOZ_DRM_DEVICE'] == '/dev/mali0':
-                # Exynos's HEVC decoder holds back as many pictures as the rebuilt SPS
-                # declares, more than Firefox submits before waiting for the first.
-                # Declaring none returns each picture as it is decoded.
-                # See X1S-FIREFOX-VIDEO.md.
-                env['TERMUX_VA_HEVC_REORDER_PICS'] = '0'
             port, ffmpeg = firefox
             command = [str(port / 'application/firefox'), *command[1:]]
             env['LD_LIBRARY_PATH'] = ':'.join(filter(None,

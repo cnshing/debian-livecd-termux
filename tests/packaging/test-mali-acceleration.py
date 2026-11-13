@@ -163,6 +163,8 @@ class PanVKBrowsers(unittest.TestCase):
         paths = env['BIONILUX_LIBRARY_PATH'].split(':')
         self.assertLess(paths.index(str(root / 'mali')), paths.index(str(root / 'mesa/lib')))
         self.assertEqual(env['TERMUX_VA_SYNC_END_PICTURE'], '1')
+        # Without it Exynos holds HEVC pictures back and the wait above fails each one.
+        self.assertEqual(env['TERMUX_VA_HEVC_REORDER_PICS'], '0')
         self.assertFalse(any('AcceleratedVideoEncoder' in arg for arg in argv))
         self.assertNotIn('--video-capture-use-gpu-memory-buffer', argv)
 
@@ -176,6 +178,8 @@ class PanVKBrowsers(unittest.TestCase):
         self.assertEqual(env['LIBVA_DRIVERS_PATH'], str(root / 'mesa/dri'))
         self.assertEqual(env['BIONILUX_LIBRARY_PATH'].split(':'), [str(root / 'mesa/lib'), str(root / 'lib')])
         self.assertEqual(env['TERMUX_VA_GPU_BACKEND'], 'kgsl')
+        # Qualcomm's decoder stops returning frames at a count of 0; it keeps the bridge's default.
+        self.assertNotIn('TERMUX_VA_HEVC_REORDER_PICS', env)
 
     def test_completion_can_be_disabled_for_a_control_run(self):
         selected = (self.tmp / 'va', {'libraries': [], 'preloads': [], 'driver_directory': 'dri'})

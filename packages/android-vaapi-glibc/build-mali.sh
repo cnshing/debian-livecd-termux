@@ -7,6 +7,7 @@ sysroot=$(realpath "$2")
 mkdir -p "$3" "$4"
 build_dir=$(realpath "$3")
 stage=$(realpath "$4")
+meson=${TERMUX_MESON:-meson}
 python3 - "$build_dir/cross.ini" "$sysroot" <<'PY'
 import os
 from pathlib import Path
@@ -29,7 +30,8 @@ PY
 # The builder exports Android flags globally; a glibc sub-build must not use them.
 unset CC CXX AR AS LD STRIP RANLIB CFLAGS CXXFLAGS CPPFLAGS LDFLAGS
 unset PKG_CONFIG PKG_CONFIG_PATH PKG_CONFIG_LIBDIR PKG_CONFIG_SYSROOT_DIR
-meson setup "$build_dir/mesa" "$source_dir" --cross-file "$build_dir/cross.ini" \
+# The builder has no meson on PATH: the recipe passes termux_setup_meson's command.
+$meson setup "$build_dir/mesa" "$source_dir" --cross-file "$build_dir/cross.ini" \
   --prefix=/usr --libdir=lib/aarch64-linux-gnu --buildtype=release --wrap-mode=nodownload \
   -Dauto_features=disabled -Dplatforms=x11,wayland -Dgallium-drivers=softpipe -Dvulkan-drivers= \
   -Dgallium-va=enabled -Dtermux-va-bridge=enabled \

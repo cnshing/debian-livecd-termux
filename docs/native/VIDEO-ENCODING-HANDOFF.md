@@ -86,6 +86,40 @@ The existing Bionilux `getifaddrs` fallback is bypassed by Chromium's direct
 `1013-chromium-net-address-tracker.patch` handles denied multicast subscription and
 link enumeration; prebuilt Chrome lacks that adaptation. No Chrome fix is accepted.
 
+### Firefox follow-up: local libdrm, empty drain, and colour metadata
+
+Promoting the installed libdrm to global visibility in a private diagnostic lets
+revision 3 open the VA display and send **60 VP9 frames through
+`OMX.Exynos.VP9.Encoder`**. The existing global DRM shim can miss libdrm loaded as
+a local dependency; emulated render-node descriptors then fall through to a missing
+function. Revision 8 adds a Bionic-only lookup through an already-loaded libdrm
+handle when `RTLD_NEXT` fails. It does not promote the library globally.
+
+Firefox then drains and recreates its encoder, and drains the empty replacement.
+FFmpeg's hardware encoder base dereferences `pic_end` when it is NULL in that
+case (`input_order == decode_delay == 0`). The RDD process dies, the flush fails,
+and the page receives only 59 of the 60 hardware packets. Revision 4 of the private
+Firefox runtime guards this timestamp adjustment. Both fixes are building in
+[CI 43436860855](https://github.com/cnshing/debian-livecd-termux/actions/runs/43436860855),
+commit `ab84dd2`, on the same CI branch. The device regression
+`tests/video-encode/test-firefox-ffmpeg.py` loads the codec libraries locally and
+checks an empty drain for H.264, HEVC and VP9; run it on the new artifacts before
+another browser probe.
+
+The saved 59 VP9 pictures decode correctly in standalone software FFmpeg, maximum
+RGB channel error **2**. Firefox's supplied decoder configuration instead gives
+maximum error **22** (15 frames exceed 16). Forcing BT.601 interpretation gives 2;
+forcing BT.709 reproduces 22. The elementary stream leaves its colour space
+unspecified. Mozilla's pinned
+[`VideoEncoder::EncoderConfigToDecoderConfig`](https://github.com/mozilla-firefox/firefox/blob/28b7a7bffb5f82828143d9ad63839ad263b598be/dom/media/webcodecs/VideoEncoder.cpp#L605)
+hardcodes BT.709 in the output decoder configuration, independent of the actual
+input conversion. This is still a browser-visible acceptance failure; do not hide
+it by loosening pixel checks or changing the page's decoder configuration.
+
+Evidence is in `firefox3-followup-logs.tgz` (logs/results, no browser profiles),
+`firefox3-vp9-chunks.json`, and `firefox3-vp9-matrix.txt` under the local acceptance
+directory. The diagnostic scripts and source copies are retained there too.
+
 ### Exynos kernel lead
 
 The supplied [d2s MFC source](https://github.com/ianmacd/d2s/blob/d1d4fb4aa21d6f4c9b9f36caf15bc1a3c21d4e39/drivers/media/platform/exynos/mfc/mfc_enc_param.c#L217)

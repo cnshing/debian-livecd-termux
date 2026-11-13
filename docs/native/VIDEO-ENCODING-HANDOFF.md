@@ -37,6 +37,107 @@ owned browser at the first GPU fatal error. Enable encoding by default only afte
 acceptance; prebuilt Chrome does not carry this patch. Local evidence and probe
 copies are in `temp/gpu-x1s/encoding-acceptance-20261113/`.
 
+## Other acceptance results (2026-11-13)
+
+The private `android-vaapi` revision 7 build from [CI 43426043093](https://github.com/cnshing/debian-livecd-termux/actions/runs/43426043093)
+passes native discovery on the S20: an emulated `/dev/dri/renderD128`, libdrm's
+platform-bus identity, VA profiles, GLX and surfaceless EGL, and ordinary shell/Python
+file operations. This also works when Android has no `/dev/dri` directory.
+The driver selects CPU-backed surfaces automatically on Mali; encoding still uses
+Exynos MediaCodec hardware. The compiler smoke check was skipped because the phone
+has no compiler. Alternating installed revision 5 and private revision 7 preload
+benchmarks measured about 21 microseconds per file-operation round for both.
+
+Revision 7 also passes **46/46 FFmpeg checks**: H.264 profiles and HEVC, decoded
+pixels, uncropped dimensions, key frames, MP4 seeking, VA post-processing/transcode,
+bitrate, and deliberately corrupted negative controls. The measured 1 and 6 Mb/s
+streams are 0.96 and 5.78 Mb/s. Post-processing is slow: the 120-frame scale/transcode
+took 72 seconds. These packages are staged privately, not installed into the desktop.
+
+Serein's GStreamer camera pipeline on revision 6 produces 60/60 accepted IDR access
+units with parameter sets and correct Constrained Baseline. At 8 Mb/s its decoded
+pixels exceed 47 dB PSNR. **Its 600 kb/s all-intra target fails**, producing 2.556 Mb/s.
+The 720p VA-memory screen-share pipeline processes 51 frames in 118 seconds and
+hits the 120-second timeout. Do not claim real-time screen sharing or add this
+pipeline to defaults yet.
+
+Firefox's installed private FFmpeg was built with encoders disabled. Merely loading
+a full VAAPI FFmpeg still fails: Firefox submits I420 without a hardware frames
+context, while these encoders normally require VA surfaces. Revision 3 adds private
+VAAPI encoders and an I420-to-NV12 upload adapter; it is building in
+[CI 43427375309](https://github.com/cnshing/debian-livecd-termux/actions/runs/43427375309)
+on the same CI branch. It still needs phone acceptance with a private
+`media.use-remote-encoder.video.platform=true` preference. No Firefox preference
+has changed by default. Firefox's installed WebRTC VP9 software loopback passed
+199 frames with correct colours; H.264 connected but produced no frames. Its VP8
+MediaRecorder output decoded in software to all four expected colour sections
+(maximum channel error 2), without a daemon encoder session. Browser paused-video
+seek/readback stayed on the first picture, so that readback alone is not an encode oracle.
+
+A fresh prebuilt Chrome loopback still has zero ICE candidates and zero frames.
+The existing Bionilux `getifaddrs` fallback is bypassed by Chromium's direct
+`AddressTrackerLinux` netlink enumeration. Termux Chromium's pinned
+`1013-chromium-net-address-tracker.patch` handles denied multicast subscription and
+link enumeration; prebuilt Chrome lacks that adaptation. No Chrome fix is accepted.
+
+### Exynos kernel lead
+
+The supplied [d2s MFC source](https://github.com/ianmacd/d2s/blob/d1d4fb4aa21d6f4c9b9f36caf15bc1a3c21d4e39/drivers/media/platform/exynos/mfc/mfc_enc_param.c#L217)
+separates frame/macroblock rate control, bitrate, frame rate, and CBR mode. A reaction
+coefficient at most 5 chooses intra-limited CBR; 6–10 chooses fixed CBR; larger values
+choose VBR. The intra-size ratio applies only to the first mode. This is a lead for
+the low-rate all-intra overshoot, not proof of its cause. The repository targets
+Exynos 9820-family configs; the attached x1s reports `universal990` and kernel
+`4.19.87-27102101`. Establish the installed OMX-to-V4L2 mapping before changing controls.
+The daemon currently requests standard MediaCodec CBR. The kernel control values
+are not MediaFormat key names and cannot simply be passed through it.
+
+### LineageOS x1s source trace
+
+The [x1s dependencies](https://github.com/LineageOS/android_device_samsung_x1s/blob/lineage-23.2/lineage.dependencies)
+lead to `universal9830-common`, whose [media package list](https://github.com/LineageOS/android_device_samsung_universal9830-common/blob/96d43e19d657df7d8c8732973150b0b722df989c/device-common.mk#L187)
+builds Exynos OMX AVC/HEVC/VP9 encoders and decoders plus `libstagefrighthw`.
+On the attached stock phone, the AVC, HEVC and VP9 encoder XML elements are identical
+to this LineageOS configuration. This confirms the component declarations, not
+binary equivalence or acceptance of every vendor extension.
+
+The path is Android MediaCodec/Stagefright → Exynos OMX → `ExynosVideoEncoder.c`
+→ `Codec_OSAL_SetControls` in `ExynosVideo_OSAL.c` → V4L2 → MFC firmware.
+[BoardConfig9830.mk](https://github.com/LineageOS/android_hardware_samsung_slsi-linaro_config/blob/3626ce714e847cae429883a612d4ec9de79389e7/BoardConfig9830.mk)
+enables DMA-buf and non-cached graphic buffers, HEVC/VP9 encoding and WFD codecs,
+with `BOARD_USE_CSC_HW=false`. Native Android buffer sharing relies on these ROM
+services; it does not provide Chromium's Linux native-pixmap allocator in Termux.
+
+In [H.264 encoder setup](https://github.com/LineageOS/android_hardware_samsung_slsi-linaro_openmax/blob/15ab30812af9fe39fff2ae3cd867d7e954c73881/openmax/component/video/enc/h264/Exynos_OMX_H264enc.c#L582),
+standard CBR sets `CBRPeriodRf=10`, video-call CBR sets 5 and fixed slices, and
+skip-frame CBR additionally permits dropping frames. The OSAL passes this coefficient
+to `V4L2_CID_MPEG_MFC51_VIDEO_RC_REACTION_COEFF`. The
+[actual universal9830 kernel](https://github.com/LineageOS/android_kernel_samsung_universal9830/blob/0d6cd86ea14b8ff28f9099a4c122cd7d96d71434/drivers/media/platform/exynos/mfc/mfc_enc_param.c#L363)
+has the same 5/10 mode thresholds as the earlier d2s lead.
+
+`openmax.mk` enables `USE_SKYPE_HD`; H.264 registers `rtc-ext-enc-bitrate-mode`.
+Its [vendor-extension adapter](https://github.com/LineageOS/android_hardware_samsung_slsi-linaro_openmax/blob/15ab30812af9fe39fff2ae3cd867d7e954c73881/openmax/osal/Exynos_OSAL_Android.cpp#L4891)
+accepts integer fields `value` (OMX control-rate enum) and `bitrate` (target bps).
+The candidate MediaFormat names are therefore
+`vendor.rtc-ext-enc-bitrate-mode.value` and
+`vendor.rtc-ext-enc-bitrate-mode.bitrate`; enumerate/verify support on the installed
+codec before using them. Do not substitute a MediaCodec bitrate-mode enum for an
+OMX enum or allow frame dropping in Serein's one-output-per-input test.
+
+Its separate `rtc-ext-enc-low-latency.enable` extension is **not** equivalent to the
+standard `low-latency` key: H.264 setup disables rate control and enables per-frame
+QP when this extension is enabled. The decoder's low-latency path instead sets
+output display delay to zero. Neither is a safe blanket encoder fix.
+
+The supplied [RTMP ingest notes](https://github.com/dimadesu/android-rtmp-ingest)
+use direct FFmpeg MediaCodec with CBR and a named Qualcomm HEVC encoder on an S20 FE.
+They also report unstable HEVC playback. They offer a useful direct-MediaCodec
+comparison, but do not validate Exynos, the Linux VA upload path, or browser defaults.
+
+Evidence: `temp/gpu-x1s/encoding-acceptance-20261113/`, including
+`native-discovery7-run.txt`, `native-ffmpeg7-run.txt`, and `exynos-source/`.
+The phone outputs are `~/gpu-x1s/en-discover7` and `~/gpu-x1s/en-ffmpeg7`.
+
 ## How encoding reaches the hardware
 
 Every client goes the same way; only the first hop differs.
@@ -60,14 +161,14 @@ has AVC and HEVC only.
 | --- | --- | --- |
 | The daemon's own protocol test | passes: key frames, pixels, bitrate | 28 of 30 pass. The 2 failures are an extra, unrequested IDR in H.264 Baseline |
 | FFmpeg `h264_vaapi`, `hevc_vaapi` | pass, including the live camera at 720p30 in real time | pass with a privately extracted FFmpeg, after adding BT.709 metadata to the stream (below). The S20 has Termux's stock FFmpeg installed, which has no VA-API |
-| GStreamer `vah264enc`, `vah265enc`; Serein | pass in the test prefix | not run |
-| Programs finding the encoder with no settings | yes: the session preload presents KGSL as `/dev/dri/renderD128` | **no**: the preload only knows KGSL. A program needs an X11 VA display and `livecd-accelerate run --profile generic` |
+| GStreamer `vah264enc`, `vah265enc`; Serein | pass in the test prefix | private camera IDRs/pixels pass; low bitrate and screen-share speed fail (above) |
+| Programs finding the encoder with no settings | yes: the session preload presents KGSL as `/dev/dri/renderD128` | private revision 7 passes; installed revision 5 still needs explicit setup |
 | Chromium, WebRTC | not run | **works behind a flag**: H.264 and VP9 loopback, hardware encoder and decoder, about 284 frames each, received colours exact |
 | Chromium, WebCodecs `VideoEncoder` | not run | **crashes the GPU process** (Chromium CHECK) |
 | Google Chrome, WebRTC | not run | cannot connect: no network interfaces under Bionilux |
 | Google Chrome, WebCodecs | not run | same crash as Chromium |
-| Firefox | reported blocklisted (`VIDEO_ENCODING_MISSING`) before the probe fix; not rechecked | lists `HWENC` for H.264, VP9 and HEVC; no encode has been run |
-| MediaRecorder, any browser | not run | not run |
+| Firefox | reported blocklisted (`VIDEO_ENCODING_MISSING`) before the probe fix; not rechecked | installed hardware encode fails; VP9 WebRTC software passes; private encoder fix building |
+| MediaRecorder, any browser | not run | Firefox VP8 software output passes; hardware encode not accepted |
 
 **Browser hardware encoding is off by default everywhere.** No launcher passes
 `AcceleratedVideoEncoder`. Native encoding (`native_encode` in
@@ -121,18 +222,13 @@ installed.
   `packages/bionilux`. The Bionic Chromium on the same phone does gather candidates, so
   compare what the two do; why the bind is denied has not been established.
 
-### 4. Native programs on Mali cannot find the encoder
+### 4. Native discovery on Mali: accepted privately, pending deployment
 
-- `packages/android-vaapi/render-node.c` presents the GPU as `/dev/dri/renderD128` only when
-  `/dev/kgsl-3d0` opens, and answers `DRM_IOCTL_VERSION` with `kgsl`. On Mali nothing is
-  presented, so FFmpeg's `-vaapi_device /dev/dri/renderD128` and GStreamer's `va` plugin find
-  no device.
-- The driver itself works on Mali through an X11 VA display with
-  `TERMUX_VA_GPU_BACKEND=sw`, which is what `--profile generic` sets up.
-- To fix: teach the preload a Mali branch (`/dev/mali0`, a driver name libva maps to
-  `termuxva_drv_video.so`, the same sysfs folder), and make the driver choose the software
-  surface backend by itself when KGSL is absent, as it already chooses KGSL settings when it
-  is present. Mind that the preload is loaded into every desktop process.
+Revision 7 presents `/dev/mali0` as the VA render node, including its directory
+when `/dev/dri` is absent, and selects the CPU surface backend automatically.
+Discovery and 46 FFmpeg checks pass (details above). The installed revision 5 still
+has the KGSL-only behavior. Retain the ordinary-process and GL/EGL checks when
+changing this preload, which is loaded into every desktop process.
 
 ### 5. Colour metadata is missing from encoded streams
 
@@ -172,8 +268,10 @@ installed.
    and packed headers Firefox wants against what the driver reports, and the upload path of
    the software surface backend.
 3. **Chrome networking** (blocker 3), then rerun the Chrome WebRTC loopback.
-4. **Mali render node** (blocker 4), then run `tests/video-encode/run-phone-tests.sh` on the
-   S20 with the repository's FFmpeg (`packages/ffmpeg`, 9.0.2-100) installed.
+4. **Deploy accepted Mali revision 7** (blocker 4), retaining the existing native tests.
+   Investigate the all-intra bitrate mode through the LineageOS OMX mapping above;
+   accept pixels, one output per input, and bitrate together. Screen-share VPP still
+   needs performance work.
 5. **Colour metadata** (blocker 5) and the Baseline IDR.
 6. Adreno: nobody has run any browser encode on the Note10+. Do it after 1.
 

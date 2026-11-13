@@ -81,7 +81,7 @@ class FirefoxVideo(unittest.TestCase):
         video.assert_called_once()
         self.assertEqual(errors, '')
 
-    def test_mali_names_its_own_node_keeps_zink_and_leaves_hevc_to_software(self):
+    def test_mali_names_its_own_node_keeps_zink_and_asks_for_hevc_in_decode_order(self):
         def sw(env, *_):
             env['TERMUX_VA_GPU_BACKEND'] = 'sw'
         with mock.patch.object(acceleration, 'video_device', return_value='/dev/mali0'), \
@@ -91,9 +91,10 @@ class FirefoxVideo(unittest.TestCase):
                 [str(self.prefix / 'bin/firefox'), '--profile', '/disposable/profile'], 'bionic', 'auto')
         self.assertEqual(env['MOZ_DRM_DEVICE'], '/dev/mali0')
         self.assertEqual(env['GALLIUM_DRIVER'], 'zink')
-        self.assertEqual(env['TERMUX_VA_DISABLE_HEVC'], '1')
-        _, env, _, _ = self.prepare()
+        self.assertEqual(env['TERMUX_VA_HEVC_REORDER_PICS'], '0')
         self.assertNotIn('TERMUX_VA_DISABLE_HEVC', env)
+        _, env, _, _ = self.prepare()
+        self.assertNotIn('TERMUX_VA_HEVC_REORDER_PICS', env)
 
     def test_probe_accepts_only_zink_on_the_named_android_gpu(self):
         source = Path(self.temporary.name) / 'gfx'

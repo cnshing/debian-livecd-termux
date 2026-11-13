@@ -1,0 +1,25 @@
+Let the launcher choose the HEVC reorder count the rebuilt VPS and SPS declare.
+
+VA-API does not carry sps_max_num_reorder_pics, so the bridge declares
+min(DPB size - 1, 3). Exynos's decoder (OMX.Exynos.hevc.dec) holds back exactly
+that many pictures. A stream whose real count is 2 then needs a fourth picture
+before the first comes out, while Firefox's FFmpeg submits three and waits for
+the first: both wait forever. With TERMUX_VA_HEVC_REORDER_PICS=0 the decoder
+returns each picture as soon as it is decoded; the bridge pairs frames by unit
+index, so output order does not matter. Unset, nothing changes: Qualcomm's
+decoder needs the old value.
+
+--- a/src/gallium/frontends/va/tva_bridge.c	2026-11-12 19:45:13.476703728 -0800
++++ b/src/gallium/frontends/va/tva_bridge.c	2026-11-12 19:45:13.520703943 -0800
+@@ -2299,6 +2299,11 @@
+ {
+     if (!sps || sps->no_pic_reordering_flag)
+         return 0;
++    /* The launcher knows the decoder: Exynos holds this many pictures back. */
++    const char *e = getenv("TERMUX_VA_HEVC_REORDER_PICS");
++    if (e && *e >= '0' && *e <= '9')
++        return MIN2((unsigned)atoi(e),
++                    (unsigned)sps->sps_max_dec_pic_buffering_minus1);
+     return MIN2((unsigned)sps->sps_max_dec_pic_buffering_minus1, 3u);
+ }
+ 

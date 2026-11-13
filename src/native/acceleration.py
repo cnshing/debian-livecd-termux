@@ -350,9 +350,11 @@ def prepare(profile, command, abi, video_override):
         if profile == 'firefox':
             env.setdefault('MOZ_DRM_DEVICE', video_device())
             if env['MOZ_DRM_DEVICE'] == '/dev/mali0':
-                # Exynos returns its first HEVC frame too late for the bridge, and
-                # Firefox then stalls instead of falling back. See X1S-FIREFOX-VIDEO.md.
-                env.setdefault('TERMUX_VA_DISABLE_HEVC', '1')
+                # Exynos's HEVC decoder holds back as many pictures as the rebuilt SPS
+                # declares, more than Firefox submits before waiting for the first.
+                # Declaring none returns each picture as it is decoded.
+                # See X1S-FIREFOX-VIDEO.md.
+                env['TERMUX_VA_HEVC_REORDER_PICS'] = '0'
             port, ffmpeg = firefox
             command = [str(port / 'application/firefox'), *command[1:]]
             env['LD_LIBRARY_PATH'] = ':'.join(filter(None,

@@ -22,7 +22,8 @@ termux_step_configure() {
 		archive="$TERMUX_PKG_CACHEDIR/$(basename "$url")"
 		termux_download "$url" "$archive" "$sha" || termux_download "$snapshot" "$archive" "$sha"
 		dpkg-deb -x "$archive" sysroot
-	done < <(python3 -c 'import json, sys; [print(i["package"], i["url"], i["sha256"], i.get("snapshot", i["url"])) for i in json.load(open(sys.argv[1]))]' \
+	# The lock is android-vaapi-glibc's whole sysroot; the preloads need only the C library.
+	done < <(python3 -c 'import json, sys; [print(i["package"], i["url"], i["sha256"], i.get("snapshot", i["url"])) for i in json.load(open(sys.argv[1])) if i["package"] in ("libc6", "libc6-dev", "linux-libc-dev")]' \
 		"$TERMUX_PKG_BUILDER_DIR/glibc-sysroot.lock.json")
 }
 

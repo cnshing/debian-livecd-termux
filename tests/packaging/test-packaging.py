@@ -115,6 +115,12 @@ class Packaging(unittest.TestCase):
             bytecode.unlink()
             bytecode.parent.rmdir()
 
+    def test_every_recipe_link_resolves(self):
+        # Staging copies each recipe with its links followed; one dangling link fails every build.
+        dangling = [str(path.relative_to(recipes.PACKAGES)) for path in recipes.PACKAGES.rglob('*')
+                    if path.is_symlink() and not path.exists()]
+        self.assertEqual(dangling, [])
+
     def test_glibc_va_artifacts_include_shared_bionic_bridge_sources(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

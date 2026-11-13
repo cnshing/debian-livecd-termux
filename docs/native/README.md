@@ -315,7 +315,9 @@ share this policy. This is a terminal fallback, not a terminal GPU pass.
 The integrated path uses the upstream release driver pinned by the package.
 The experimental point-size driver variant is excluded because it failed GTK
 presentation. The 30-minute soak remains pending. See
-[PanVK desktop integration](PANVK-DESKTOP.md) for validation and remaining limits.
+[PanVK desktop integration](PANVK-DESKTOP.md) for validation and remaining limits, and
+[Mali GPU and hardware video](MALI-GPU-STATUS.md) for the state of the desktop, Ghostty and
+each browser on Mali in one place.
 
 ## Native renderer recovery
 

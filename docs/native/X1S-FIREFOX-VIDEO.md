@@ -42,7 +42,7 @@ B-frames and 5 references (150 frames). Without the variable FFmpeg hangs on the
 | `android-vaapi` ≥ revision 5 (HEVC) | `0103-hevc-reorder-count.patch` | See [HEVC](#hevc-why-it-stalled) below. The bridge takes the reorder count it declares from `TERMUX_VA_HEVC_REORDER_PICS` |
 | `mesa` ≥ 26.2.6-103 | `0023-zink-skip-missing-dmabuf-fence-semaphores.patch` | PanVK's kbase backend cannot create SYNC_FD semaphores. Zink's `submit_queue` read one per dma-buf plane from an empty array and crashed Firefox on its first imported frame |
 | `android-firefox-video` ≥ 9.0.2-2 | `stage.py` | Firefox's graphics probe accepts Zink on PanVK with `/dev/mali0`, as it does Turnip with KGSL. Without a render device Firefox never runs its VA-API probe. The package depends on mesa -103 and android-vaapi 5 |
-| Launcher | `src/native/acceleration.py` | On Mali: `MOZ_DRM_DEVICE=/dev/mali0`, Firefox keeps its own `GALLIUM_DRIVER`, and `TERMUX_VA_HEVC_REORDER_PICS=0` |
+| Launcher | `src/native/acceleration.py` (`livecd-desktop` ≥ 0.2.0-17) | On Mali: `MOZ_DRM_DEVICE=/dev/mali0`, Firefox keeps its own `GALLIUM_DRIVER`, and `TERMUX_VA_HEVC_REORDER_PICS=0` |
 
 Frame export itself comes from the ION dma-buf surfaces of `tva_ion_winsys.h` (android-vaapi 3).
 Firefox's GL is on PanVK only when the desktop renderer is Zink (`gpu_enabled`); on a software
@@ -63,9 +63,9 @@ back. The earlier explanation, a first frame after about 18 pictures, was wrong.
 
 With `TERMUX_VA_HEVC_REORDER_PICS=0` the decoder returns each picture as soon as it is decoded.
 The order no longer matches display order, which does not matter: the bridge pairs each frame
-with its input unit by index. The launcher sets it for Firefox on Mali only. Unset, the bridge
-declares what it did before, because its source says Qualcomm's decoder stops returning frames
-at 0.
+with its input unit by index. The launcher sets it for every VA-API client on Mali (Firefox,
+Chromium, Chrome and explicit clients) and nowhere else. Unset, the bridge declares what it did
+before, because its source says Qualcomm's decoder stops returning frames at 0.
 
 The `vendor.rtc-ext-dec-low-latency.enable` MediaCodec key and turning `low-latency` off changed
 nothing.
@@ -111,9 +111,9 @@ Firefox on Mali now decodes HEVC in hardware (above). Not done:
 - **The launcher path is untested on the phone.** The harness set the variable by hand; the
   launcher line and its host test (`tests/packaging/test-firefox-video.py`) are new. The final CI
   driver (run 43362735995) is byte-identical to the one tested.
-- **Chromium on Mali** has the same failure and still decodes HEVC in software. Its end-of-picture
-  wait needs each picture back before the next goes in, which a count of 0 should give. Set the
-  variable for Chromium in `acceleration.py` and run its HEVC case.
+- **Chromium on Mali** had the same failure and is fixed the same way: with the variable, set by
+  the launcher's shared Mali settings, it decodes the HEVC fixture on `VaapiVideoDecoder`
+  ([X1S-BROWSER-VERIFICATION.md](X1S-BROWSER-VERIFICATION.md)).
 - **Other phones.** On Adreno nothing changes. A count of 1 is never more than a reordering
   stream's real count and also gave identical frames here, so it may be a better default than 3
   for every decoder; that needs a run on the Note10+ first.

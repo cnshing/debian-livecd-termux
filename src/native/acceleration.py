@@ -75,12 +75,18 @@ def checked_stack(root, abi):
         manifest = json.loads((root / 'manifest.json').read_text())
         if manifest['format'] != 1 or manifest['abi'] != abi:
             raise ValueError('Wrong stack ABI')
-        for value in [*manifest['libraries'], *manifest['preloads'], manifest['driver_directory']]:
-            path = root / value
-            if not path.exists() or not path.resolve().is_relative_to(root.resolve()):
-                raise ValueError('Missing or external stack path: ' + str(path))
-        if not (root / manifest['driver_directory'] / 'termuxva_drv_video.so').is_file():
-            raise ValueError('Missing Termux:VA driver')
+        variants = [manifest]
+        if 'mali' in manifest:
+            variants.append(manifest['mali'])
+        for variant in variants:
+            preloads = manifest['preloads'] if variant is manifest else variant.get('preloads', [])
+            for value in [*variant['libraries'], *preloads, variant['driver_directory']]:
+                path = root / value
+                if not path.exists() or not path.resolve().is_relative_to(root.resolve()):
+                    raise ValueError('Missing or external stack path: ' + str(path))
+            driver = root / variant['driver_directory'] / 'termuxva_drv_video.so'
+            if not driver.is_file() or not driver.resolve().is_relative_to(root.resolve()):
+                raise ValueError('Missing or external Termux:VA driver')
         return root, manifest
     except (OSError, ValueError, KeyError, TypeError):
         return None
@@ -157,7 +163,9 @@ def ensure_daemon(env):
 
 def video_environment(env, selected, abi, config):
     root, manifest = selected
-    libraries = ':'.join(str(root / p) for p in manifest['libraries'])
+    mali = mali_usable()
+    variant = manifest.get('mali', {}) if abi == 'glibc' and mali else {}
+    libraries = ':'.join(str(root / p) for p in [*variant.get('libraries', []), *manifest['libraries']])
     preloads = ':'.join(str(root / p) for p in manifest['preloads'])
     if abi == 'glibc':
         env['BIONILUX_LIBRARY_PATH'] = libraries
@@ -165,9 +173,9 @@ def video_environment(env, selected, abi, config):
     else:
         env['LD_LIBRARY_PATH'] = ':'.join(filter(None, [libraries, env.get('LD_LIBRARY_PATH')]))
         env['LD_PRELOAD'] = ':'.join(filter(None, [preloads, env.get('LD_PRELOAD')]))
-    env.update(LIBVA_DRIVERS_PATH=str(root / manifest['driver_directory']),
+    env.update(LIBVA_DRIVERS_PATH=str(root / variant.get('driver_directory', manifest['driver_directory'])),
                LIBVA_DRIVER_NAME='termuxva', TERMUX_VA_BRIDGE='1')
-    if mali_usable():
+    if mali:
         # CPU surfaces do not disable MediaCodec hardware codec execution.
         # The KGSL/dma-buf import settings are specific to the Adreno stack.
         env['TERMUX_VA_GPU_BACKEND'] = 'sw'
@@ -342,7 +350,7 @@ def prepare(profile, command, abi, video_override):
             # GALLIUM_DRIVER, so do not let it inherit the desktop's. Firefox keeps
             # its own: its GL is Zink, and the driver now reads only its own variable.
             env['GALLIUM_DRIVER'] = 'softpipe'
-        if abi == 'bionic' and profile in ('chromium', 'ungoogled-chromium'):
+        if profile in BROWSERS:
             # ANGLE consumes exported surfaces through implicit DRM sync. The
             # MediaCodec/CPU producer needs an explicit completion boundary.
             env['TERMUX_VA_SYNC_END_PICTURE'] = (

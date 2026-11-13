@@ -153,6 +153,62 @@ class PanVKBrowsers(unittest.TestCase):
         self.assertEqual(env['VK_DRIVER_FILES'], str(self.panvk / 'glibc/panfrost_icd.json'))
         self.assertEqual(env['BIONILUX_LIBRARY_PATH'].split(':')[0], str(self.panvk / 'glibc/lib'))
 
+    def test_glibc_mali_driver_precedes_the_prebuilt_mesa(self):
+        root = self.tmp / 'va'
+        manifest = {'libraries': ['mesa/lib', 'lib'], 'preloads': [], 'driver_directory': 'mesa/dri',
+                    'mali': {'libraries': ['mali'], 'driver_directory': 'mali/dri'}}
+        with mock.patch.object(acceleration, 'stack', return_value=(root, manifest)):
+            argv, env = acceleration.prepare('chrome', ['/chrome'], 'glibc', 'on')
+        self.assertEqual(env['LIBVA_DRIVERS_PATH'], str(root / 'mali/dri'))
+        paths = env['BIONILUX_LIBRARY_PATH'].split(':')
+        self.assertLess(paths.index(str(root / 'mali')), paths.index(str(root / 'mesa/lib')))
+        self.assertEqual(env['TERMUX_VA_SYNC_END_PICTURE'], '1')
+        self.assertFalse(any('AcceleratedVideoEncoder' in arg for arg in argv))
+        self.assertNotIn('--video-capture-use-gpu-memory-buffer', argv)
+
+    def test_adreno_keeps_the_prebuilt_glibc_driver(self):
+        root = self.tmp / 'va'
+        manifest = {'libraries': ['mesa/lib', 'lib'], 'preloads': [], 'driver_directory': 'mesa/dri',
+                    'mali': {'libraries': ['mali'], 'driver_directory': 'mali/dri'}}
+        env = {}
+        with mock.patch.object(acceleration, 'mali_usable', return_value=False):
+            acceleration.video_environment(env, (root, manifest), 'glibc', {})
+        self.assertEqual(env['LIBVA_DRIVERS_PATH'], str(root / 'mesa/dri'))
+        self.assertEqual(env['BIONILUX_LIBRARY_PATH'].split(':'), [str(root / 'mesa/lib'), str(root / 'lib')])
+        self.assertEqual(env['TERMUX_VA_GPU_BACKEND'], 'kgsl')
+
+    def test_completion_can_be_disabled_for_a_control_run(self):
+        selected = (self.tmp / 'va', {'libraries': [], 'preloads': [], 'driver_directory': 'dri'})
+        with mock.patch.object(acceleration, 'stack', return_value=selected), \
+                mock.patch.dict(os.environ, {'LIVECD_VA_DISABLE_COMPLETION': '1'}):
+            _, env = acceleration.prepare('chrome', ['/chrome'], 'glibc', 'on')
+        self.assertEqual(env['TERMUX_VA_SYNC_END_PICTURE'], '0')
+
+    def test_disabled_video_does_not_select_a_va_driver(self):
+        _, env = acceleration.prepare('chrome', ['/chrome'], 'glibc', 'off')
+        self.assertNotIn('LIBVA_DRIVERS_PATH', env)
+        self.assertNotIn('TERMUX_VA_SYNC_END_PICTURE', env)
+
+    def test_stack_rejects_a_missing_or_external_mali_driver(self):
+        import json
+        root = self.tmp / 'va'
+        (root / 'mesa/dri').mkdir(parents=True)
+        (root / 'mesa/dri/termuxva_drv_video.so').touch()
+        manifest = {'format': 1, 'abi': 'glibc', 'libraries': ['mesa'], 'preloads': [],
+                    'driver_directory': 'mesa/dri',
+                    'mali': {'libraries': ['mali'], 'driver_directory': 'mali/dri'}}
+        (root / 'manifest.json').write_text(json.dumps(manifest))
+        self.assertIsNone(acceleration.checked_stack(root, 'glibc'))
+        (root / 'mali/dri').mkdir(parents=True)
+        driver = root / 'mali/dri/termuxva_drv_video.so'
+        driver.touch()
+        self.assertIsNotNone(acceleration.checked_stack(root, 'glibc'))
+        driver.unlink()
+        external = self.tmp / 'unpackaged-driver.so'
+        external.touch()
+        driver.symlink_to(external)
+        self.assertIsNone(acceleration.checked_stack(root, 'glibc'))
+
     def test_without_the_package_browsers_keep_the_desktop_policy(self):
         for abi in ('bionic', 'glibc'):
             (self.panvk / abi / 'panfrost_icd.json').unlink()

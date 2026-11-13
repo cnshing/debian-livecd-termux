@@ -115,6 +115,19 @@ class Packaging(unittest.TestCase):
             bytecode.unlink()
             bytecode.parent.rmdir()
 
+    def test_glibc_va_artifacts_include_shared_bionic_bridge_sources(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            for name in ('android-vaapi-glibc', 'android-vaapi'):
+                (root / name).mkdir()
+                (root / name / 'build.sh').write_text(name)
+            shared = root / 'android-vaapi/tva_ion_winsys.h'
+            shared.write_text('first surface implementation')
+            with mock.patch.object(recipes, 'PACKAGES', root):
+                before = recipes.directory_hash(['android-vaapi-glibc'])
+                shared.write_text('changed surface implementation')
+                self.assertNotEqual(before, recipes.directory_hash(['android-vaapi-glibc']))
+
     def test_reused_packages_come_only_from_this_run_or_the_default_branch(self):
         def candidate(id, branch, run, fork=False, expired=False):
             return {'id': id, 'name': 'debs-x', 'expired': expired,

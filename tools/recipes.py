@@ -47,7 +47,7 @@ BEHAVIOUR_ONLY = {'mesa'}
 # Build-machine libraries that a recipe's own tools link when it is cross-compiled. They are installed
 # in the builder container before the build, since termux-packages refuses sudo inside a recipe.
 HOST_PACKAGES = {'lsp-plugins-lv2': ['libcairo2-dev', 'libsndfile1-dev'],
-                 'android-vaapi-glibc': ['bison', 'flex', 'python3-mako', 'python3-yaml', 'python3-packaging', 'libwayland-dev', 'wayland-protocols']}
+                 'android-vaapi-glibc': ['bison', 'flex', 'python3-mako', 'python3-yaml', 'python3-packaging']}
 # Both ABIs use the same pinned VA bridge patches and ION winsys. Staging retains
 # all sibling recipes; include shared source inputs in the glibc artifact's cache key.
 RECIPE_INPUTS = {'android-vaapi-glibc': {'android-vaapi'}}

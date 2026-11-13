@@ -33,10 +33,12 @@ PY
 # The builder exports Android flags globally; a glibc sub-build must not use them.
 unset CC CXX AR AS LD STRIP RANLIB CFLAGS CXXFLAGS CPPFLAGS LDFLAGS
 unset PKG_CONFIG PKG_CONFIG_PATH PKG_CONFIG_LIBDIR PKG_CONFIG_SYSROOT_DIR
+# X11 only: the VA frontend needs no Wayland, and Mesa's Wayland code wants a wayland-scanner of
+# exactly the sysroot's Wayland version, which the builder (x86_64) cannot run from Debian arm64.
 # The builder has no meson on PATH: the recipe passes termux_setup_meson's command.
 $meson setup "$build_dir/mesa" "$source_dir" --cross-file "$build_dir/cross.ini" \
   --prefix=/usr --libdir=lib/aarch64-linux-gnu --buildtype=release --wrap-mode=nodownload \
-  -Dauto_features=disabled -Dplatforms=x11,wayland -Dgallium-drivers=softpipe -Dvulkan-drivers= \
+  -Dauto_features=disabled -Dplatforms=x11 -Dgallium-drivers=softpipe -Dvulkan-drivers= \
   -Dgallium-va=enabled -Dtermux-va-bridge=enabled \
   -Dvideo-codecs=h264dec,h265dec,vp9dec,av1dec,h264enc,h265enc \
   -Dllvm=disabled -Ddraw-use-llvm=false -Dglx=disabled -Degl=enabled -Dgles1=disabled \

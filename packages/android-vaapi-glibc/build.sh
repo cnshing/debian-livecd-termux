@@ -40,6 +40,9 @@ termux_step_post_get_source() {
 		dpkg-deb -x "$archive" sysroot
 	done < <(python3 -c 'import json, sys; [print(i["package"], i["url"], i["sha256"], i["snapshot"]) for i in json.load(open(sys.argv[1]))]' \
 		"$TERMUX_PKG_BUILDER_DIR/sysroot.lock.json")
+	# Debian merges /lib into /usr/lib with a link from base-files, which is not a library package.
+	# glibc's libc.so linker script names /lib/aarch64-linux-gnu/libc.so.6.
+	test -e sysroot/lib || ln -s usr/lib sysroot/lib
 	# Reuse the Bionic recipe's exact source, patches and ION surface changes.
 	local bridge="$TERMUX_PKG_BUILDER_DIR/../android-vaapi" source_url source_sha
 	read -r source_url source_sha < <(bash -c 'source "$1"; printf "%s %s\n" "$TERMUX_PKG_SRCURL" "$TERMUX_PKG_SHA256"' \

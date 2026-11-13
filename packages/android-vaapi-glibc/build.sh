@@ -48,8 +48,9 @@ termux_step_post_get_source() {
 	mkdir -p mesa-mali
 	tar -xf "$TERMUX_PKG_CACHEDIR/mesa-va-$source_sha.tar.gz" -C mesa-mali --strip-components=1
 	local change
-	for change in 0100-termux-va-encode.patch 0101-complete-implicit-sync-decodes.patch 0102-own-gallium-driver-variable.patch; do
-		patch --batch -d mesa-mali -p1 < "$bridge/$change"
+	# Every bridge patch (01xx) of the Bionic recipe; its 00xx patches are Termux's for Bionic.
+	for change in "$bridge"/01[0-9][0-9]-*.patch; do
+		patch --batch -d mesa-mali -p1 < "$change"
 	done
 	cp "$bridge/tva_ion.h" "$bridge/tva_ion_winsys.h" mesa-mali/src/gallium/frontends/va/
 	python3 "$bridge/configure-bridge.py" mesa-mali/src/gallium/frontends/va/tva_bridge.c

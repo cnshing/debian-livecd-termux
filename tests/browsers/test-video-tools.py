@@ -25,6 +25,34 @@ def load(name, path):
     return module
 
 
+class AccelerationEvidence(unittest.TestCase):
+    def setUp(self):
+        with patch.dict(os.environ, {'PREFIX': '/data/data/com.termux/files/usr'}):
+            self.harness = load('acceleration_harness', Path(__file__).with_name('test-acceleration.py'))
+        sys.path.insert(0, str(ROOT / 'src/native'))
+        self.addCleanup(sys.path.remove, str(ROOT / 'src/native'))
+
+    def test_gpu_evidence_accepts_only_the_selected_driver(self):
+        records = {1: {'driver': 'panvk'}, 2: {'driver': 'turnip'}, 3: {'driver': None}}
+        with patch.object(self.harness.probe, 'tagged', return_value=list(records)), \
+                patch('graphics.process_gpu', side_effect=records.__getitem__):
+            for driver in ('panvk', 'turnip'):
+                with self.subTest(driver=driver):
+                    self.assertEqual(self.harness.gpu_processes('private-test', driver),
+                                     [{'driver': driver}])
+
+    def test_decoder_init_without_output_is_distinct_from_decoded_frames(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            (folder / 'mozilla.log.child-1.moz_log').write_text('VA-API FFmpeg init successful\n')
+            self.assertEqual(self.harness.firefox_decode_evidence(folder),
+                             {'init_ok': True, 'frames': 0, 'software_codecs': []})
+            (folder / 'mozilla.log.child-2.moz_log').write_text(
+                'VA-API frame pts=0\nVA-API frame pts=1\nUsing preferred software codec hevc\n')
+            self.assertEqual(self.harness.firefox_decode_evidence(folder),
+                             {'init_ok': True, 'frames': 2, 'software_codecs': ['hevc']})
+
+
 class PixelOracle(unittest.TestCase):
     def test_positive_and_corrupted_controls(self):
         chart = load('fixtures', Path(__file__).with_name('make-video-fixtures.py')).chart

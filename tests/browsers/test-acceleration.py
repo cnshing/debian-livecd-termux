@@ -55,17 +55,24 @@ def wait_for(check, timeout=45):
     raise RuntimeError('Timed out waiting for application readiness; see app.log')
 
 
-def gpu_processes(tag):
+def gpu_processes(tag, expected_driver):
     from graphics import process_gpu
     found = []
     for pid in probe.tagged(tag):
         try:
             record = process_gpu(pid)
-            if record['turnip_libraries'] and record['kgsl_devices']:
+            if record['driver'] == expected_driver:
                 found.append(record)
         except (OSError, ValueError, UnicodeError):
             pass
     return found
+
+
+def firefox_decode_evidence(folder):
+    logs = '\n'.join(path.read_text(errors='replace') for path in folder.glob('mozilla.log*'))
+    return {'init_ok': 'VA-API FFmpeg init successful' in logs,
+            'frames': len(re.findall(r'VA-API frame pts=', logs)),
+            'software_codecs': sorted(set(re.findall(r'Using preferred software codec (\S+)', logs)))}
 
 
 class MPV:
@@ -97,12 +104,14 @@ class MPV:
 def worker(args):
     sys.path.insert(0, str(NATIVE))
     import acceleration
+    from graphics import zink_driver
     tag = 'acceleration-' + args.out.name
     probe.OUT = args.out
     result = {'application': args.application, 'startup_only': args.startup_only,
               'decoder_expectation': 'software' if args.expect_software else 'hardware',
               'display': os.environ['DISPLAY'], 'started': False,
               'hardware_verified': False, 'ok': False, 'command': sys.argv}
+    result['expected_gpu_driver'] = zink_driver()
     browser = ipc = server = None
     code = 1
     try:
@@ -162,6 +171,7 @@ def worker(args):
             def frames():
                 state = browser.evaluate("(() => {let v=document.querySelector('video');return {"
                     "frames:v.getVideoPlaybackQuality().totalVideoFrames,error:v.error?.message}})()")
+                result['playback'] = state
                 if state.get('error'):
                     raise RuntimeError(state['error'])
                 return state if state['frames'] >= selected['frames'] else None
@@ -170,16 +180,17 @@ def worker(args):
             result['graphics'] = browser.chrome('return window.windowUtils.layerManagerType;')
             if result['graphics'] != 'WebRender':
                 raise RuntimeError('Firefox is not using WebRender: ' + str(result['graphics']))
-            logs = '\n'.join(path.read_text(errors='replace') for path in args.out.glob('mozilla.log*'))
+            evidence = firefox_decode_evidence(args.out)
+            result['vaapi'] = evidence
             # These FFmpegVideoDecoder messages describe successful init and
             # received VA-API frames, rather than just a requested preference.
-            vaapi_frames = bool(re.search(r'VA-API frame pts=', logs))
+            vaapi_frames = evidence['frames'] > 0
             if args.expect_software:
-                if vaapi_frames or 'Using preferred software codec ' + selected['codec'] not in logs:
+                if vaapi_frames or selected['codec'] not in evidence['software_codecs']:
                     raise RuntimeError('Firefox did not use the expected software fallback')
                 result['decoder'] = 'software'
             else:
-                if 'VA-API FFmpeg init successful' not in logs or not vaapi_frames:
+                if not evidence['init_ok'] or not vaapi_frames:
                     raise RuntimeError('Firefox did not report successful VA-API frame decoding; see mozilla.log*')
                 result['decoder'] = 'VA-API'
             browser.screenshot(args.out / 'video.png')
@@ -215,9 +226,10 @@ def worker(args):
             args.out / 'video-normalized.png')
         if not result['pixels']['ok']:
             raise RuntimeError('Decoded video pixels differ from the numbered reference')
-        result['gpu_processes'] = gpu_processes(tag)
+        result['gpu_processes'] = gpu_processes(tag, result['expected_gpu_driver'])
         if not result['gpu_processes']:
-            raise RuntimeError('No application process holds KGSL with Turnip mapped')
+            raise RuntimeError('No application process holds a matching GPU device with ' +
+                               result['expected_gpu_driver'] + ' mapped')
         result.update(status='passed', hardware_verified=not args.expect_software, ok=True)
         code = 0
     except StartupComplete:
@@ -252,6 +264,10 @@ def worker(args):
         if result['remaining_app_processes']:
             result.update(status='failed', error='Test application survived cleanup', ok=False)
             code = 1
+        if args.application == 'firefox':
+            # A successful probe/init followed by zero frames is a decode
+            # failure. Keep that distinction even when readiness times out.
+            result['vaapi'] = firefox_decode_evidence(args.out)
         (args.out / 'result.json').write_text(json.dumps(result, indent=2) + '\n')
         print('RESULT', args.application, result.get('status'), flush=True)
     return code

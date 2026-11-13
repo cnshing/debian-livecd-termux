@@ -89,8 +89,18 @@ nothing is installed on the phone yet. In such an extraction, point the links in
 every codec silently decodes in software. `~/gpu-x1s/hevc-latency.py OUTDIR DAEMON CLIP` (local
 copy `temp/gpu-x1s/hevc-latency.py`) decodes a clip with FFmpeg through the driver, without a
 browser, and compares every frame with software decoding. Once the packages are installed, the maintained
-`tests/browsers/test-acceleration.py firefox` should replace this harness; it has not been run on
-Mali. Host checks: `python3 tests/packaging/test-firefox-video.py`.
+`tests/browsers/test-acceleration.py firefox` should exercise the installed launcher; it has not
+been run on Mali. It accepts the selected GPU's matching library and device pair (PanVK with Mali,
+or Turnip with KGSL) instead of requiring Turnip on every phone, and its result keeps the last
+playback state and the VA-API init, frame and software-codec evidence even when playback fails.
+It checks browser pixels; the private harness above still supplies the compositor captures and
+the concurrent WebGL workload. Host checks:
+
+```sh
+python3 tests/packaging/test-firefox-video.py
+python3 tests/native/test-graphics.py
+python3 tests/browsers/test-video-tools.py AccelerationEvidence -v
+```
 
 ## Handoff: what is left
 

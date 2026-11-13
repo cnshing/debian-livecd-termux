@@ -30,3 +30,16 @@ Artifact validation: `python3 tests/packaging/check-browser-video-artifacts.py O
 Device qualification uses the private-display Firefox runner in
 `tests/browsers/test-acceleration.py`, including decoder logs, GPU evidence and
 numbered-frame pixel checks.
+
+Revision 3 also builds `h264_vaapi`, `hevc_vaapi`, and `vp9_vaapi`. Firefox's GTK
+encoder submits I420 frames without creating a VA frame pool. The private
+`0100-cpu-input-vaapi-encoders.patch` creates that pool, converts I420 to NV12,
+and uploads each frame before the usual VA encoder submission. It preserves
+timestamps, key-frame requests and colour properties; existing VA-frame clients
+keep their original path. The CPU-input path uses 8-bit frames and no B frames.
+
+This is awaiting device acceptance. The package records its CPU-input encoder
+capability in the runtime manifest, but does not change Firefox's remote platform
+encoder preference. Enable that preference only in private acceptance profiles
+until daemon frame counts, software decoding and pixel checks pass. A `HWENC`
+graphics-probe listing alone does not prove that Firefox can encode.

@@ -66,6 +66,12 @@ def check(directory):
         codec = subprocess.check_output(['readelf', '-d', str(firefox / 'ffmpeg/lib/libavcodec.so.63')], text=True)
         if '[libva.so]' not in codec:
             raise RuntimeError('Firefox decoder library is not linked to native VA-API')
+        if receipt.get('encoding'):
+            if receipt['encoding'] != {'input': 'i420', 'codecs': ['h264', 'hevc', 'vp9']}:
+                raise RuntimeError('Unexpected Firefox encoder input contract')
+            if b'VAAPI: uploading I420 input through NV12 surfaces' not in (
+                    firefox / 'ffmpeg/lib/libavcodec.so.63').read_bytes():
+                raise RuntimeError('Firefox encoder runtime lacks its CPU-frame upload adapter')
     print('PASS: native Firefox helpers, decoder ABI and Chromium libva dlopen aliases')
 
 

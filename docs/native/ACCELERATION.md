@@ -35,7 +35,7 @@ stale-frame failure under concurrent encoding load.
 | Application | GPU configuration | Video configuration |
 | --- | --- | --- |
 | Google Chrome | Shared glibc Turnip and ANGLE Vulkan | Shared glibc Termux:VA driver and ION adapter from `android-vaapi-glibc`; VP9/HEVC on by default |
-| Native Firefox | Turnip/Zink and WebRender; KGSL graphics probe from `android-firefox-video` | Packaged VA-API FFmpeg libraries pass VP9/HEVC hardware, GPU and numbered-frame pixel checks |
+| Native Firefox | Turnip/Zink and WebRender; KGSL graphics probe from `android-firefox-video` | Packaged VA-API FFmpeg libraries pass VP9/HEVC hardware, GPU and numbered-frame pixel checks. On Mali: Zink on PanVK, [VP9 only](X1S-FIREFOX-VIDEO.md) |
 | Native Chromium | Turnip and Vulkan/ANGLE | Native `chromium` with private libva ABI aliases and producer completion passes VP9 hardware and fullscreen browser/GNOME pixel checks |
 | Native mpv | Vulkan `gpu-next` / `x11vk` | VP9/H.264/HEVC hardware decoding and pixel checks pass through native MediaCodec |
 | Other applications | Inherited native rendering, or an explicit glibc profile | Standard VA-API available through the shared launcher when the application includes a compatible backend |

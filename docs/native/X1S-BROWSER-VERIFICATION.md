@@ -26,8 +26,9 @@ Why video is still software:
   `VaapiVideoDecoder`: six fullscreen cycles, 188 frames, none dropped, numbered frames 12 and 36
   correct at the browser and compositor layers, served by Android's VP9 decoder. Turning off the
   bridge's end-of-picture wait makes the frame check fail, so that wait stays.
-  HEVC: Exynos's decoder returns its first frame only after about 18 pictures, so the bridge's
-  bounded per-picture wait fails and Chromium falls back to FFmpeg. Native Chromium passes only
+  HEVC: Exynos's decoder holds back as many pictures as the bridge's rebuilt SPS declares for
+  reordering (3), so the bridge's bounded per-picture wait fails and Chromium falls back to
+  FFmpeg. [X1S-FIREFOX-VIDEO.md](X1S-FIREFOX-VIDEO.md) has the cause and the fix Firefox uses. Native Chromium passes only
   VP9 on Adreno too; this is a bridge limitation, not Mali's. H.264 hardware decoding is off by
   default (`disabled_va_codecs`). Chrome uses lfdevs' prebuilt glibc VA driver, which needs the
   same winsys in a glibc build.

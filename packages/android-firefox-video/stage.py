@@ -12,15 +12,19 @@ def patch(source):
     text = path.read_text()
     before = '''    if (deviceExtensions &&
         strstr(deviceExtensions, "EGL_MESA_device_software")) {'''
-    after = '''    const char* kgsl = getenv("MOZ_DRM_DEVICE");
-    int kgslFd = kgsl && !strcmp(kgsl, "/dev/kgsl-3d0") &&
-        strstr((const char*)rendererString, "zink") &&
-        strstr((const char*)rendererString, "Turnip Adreno")
-        ? open(kgsl, O_RDWR | O_CLOEXEC) : -1;
-    if (kgslFd >= 0) {
-      close(kgslFd);
+    # A GPU Mesa cannot describe as a DRM render node: Zink on Turnip (KGSL) or on
+    # PanVK (Android's Mali kbase driver). Only the node the launcher names is opened.
+    after = '''    const char* node = getenv("MOZ_DRM_DEVICE");
+    const char* renderer = (const char*)rendererString;
+    bool android = node && strstr(renderer, "zink") &&
+        ((!strcmp(node, "/dev/kgsl-3d0") && strstr(renderer, "Turnip Adreno")) ||
+         (!strcmp(node, "/dev/mali0") && strstr(renderer, "Mali") &&
+          strstr(renderer, "PANVK")));
+    int nodeFd = android ? open(node, O_RDWR | O_CLOEXEC) : -1;
+    if (nodeFd >= 0) {
+      close(nodeFd);
       record_value("MESA_ACCELERATED\\nTRUE\\nDRI_DRIVER\\nzink\\n");
-      set_render_device_path(kgsl);
+      set_render_device_path(node);
     } else if (deviceExtensions &&
         strstr(deviceExtensions, "EGL_MESA_device_software")) {'''
     if text.count(before) != 1:

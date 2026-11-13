@@ -81,6 +81,34 @@ class FirefoxVideo(unittest.TestCase):
         video.assert_called_once()
         self.assertEqual(errors, '')
 
+    def test_mali_names_its_own_node_keeps_zink_and_asks_for_hevc_in_decode_order(self):
+        def sw(env, *_):
+            env['TERMUX_VA_GPU_BACKEND'] = 'sw'
+        with mock.patch.object(acceleration, 'video_device', return_value='/dev/mali0'), \
+                mock.patch.object(acceleration, 'video_environment', side_effect=sw), \
+                mock.patch.dict(os.environ, {'GALLIUM_DRIVER': 'zink'}):
+            _, env = acceleration.prepare('firefox',
+                [str(self.prefix / 'bin/firefox'), '--profile', '/disposable/profile'], 'bionic', 'auto')
+        self.assertEqual(env['MOZ_DRM_DEVICE'], '/dev/mali0')
+        self.assertEqual(env['GALLIUM_DRIVER'], 'zink')
+        self.assertEqual(env['TERMUX_VA_HEVC_REORDER_PICS'], '0')
+        self.assertNotIn('TERMUX_VA_DISABLE_HEVC', env)
+        _, env, _, _ = self.prepare()
+        self.assertNotIn('TERMUX_VA_HEVC_REORDER_PICS', env)
+
+    def test_probe_accepts_only_zink_on_the_named_android_gpu(self):
+        source = Path(self.temporary.name) / 'gfx'
+        source.mkdir()
+        (source / 'glxtest.cpp').write_text('''    if (deviceExtensions &&
+        strstr(deviceExtensions, "EGL_MESA_device_software")) {''')
+        stage.patch(source)
+        patched = (source / 'glxtest.cpp').read_text()
+        for needle in ('"/dev/kgsl-3d0"', '"Turnip Adreno"', '"/dev/mali0"', '"PANVK"', '"zink"',
+                       'set_render_device_path(node)'):
+            self.assertIn(needle, patched)
+        with self.assertRaises(RuntimeError):
+            stage.patch(source)
+
     def test_firefox_binary_or_application_ini_changes_fall_back_without_starting_video(self):
         for name in ('firefox', 'application.ini'):
             with self.subTest(name=name):

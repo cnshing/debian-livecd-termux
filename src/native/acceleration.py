@@ -336,9 +336,11 @@ def prepare(profile, command, abi, video_override):
             env[key] = value
     if video and profile != 'mpv':
         video_environment(env, selected, abi, config)
-        if abi == 'bionic' and env.get('TERMUX_VA_GPU_BACKEND') == 'sw':
+        if abi == 'bionic' and env.get('TERMUX_VA_GPU_BACKEND') == 'sw' and profile != 'firefox':
             # The private VA driver builds softpipe, not the system Mesa's LLVM
-            # renderer. Do not inherit the desktop's GALLIUM_DRIVER=llvmpipe.
+            # renderer. Before android-vaapi revision 4 it read the application's
+            # GALLIUM_DRIVER, so do not let it inherit the desktop's. Firefox keeps
+            # its own: its GL is Zink, and the driver now reads only its own variable.
             env['GALLIUM_DRIVER'] = 'softpipe'
         if abi == 'bionic' and profile in ('chromium', 'ungoogled-chromium'):
             # ANGLE consumes exported surfaces through implicit DRM sync. The
@@ -346,7 +348,13 @@ def prepare(profile, command, abi, video_override):
             env['TERMUX_VA_SYNC_END_PICTURE'] = (
                 '0' if os.environ.get('LIVECD_VA_DISABLE_COMPLETION') == '1' else '1')
         if profile == 'firefox':
-            env.setdefault('MOZ_DRM_DEVICE', '/dev/kgsl-3d0')
+            env.setdefault('MOZ_DRM_DEVICE', video_device())
+            if env['MOZ_DRM_DEVICE'] == '/dev/mali0':
+                # Exynos's HEVC decoder holds back as many pictures as the rebuilt SPS
+                # declares, more than Firefox submits before waiting for the first.
+                # Declaring none returns each picture as it is decoded.
+                # See X1S-FIREFOX-VIDEO.md.
+                env['TERMUX_VA_HEVC_REORDER_PICS'] = '0'
             port, ffmpeg = firefox
             command = [str(port / 'application/firefox'), *command[1:]]
             env['LD_LIBRARY_PATH'] = ':'.join(filter(None,

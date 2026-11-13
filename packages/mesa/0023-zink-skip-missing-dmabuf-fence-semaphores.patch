@@ -1,0 +1,30 @@
+Zink: do not read missing dma-buf fence semaphores.
+
+Flushing a batch that used a dma-buf creates one exportable SYNC_FD semaphore
+per plane and appends those that succeed; submit_queue() then reads one per
+plane unconditionally. PanVK's kbase backend cannot create SYNC_FD
+semaphores, so the array is empty and its data pointer NULL: Firefox
+crashed in the flush thread on its first imported VA-API frame. Attach
+fences only for the semaphores that exist; without them the dma-buf keeps
+the synchronous behaviour it has when implicit sync is unavailable.
+
+--- a/src/gallium/drivers/zink/zink_batch.c
++++ b/src/gallium/drivers/zink/zink_batch.c
+@@ -820,6 +820,8 @@
+ 
+    unsigned i = 0;
+    VkSemaphore *sem = bs->signal_semaphores.data;
++   /* one semaphore per plane, unless the driver could not create them */
++   unsigned num_sem = util_dynarray_num_elements(&bs->signal_semaphores, VkSemaphore);
+    hash_table_foreach(&bs->dmabuf_exports, entry) {
+       struct zink_resource *res = (void*)entry->key;
+       /* Add the batch's fence as a write fence if the batch wrote the image,
+@@ -827,7 +829,7 @@
+        */
+       if (res->obj->exportable_dmabuf) {
+          bool write = entry->data != NULL;
+-         for (; res; res = zink_resource(res->base.b.next))
++         for (; res && i < num_sem; res = zink_resource(res->base.b.next))
+             zink_screen_import_dmabuf_semaphore(screen, res, sem[i++], write);
+       }
+ 

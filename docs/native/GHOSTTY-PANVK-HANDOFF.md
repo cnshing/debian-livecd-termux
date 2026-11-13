@@ -1,7 +1,8 @@
 # Ghostty / PanVK G77 handoff
 
-Updated 2026-11-12. User requested a handoff at this point; further investigation
-and driver promotion are not part of this handoff.
+Updated 2026-11-12 after the user resumed GPU rendering work and requested both
+DMA-BUF and CPU-readback presentation, prioritizing DMA-BUF. Device access now
+uses wireless ADB for x1s. Driver promotion remains outside this experiment.
 
 ## Current outcome
 
@@ -12,12 +13,80 @@ not full Vulkan or OpenGL conformance.
 
 With the experimental opt-in, Zink reports OpenGL **4.6** and GLES **3.2**,
 without a GL/GLSL version override. Ghostty 1.4.0 creates its OpenGL context,
-so the former 4.3 context/version gate is overcome. **GPU Ghostty is still not
-usable:** the Cairo GTK path did not produce an accepted terminal frame/input
-result, and the GTK GL path failed with `EGL_BAD_ACCESS`.
+so the former 4.3 context/version gate is overcome. **GPU Ghostty now passes
+with privately staged Mesa 26.2.6-102, GTK Cairo and CPU-readback presentation.**
+The terminal renderer uses Zink/PanVK on Mali; readback copies the finished GPU
+frame into CPU memory for GTK. This is not software terminal rendering or
+zero-copy presentation. DMA-BUF remains unsupported with this ICD; GTK's GL path
+has no acceptance pass.
 
 Keep the installed Ghostty software fallback. The experimental ICD was staged
 privately and was not installed or selected for the managed desktop.
+
+## Resumed fix and acceptance
+
+The original blank-window runs actually crashed. The refined harness records
+Ghostty's return code **-11**, and Android's crash buffer records a null pointer
+in `libgallium-26.2.6.so` at `0xf55988`, on `ghostty:zfq0`. Disassembly matches
+`submit_queue()` reading `bs->signal_semaphores.data[i]` while processing exported
+DMA-BUF resources. This supersedes the original undetermined crash status.
+
+The exact experimental ICD's `sync-fd` probe reports both OPAQUE_FD and SYNC_FD
+as non-importable/non-exportable; exportable semaphore creation returns
+`VK_ERROR_INVALID_EXTERNAL_HANDLE` (-1000072003). External-memory support alone
+does not supply the synchronization Zink's DMA-BUF export path requires.
+`ZINK_DEBUG=flushsync` was also tried and still crashed.
+
+`packages/mesa/0022-zink-reject-unsynchronized-dmabuf-export.patch` rejects FD
+export **before** `add_resource_bind()` converts the texture into an exportable
+resource, when neither native fences nor implicit synchronization is available.
+Ghostty then uses its existing CPU-readback fallback. Drivers with working
+native fences or implicit synchronization retain their existing DMA-BUF path.
+This relies on the earlier native-fence capability check in patch 0021.
+
+The fix is commit `256e626`. [Mesa CI run 43197519495](https://github.com/cnshing/debian-livecd-termux/actions/runs/43197519495)
+passed, including packaging checks, the Mesa build and artifact assembly. Nothing
+was installed globally and no release was published.
+
+- Artifact: `debs-mesa-9a284848bd99ab6b` (ID `13934037718`).
+- Package: `mesa_26.2.6-102_aarch64.deb`, SHA-256
+  `45e40bc6953d79ffe5d6445631a99b06e37b76e161ee57ba4bf485c3efd46d5c`.
+- Staged `libgallium-26.2.6.so`, SHA-256
+  `ac1c4b03ebc4c890689cf19ca1acefad504a91cd088d9a99ad620280ee1178b7`.
+- Phone libraries: `~/gpu-x1s/panvk/workgroups/mesa-102/lib/`.
+- Host package/evidence: `temp/gpu-x1s/ghostty-mesa-ci/` and
+  `temp/gpu-x1s/workgroups/evidence/desktop-readback-102-02/`.
+
+`desktop-readback-102-02` passes both independent checkers:
+
+- Four Ghostty captures show fresh red/yellow, green, blue and white terminal
+  bands in order through two windowed/fullscreen cycles and resizing. The stale
+  color-phase negative control fails as required. Text was visually inspected.
+- Typed commands execute as UID 10287 with the native home and no GL override;
+  Ghostty maps the staged Gallium and experimental PanVK libraries, holds Mali
+  FDs, loads no ANGLE, and exits normally with code 0 before cleanup.
+- Four separate GTK captures pass with maximum pixel error 0. Their checker
+  does **not** validate Ghostty; `check-ghostty-panvk.py` supplies that check.
+- The managed desktop isolation comparison passes.
+
+`desktop-launcher-102-01` repeats acceptance through the opt-in launcher for
+**eight** Ghostty captures and eight GTK captures across four resize/fullscreen
+cycles. Both pixel checkers pass, including stale-frame rejection, and Ghostty
+exits with code 0. Together the two GPU runs pass twelve terminal captures and
+twelve GTK captures. The launcher also successfully reconstructs the actual
+managed session environment (`DISPLAY=:0`) without starting an extra session.
+
+`desktop-readback-102-01` established visible GPU text and successful initial
+input but timed out on input after resizing. Explicit window activation after
+each transition fixed the harness. Do not count that first run as a full pass.
+The software oracle control also passes all four terminal captures and normal
+exit, with neither PanVK mappings nor a Mali FD in Ghostty.
+
+`tools/panvk-probes/workgroups/ghostty-gpu.py` is an opt-in launcher for these
+exact staged artifacts. It verifies driver/Gallium hashes, joins the managed
+session for ordinary manual launches, disables shader caching, selects GTK
+Cairo, and bypasses single-instance forwarding. It changes only its child
+process environment. The installed launcher and desktop defaults remain intact.
 
 ## Workspace and source provenance
 
@@ -124,7 +193,7 @@ accepts a typed command, records the native UID/home and exits normally.
 This is a short correctness check. The previously deferred 30-minute soak is
 still pending, as requested by the user.
 
-### Ghostty GPU: not accepted
+### Original Ghostty GPU failures (before Mesa 26.2.6-102)
 
 | Run directory | Observation |
 |---|---|
@@ -134,18 +203,18 @@ still pending, as requested by the user.
 | `desktop-dmabuf-disabled` | Shell readiness marker appears; the probe aborts while inspecting `/proc/30324/fd` with `PermissionError`. It does not establish a successful or failed DMA-BUF workaround. |
 | `desktop-gsk-gl` | With `GSK_RENDERER=gl`, Ghostty logs `failed to make EGL context current err=error.BadAccess`, then surface initialization fails. Shell readiness times out. |
 
-Do not classify any GPU Ghostty run as a pass. In particular, GL context creation
-and a reported GL version are insufficient evidence of usable rendering.
+None of the five original runs qualifies GPU Ghostty. The later
+`desktop-readback-102-02` run above supplies the first acceptance pass. GL context
+creation and a reported GL version remain insufficient evidence on their own.
 
 The software-control screenshot's initial diagnostic string says `GPU INPUT
 PASS` because that first harness used the same text in both modes. Its JSON
 explicitly identifies `software_control: true` and verifies no PanVK/Mali use in
 Ghostty. The saved source now uses the neutral text `GHOSTTY INPUT PASS`.
 
-The `/proc/.../fd` denial could be a process-lifecycle race, a process permission
-condition, or something else. A crash has **not** been established: the harness
-did not preserve Ghostty's exit status before cleanup. Do not infer a kernel,
-SELinux, DMA-BUF or driver root cause from that exception alone.
+The original `/proc/.../fd` denial alone did not establish a crash. The resumed
+exit-status capture and Android crash log now independently establish SIGSEGV
+in Zink for these runs. No kernel or SELinux change is indicated.
 
 ## Presentation investigation and useful sources
 
@@ -207,28 +276,44 @@ PANVK_G77_LWG=1 MESA_SHADER_CACHE_DISABLE=true python panvk-desktop.py \
   --out "$PWD/desktop-control-next"
 ```
 
-For the unaccepted GPU Ghostty case, omit `--ghostty-software`. The default
-Ghostty GTK renderer is Cairo; `--ghostty-gsk gl` selects the failed GL control.
+For the fixed GPU Ghostty case, use the new source harness and staged Mesa:
+
+```
+PANVK_G77_LWG=1 MESA_SHADER_CACHE_DISABLE=true python panvk-desktop.py \
+  --mode shm --cycles 2 --driver "$PWD/patched/libvulkan_panfrost.so" \
+  --mesa-lib-dir "$PWD/mesa-102/lib" --ghostty-probe \
+  --out "$PWD/desktop-fixed-next"
+```
+
+For a manual GPU terminal in the running managed session:
+
+```
+python ~/gpu-x1s/panvk/workgroups/ghostty-gpu.py
+```
+
+Do not automate input into the managed display. The default Ghostty GTK renderer
+is Cairo; `--ghostty-gsk gl` selects the failed GL control.
 The harness creates a private display/session and cleans up only its own tagged
 processes. Never target the managed `:0` session with its input automation.
 
 Check retrieved presentation captures on the host:
 
 ```
-python3 tests/native/check-panvk-desktop.py /path/to/desktop-control-next
+python3 tests/native/check-panvk-desktop.py /path/to/desktop-fixed-next
+python3 tests/native/check-ghostty-panvk.py /path/to/desktop-fixed-next
 ```
 
 ## Resume priorities and boundaries
 
-1. Preserve Ghostty's actual exit status and inspect process liveness during
-   readiness/input waits. Keep optional diagnostic `/proc` failures distinct
-   from rendering/input acceptance. Do not relax GPU evidence checks.
-2. Determine whether the Cairo GPU case exits/crashes, stalls in GL work, or
-   fails to present. Instrument first-frame progress before attributing it to
-   DMA-BUF or synchronization.
-3. If testing CPU **presentation** with GPU rendering, use a real Ghostty code
-   path/configuration change; the overwritten `GDK_DISABLE` environment variable
-   does not implement that test. Build any changes in CI.
+1. Preserve the new exit-status and independent Ghostty pixel checks. Optional
+   diagnostic failures must remain distinct from rendering/input acceptance.
+2. Prioritize DMA-BUF only after implementing and validating actual SYNC_FD
+   synchronization in the ICD/kernel interface; do not bypass the export guard
+   or merely advertise semaphore support. The current ICD cannot provide the
+   synchronization needed for this DMA-BUF path.
+3. The existing Ghostty CPU-readback path now works with GPU rendering. Reuse
+   the staged Mesa/launcher rather than the ineffective `GDK_DISABLE=dmabuf`
+   environment attempt. Any further native builds stay in CI.
 4. Keep the workgroup implementation experimental until valid nested barriers,
    unaligned/prime shapes and other required shader patterns are implemented,
    and relevant CTS/capability checks pass. The opt-in reports capabilities that
@@ -243,8 +328,9 @@ required for this handoff.
 
 ## State left behind
 
-All five private display runs cleaned up; every recorded isolation comparison
-passed. Final X socket listing contains only `X0`. Managed status matches the
+All resumed private runs cleaned up, including failed diagnostics. The two GPU
+acceptance runs and software oracle control pass isolation comparisons. The
+latest X socket listing contains only `X0`. Managed status matches the
 before snapshot: owner 7760, Shell 8163, session tag
 `4cb70234ceda4c88a750822fc22f7be4`, renderer `zink`, integrations ready (the
 pre-existing Bluetooth headset condition is unrelated). The installed renderer

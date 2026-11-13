@@ -231,7 +231,9 @@ disable() { global.compositor.enable_unredirect(); }
             if args.ghostty_software:
                 from graphics import apply_renderer
                 terminal_env = apply_renderer(terminal_env, 'software')
-            terminal = start([str(Path(os.environ['PREFIX']) / 'bin/ghostty'),
+            executable = ([sys.executable, str(args.ghostty_launcher)] if args.ghostty_launcher
+                          else [str(Path(os.environ['PREFIX']) / 'bin/ghostty')])
+            terminal = start([*executable,
                 '--gtk-single-instance=false', '--title=PanVK G77 Ghostty',
                 '--working-directory=' + str(out), '-e', 'bash', '--noprofile', '--norc',
                 str(shell_script)], 'ghostty', env=terminal_env)
@@ -259,12 +261,21 @@ disable() { global.compositor.enable_unredirect(); }
             result['ghostty']['active'] = run(['xdotool', 'getactivewindow'], capture_output=True, text=True).stdout.strip()
             screenshot(out / 'ghostty-before-input.png')
             identity = out / 'ghostty-identity.json'
-            code = ('import os,json; from pathlib import Path; '
+            code = ('import os,json,sys; from pathlib import Path; '
                 'print("\\033[32mPANVK G77 GHOSTTY INPUT PASS\\033[0m"); '
                 'Path(' + repr(str(identity)) + ').write_text(json.dumps(dict(uid=os.getuid(), '
                 'home=str(Path.home()), experiment=os.environ.get("PANVK_G77_LWG"), '
                 'gl_override=os.environ.get("MESA_GL_VERSION_OVERRIDE"))))')
             command_file = out / 'ghostty-command.py'
+            code += '\n' + '''phase = int(sys.argv[1]) if len(sys.argv) > 1 else 1
+colors = [(255,255 if phase % 2 else 0,0),(0,255,0),(0,0,255),(255,255,255)]
+print("\\033[2J\\033[H", end="")
+print("GHOSTTY GPU RENDER ORACLE", phase)
+for r,g,b in colors:
+    for _ in range(3):
+        print(f"\\033[48;2;{r};{g};{b}m" + " " * 24 + "\\033[0m")
+print("GHOSTTY INPUT PASS", phase, flush=True)
+'''
             command_file.write_text(code + '\n')
             run(['xdotool', 'type', '--clearmodifiers', '--delay', '5', 'python ' + shlex.quote(str(command_file))])
             run(['xdotool', 'key', 'Return'])
@@ -286,8 +297,32 @@ disable() { global.compositor.enable_unredirect(); }
             else:
                 assert driver in gpu['libraries'], gpu
                 assert any(fd['target'] == '/dev/mali0' for fd in gpu['devices']), gpu
-            result['ghostty'].update(identity=data)
-            time.sleep(1)
+            result['ghostty'].update(identity=data, captures=[])
+            for phase in range(1, args.cycles * 2 + 1):
+                full = phase % 2 == 0
+                if full:
+                    run(['xdotool', 'windowstate', '--add' if full else '--remove', 'FULLSCREEN', wid])
+                else:
+                    if phase > 1:
+                        run(['xdotool', 'windowstate', '--add' if full else '--remove', 'FULLSCREEN', wid])
+                    run(['xdotool', 'windowsize', '--sync', wid,
+                         str(803 if phase % 4 == 1 else 641), '620'])
+                time.sleep(.5)
+                run(['xdotool', 'windowactivate', '--sync', wid])
+                time.sleep(.3)
+                identity.unlink(missing_ok=True)
+                run(['xdotool', 'type', '--clearmodifiers', '--delay', '2',
+                     'python ' + shlex.quote(str(command_file)) + ' ' + str(phase)])
+                run(['xdotool', 'key', 'Return'])
+                wait(identity_ready)
+                time.sleep(1)
+                path = out / f'ghostty-{phase:02d}.png'
+                screenshot(path)
+                result['ghostty']['captures'].append({'path': path.name, 'phase': phase,
+                    'fullscreen_requested': full,
+                    'wm_state': run(['xprop', '-id', wid, '_NET_WM_STATE'], capture_output=True, text=True).stdout,
+                    'geometry': run(['xdotool', 'getwindowgeometry', '--shell', wid],
+                                    capture_output=True, text=True).stdout})
             screenshot(out / 'ghostty.png')
             run(['xdotool', 'type', '--clearmodifiers', 'exit'])
             run(['xdotool', 'key', 'Return'])
@@ -396,6 +431,13 @@ disable() { global.compositor.enable_unredirect(); }
     except BaseException:
         result['error'] = traceback.format_exc()
         print(result['error'], flush=True)
+        if terminal is not None and terminal.poll() is None:
+            try:
+                screenshot(out / 'ghostty-failure.png')
+                result['failure_active_window'] = run(['xdotool', 'getactivewindow'],
+                    check=False, capture_output=True, text=True).stdout
+            except Exception as error:
+                result['failure_capture_error'] = repr(error)
     finally:
         if terminal is not None:
             result.setdefault('ghostty', {}).update(
@@ -489,6 +531,7 @@ def parent(args):
              '--restart-cycles', str(args.restart_cycles), '--soak-seconds', str(args.soak_seconds),
              *(['--allow-other-displays'] if args.allow_other_displays else []),
              *(['--ghostty-probe'] if args.ghostty_probe else []),
+             *(['--ghostty-launcher', str(args.ghostty_launcher)] if args.ghostty_launcher else []),
              *(['--ghostty-software'] if args.ghostty_software else []),
              '--ghostty-gsk', args.ghostty_gsk],
              env=env, start_new_session=True)
@@ -525,6 +568,7 @@ if __name__ == '__main__':
     parser.add_argument('--mode', choices=('shm', 'raw'), default='shm')
     parser.add_argument('--server', choices=('lorie', 'xvfb'), default='lorie')
     parser.add_argument('--cycles', type=int, default=20)
+    parser.add_argument('--ghostty-launcher', type=Path, help='Private experimental Ghostty launcher')
     parser.add_argument('--ghostty-gsk', choices=('cairo', 'gl'), default='cairo')
     parser.add_argument('--ghostty-software', action='store_true', help='Software control for the Ghostty probe')
     parser.add_argument('--ghostty-probe', action='store_true', help='Check direct GPU Ghostty on the private display')

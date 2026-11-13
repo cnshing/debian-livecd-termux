@@ -45,3 +45,17 @@ Further gates before promotion: handle all required valid workgroup patterns,
 full capability audit against our exact Zink build, relevant Vulkan/GL CTS,
 Ghostty output/input correctness, and presentation regressions. The previously
 deferred 30-minute soak remains pending independently.
+
+## Ghostty app acceptance
+
+The [Ghostty handoff](../../../docs/native/GHOSTTY-PANVK-HANDOFF.md) records the
+passing GPU terminal path and its limitations. Mesa 26.2.6-102 rejects unsafe
+DMA-BUF export on this ICD, allowing Ghostty's GPU-rendered CPU-readback path.
+DMA-BUF has no accepted path until actual SYNC_FD support is implemented.
+
+After staging the exact driver and Mesa artifacts described in that handoff,
+copy `ghostty-gpu.py` to `~/gpu-x1s/panvk/workgroups/` and invoke it with Python.
+It verifies library hashes and joins the existing desktop session. It does not
+install libraries or change the normal Ghostty/desktop defaults. The large
+workgroup opt-in and disabled shader cache remain mandatory; this is an
+experimental app-specific pass, not OpenGL/Vulkan qualification.

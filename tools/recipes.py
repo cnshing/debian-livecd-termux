@@ -46,11 +46,7 @@ EXACT_DEPENDENCIES = {'chromium'}
 BEHAVIOUR_ONLY = {'mesa'}
 # Build-machine libraries that a recipe's own tools link when it is cross-compiled. They are installed
 # in the builder container before the build, since termux-packages refuses sudo inside a recipe.
-HOST_PACKAGES = {'lsp-plugins-lv2': ['libcairo2-dev', 'libsndfile1-dev'],
-                 'android-vaapi-glibc': ['bison', 'flex', 'python3-mako', 'python3-yaml', 'python3-packaging']}
-# Both ABIs use the same pinned VA bridge patches and ION winsys. Staging retains
-# all sibling recipes; include shared source inputs in the glibc artifact's cache key.
-RECIPE_INPUTS = {'android-vaapi-glibc': {'android-vaapi'}}
+HOST_PACKAGES = {'lsp-plugins-lv2': ['libcairo2-dev', 'libsndfile1-dev']}
 # CI reuses a set's packages while everything it is built from stays the same: its recipes, the builder
 # revision and the settings above. Bump this after changing how CI builds packages in some other way,
 # so that every set is built again.
@@ -98,9 +94,6 @@ def checked(names):
 
 def directory_hash(names):
     digest = hashlib.sha256()
-    names = set(names)
-    for name in tuple(names):
-        names.update(RECIPE_INPUTS.get(name, ()))
     for name in sorted(names):
         for path in sorted((PACKAGES / name).rglob('*')):
             # Tests import some recipes' Python, and the bytecode they leave records when that happened.
@@ -296,12 +289,13 @@ def check_patches(name):
     if (PACKAGES / name / 'upstream.json').is_file() and not patches:
         print(f'ok   {name}: recipe override; pinned upstream patches checked when staging')
         return True
-    if name == 'chromium' and not patches:
-        # This recipe changes build options, inheriting assets and platform
+    if name == 'chromium':
+        # This recipe inherits assets and platform
         # patches from the pinned termux-packages checkout. Its post-get-source
         # step requires that checkout and host-tools; the package builder runs
         # the version guard and verifies the source archive there.
-        print('ok   chromium: no local source patches; upstream preparation runs in the package builder')
+        print(f'deferred chromium: {len(patches)} local source patch(es); '
+              'upstream preparation and patch application run in the package builder')
         return True
     with tempfile.TemporaryDirectory() as temporary:
         source = Path(temporary) / 'src'

@@ -1,0 +1,96 @@
+name: PanVK kbase probes
+
+# Builds the pinned zenithblue-oss/panvk-kbase-android C tests for Android
+# (Bionic, API 29) so they can run on a stock-kernel Mali phone against the
+# release libvulkan_panfrost.so. Research only; nothing here is packaged.
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+    - .github/workflows/panvk-probes.yml
+    - tools/panvk-probes/build.sh
+    - tools/panvk-probes/build-features.sh
+    - tools/panvk-probes/add-dump.py
+    - tools/panvk-probes/glibc-deps.sh
+    - tools/panvk-probes/sync-fd.c
+
+permissions:
+  contents: read
+
+env:
+  ZENITH_REPO: zenithblue-oss/panvk-kbase-android
+  ZENITH_COMMIT: cf70e02b918e1864cbcd746a7fefa57b96c673ce
+  VULKAN_HEADERS_TAG: v1.4.363
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions/checkout@v4
+      with:
+        repository: ${{ env.ZENITH_REPO }}
+        ref: ${{ env.ZENITH_COMMIT }}
+        path: zenith
+    - uses: actions/checkout@v4
+      with:
+        repository: KhronosGroup/Vulkan-Headers
+        ref: ${{ env.VULKAN_HEADERS_TAG }}
+        path: vulkan-headers
+    - name: Build Android probes
+      run: bash tools/panvk-probes/build.sh zenith vulkan-headers out
+    - name: Build wider Android feature and AHB probes
+      run: bash tools/panvk-probes/build-features.sh zenith vulkan-headers out/features
+    - uses: actions/upload-artifact@v4
+      with:
+        name: panvk-probes-android-aarch64
+        path: out/
+
+  # Runtime libraries the glibc PanVK ICD needs that Chrome's bundled lib/
+  # lacks. Taken from Ubuntu's arm64 archive with their package versions.
+  glibc-deps:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 10
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions/checkout@v4
+      with:
+        repository: ${{ env.ZENITH_REPO }}
+        ref: ${{ env.ZENITH_COMMIT }}
+        path: zenith
+    - uses: actions/checkout@v4
+      with:
+        repository: KhronosGroup/Vulkan-Headers
+        ref: ${{ env.VULKAN_HEADERS_TAG }}
+        path: vulkan-headers
+    - name: Fetch and unpack
+      run: bash tools/panvk-probes/glibc-deps.sh out
+    - name: Build glibc probes
+      run: CC=gcc bash tools/panvk-probes/build.sh zenith vulkan-headers out/probes
+    - name: Build wider glibc feature probes
+      run: |
+        sudo apt-get install -y libxcb1-dev libxcb-shm0-dev
+        CC=gcc bash tools/panvk-probes/build-features.sh zenith vulkan-headers out/features
+    - uses: actions/upload-artifact@v4
+      with:
+        name: panvk-glibc-deps-aarch64
+        path: out/
+
+  # Research: the Termux:VA bridge for glibc (Google Chrome) with dma-buf software surfaces.
+  va-glibc:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 45
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions/checkout@v4
+      with:
+        ref: main
+        path: main
+    - name: Build in Debian trixie
+      run: docker run --rm -v "$PWD:/w" -w /w debian:trixie bash tools/panvk-probes/va-glibc.sh main out-va
+    - uses: actions/upload-artifact@v4
+      with:
+        name: termux-va-glibc-aarch64
+        path: out-va/

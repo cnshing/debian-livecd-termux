@@ -1,0 +1,30 @@
+Use the unversioned X11 sonames shipped by Termux in the Android-only
+dlopen implementation. No private versioned-symlink directory is needed.
+
+--- a/src/vulkan/wsi/wsi_x11_dlopen.c
++++ b/src/vulkan/wsi/wsi_x11_dlopen.c
+@@ -16,15 +16,15 @@
+ #include "wsi_common_private.h"
+ 
+ static const char *const wsi_x11_libs[] = {
+-   "libxcb.so.1",
+-   "libX11-xcb.so.1",
+-   "libxcb-dri3.so.0",
+-   "libxcb-present.so.0",
+-   "libxcb-shm.so.0",
+-   "libxcb-sync.so.1",
+-   "libxcb-xfixes.so.0",
+-   "libxcb-randr.so.0",
+-   "libxshmfence.so.1",
++   "libxcb.so",
++   "libX11-xcb.so",
++   "libxcb-dri3.so",
++   "libxcb-present.so",
++   "libxcb-shm.so",
++   "libxcb-sync.so",
++   "libxcb-xfixes.so",
++   "libxcb-randr.so",
++   "libxshmfence.so",
+ };
+ 
+ #define WSI_X11_SYMS(S) \

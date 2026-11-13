@@ -1,0 +1,27 @@
+Reject DMA-BUF export when neither Vulkan SYNC_FD nor implicit synchronization
+is available. Memory-FD support alone does not make the exported image safe
+for another API. In particular PanVK kbase advertises external memory but
+cannot create SYNC_FD semaphores. Zink later dereferences an empty signal
+semaphore array in submit_queue when such a resource is used again.
+
+Refuse before add_resource_bind can convert the texture into an exportable
+resource. EGL export then fails and applications such as Ghostty 1.4 use GPU
+rendering with CPU readback presentation. Drivers with native fence support
+or implicit synchronization keep their existing export path.
+
+--- a/src/gallium/drivers/zink/zink_resource.c
++++ b/src/gallium/drivers/zink/zink_resource.c
+@@ -2210,6 +2210,13 @@ zink_resource_get_handle(struct pipe_screen *pscreen,
+                          struct winsys_handle *whandle,
+                          unsigned usage)
+ {
++   struct zink_screen *zs = zink_screen(pscreen);
++   /* External memory support alone does not provide producer/consumer sync.
++    * Reject before add_resource_bind makes this texture exportable.
++    */
++   if (whandle->type == WINSYS_HANDLE_TYPE_FD &&
++       !pscreen->caps.native_fence_fd && !zs->driver_workarounds.implicit_sync)
++      return false;
+    if (tex->target == PIPE_BUFFER)
+       tc_buffer_disable_cpu_storage(tex);
+ #ifdef HAVE_LIBDRM

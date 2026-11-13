@@ -1,0 +1,88 @@
+name: PanVK source rebuild
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [research/panvk-kbase-probes]
+    paths:
+    - .github/workflows/panvk-driver.yml
+    - tools/panvk-probes/prepare-driver.sh
+    - tools/panvk-probes/driver-deps.sh
+    - tools/panvk-probes/build-driver.sh
+    - tools/panvk-probes/driver-patches/**
+
+permissions:
+  contents: read
+
+concurrency:
+  group: panvk-source-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  ZENITH_COMMIT: cf70e02b918e1864cbcd746a7fefa57b96c673ce
+
+jobs:
+  source:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions/checkout@v4
+      with:
+        repository: zenithblue-oss/panvk-kbase-android
+        ref: ${{ env.ZENITH_COMMIT }}
+        path: zenith
+    - name: Reconstruct the pinned p0175 source
+      run: bash tools/panvk-probes/prepare-driver.sh zenith source
+    - uses: actions/upload-artifact@v4
+      with:
+        name: panvk-prepared-source
+        path: source/
+
+  driver:
+    needs: source
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+        - kind: android
+          runner: ubuntu-24.04
+        - kind: glibc
+          runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions/checkout@v4
+      with:
+        repository: zenithblue-oss/panvk-kbase-android
+        ref: ${{ env.ZENITH_COMMIT }}
+        path: zenith
+    - name: Reconstruct the same reviewed source locally on the runner
+      # Repeating the shallow reconstruction avoids a stalled large-artifact
+      # download. The content-tree hash must match on both runner architectures.
+      run: |
+        PANVK_SKIP_ARCHIVE=1 bash tools/panvk-probes/prepare-driver.sh zenith source
+        test "$(git -C zenith/work/mesa rev-parse HEAD^{tree})" = 4a8e9a8cbb34b9fb91a9ad2040319aceb075b973
+    - name: Install native build tools
+      run: |
+        sudo apt-get update -qq
+        sudo apt-get install -y ninja-build pkg-config python3-mako python3-yaml python3-ply \
+          llvm-18-dev clang-18 libclang-18-dev libclang-cpp18-dev libclc-18-dev \
+          libllvmspirvlib-18-dev spirv-tools glslang-tools libdrm-dev libexpat1-dev zlib1g-dev \
+          libxcb1-dev libxcb-dri3-dev libxcb-present-dev libxcb-shm0-dev libxcb-sync-dev \
+          libxcb-xfixes0-dev libxcb-randr0-dev libx11-dev libx11-xcb-dev libxshmfence-dev \
+          libwayland-dev wayland-protocols bison flex patchelf
+        python3 -m venv --system-site-packages .venv
+        .venv/bin/pip install 'meson>=1.7,<2'
+        echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
+    - name: Build ICD in CI
+      run: bash tools/panvk-probes/build-driver.sh '${{ matrix.kind }}' zenith out
+    - uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: panvk-source-${{ matrix.kind }}-aarch64
+        path: |
+          out/
+          zenith/build/**/*.log
+          zenith/build/**/meson-logs/

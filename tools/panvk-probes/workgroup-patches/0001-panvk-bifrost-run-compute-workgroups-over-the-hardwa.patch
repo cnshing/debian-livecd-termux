@@ -1,0 +1,276 @@
+From fc27ce93361c4d415724152d52f030b4d812ae5d Mon Sep 17 00:00:00 2001
+From: soulexit <b@l>
+Date: Sun, 25 Oct 2026 12:46:05 +0300
+Subject: [PATCH] panvk/bifrost: run compute workgroups over the hardware limit
+ as K copies per invocation
+
+---
+ src/panfrost/vulkan/panvk_vX_shader.c | 245 ++++++++++++++++++++++++++
+ 1 file changed, 245 insertions(+)
+
+diff --git a/src/panfrost/vulkan/panvk_vX_shader.c b/src/panfrost/vulkan/panvk_vX_shader.c
+index 1dd4e02..b46e159 100644
+--- a/src/panfrost/vulkan/panvk_vX_shader.c
++++ b/src/panfrost/vulkan/panvk_vX_shader.c
+@@ -711,6 +711,244 @@ panvk_lower_clip_cull_fs(nir_shader *nir, uint64_t prev_outputs,
+                        nir_metadata_none);
+ }
+ 
++
++/* Large compute workgroups on Bifrost.
++ *
++ * Bifrost cores hold at most max_threads_per_wg (G72/G76: 384) threads of
++ * one workgroup, half that once a shader needs more than 32 registers.
++ * D3D11 (through DXVK) allows 1024: a larger workgroup never fits on a core
++ * and its first barrier waits forever, so the job is killed and the device
++ * is lost (NieR:Automata's 32x30 luminance reduction on Mali-G76).
++ *
++ * When every workgroup barrier sits at the top level of the shader, the
++ * logical workgroup of N invocations is run by H = N / K hardware
++ * invocations: the code between two barriers is emitted K times, copy c
++ * acting as logical invocation hw_index + c * H, and the barriers stay
++ * between the regions.  Values crossing a barrier are per copy because each
++ * copy is a separate clone; shared memory and barriers stay those of the one
++ * hardware workgroup.  Shaders this cannot handle are left alone.
++ */
++static bool
++lwg_instr_blocks(nir_instr *instr)
++{
++   if (instr->type != nir_instr_type_intrinsic)
++      return false;
++   switch (nir_instr_as_intrinsic(instr)->intrinsic) {
++   case nir_intrinsic_load_subgroup_id:
++   case nir_intrinsic_load_num_subgroups:
++   case nir_intrinsic_load_subgroup_invocation:
++   case nir_intrinsic_load_global_invocation_index:
++   case nir_intrinsic_vote_any:
++   case nir_intrinsic_vote_all:
++   case nir_intrinsic_vote_feq:
++   case nir_intrinsic_vote_ieq:
++   case nir_intrinsic_ballot:
++   case nir_intrinsic_read_invocation:
++   case nir_intrinsic_read_first_invocation:
++   case nir_intrinsic_shuffle:
++   case nir_intrinsic_shuffle_xor:
++   case nir_intrinsic_shuffle_up:
++   case nir_intrinsic_shuffle_down:
++   case nir_intrinsic_quad_broadcast:
++   case nir_intrinsic_quad_swap_horizontal:
++   case nir_intrinsic_quad_swap_vertical:
++   case nir_intrinsic_quad_swap_diagonal:
++   case nir_intrinsic_reduce:
++   case nir_intrinsic_inclusive_scan:
++   case nir_intrinsic_exclusive_scan:
++   case nir_intrinsic_elect:
++      return true;
++   default:
++      return false;
++   }
++}
++
++static bool
++lwg_is_wg_barrier(nir_instr *instr)
++{
++   if (instr->type != nir_instr_type_intrinsic)
++      return false;
++   nir_intrinsic_instr *intr = nir_instr_as_intrinsic(instr);
++   return intr->intrinsic == nir_intrinsic_barrier &&
++          nir_intrinsic_execution_scope(intr) >= SCOPE_WORKGROUP;
++}
++
++/* Make every read of the invocation's position derive from @lin (the logical
++ * linear local index).  Done once on the whole shader, before the regions are
++ * cloned: each copy then maps @lin to its own value through the clone remap
++ * table, so the clones are never walked.  @skip is the hardware index read
++ * the copies are built from. */
++static void
++lwg_rewrite_ids(nir_builder *b, nir_function_impl *impl, nir_def *lin,
++                nir_instr *skip, const uint16_t *lsize)
++{
++   nir_foreach_block(block, impl) {
++      nir_foreach_instr_safe(instr, block) {
++         if (instr == skip || instr->type != nir_instr_type_intrinsic)
++            continue;
++         nir_intrinsic_instr *intr = nir_instr_as_intrinsic(instr);
++         if (intr->intrinsic != nir_intrinsic_load_local_invocation_index &&
++             intr->intrinsic != nir_intrinsic_load_local_invocation_id &&
++             intr->intrinsic != nir_intrinsic_load_global_invocation_id &&
++             intr->intrinsic != nir_intrinsic_load_workgroup_size)
++            continue;
++
++         b->cursor = nir_before_instr(instr);
++         nir_def *x = nir_umod_imm(b, lin, lsize[0]);
++         nir_def *y = nir_umod_imm(b, nir_udiv_imm(b, lin, lsize[0]), lsize[1]);
++         nir_def *z = nir_udiv_imm(b, lin, lsize[0] * lsize[1]);
++         nir_def *lid = nir_vec3(b, x, y, z);
++         nir_def *size = nir_imm_ivec3(b, lsize[0], lsize[1], lsize[2]);
++         nir_def *repl;
++         switch (intr->intrinsic) {
++         case nir_intrinsic_load_local_invocation_index:
++            repl = lin;
++            break;
++         case nir_intrinsic_load_local_invocation_id:
++            repl = lid;
++            break;
++         case nir_intrinsic_load_global_invocation_id:
++            repl = nir_iadd(b, nir_imul(b, nir_load_workgroup_id(b), size), lid);
++            break;
++         default:
++            repl = size;
++            break;
++         }
++         if (repl->bit_size != intr->def.bit_size)
++            repl = nir_u2uN(b, repl, intr->def.bit_size);
++         nir_def_replace(&intr->def, repl);
++      }
++   }
++}
++
++static bool
++panvk_lower_large_workgroup(nir_shader *nir, unsigned max_hw)
++{
++   if (nir->info.stage != MESA_SHADER_COMPUTE ||
++       nir->info.workgroup_size_variable || !max_hw)
++      return false;
++
++   const uint16_t lsize[3] = {nir->info.workgroup_size[0],
++                              nir->info.workgroup_size[1],
++                              nir->info.workgroup_size[2]};
++   const unsigned n = lsize[0] * lsize[1] * lsize[2];
++   if (n <= max_hw)
++      return false;
++
++   unsigned k = DIV_ROUND_UP(n, max_hw);
++   while (k <= n && (n % k || n / k > max_hw))
++      k++;
++   if (k > 16 || n % k) {
++      mesa_logw("panvk: %u-invocation workgroup over the %u limit left as is",
++                n, max_hw);
++      return false;
++   }
++   const unsigned h = n / k;
++
++   nir_function_impl *impl = nir_shader_get_entrypoint(nir);
++   nir_lower_returns_impl(impl);
++   nir_lower_vars_to_ssa(nir);
++   /* Built-ins are still variable loads here: make them intrinsics first so
++    * the invocation-position reads can be rewritten per copy. */
++   nir_lower_system_values(nir);
++
++   /* Workgroup barriers must all be top-level; nothing may depend on the
++    * hardware subgroup/invocation layout. */
++   struct util_dynarray barriers;
++   util_dynarray_init(&barriers, NULL);
++   bool ok = true;
++   nir_foreach_block(block, impl) {
++      nir_foreach_instr(instr, block) {
++         if (lwg_instr_blocks(instr))
++            ok = false;
++         if (lwg_is_wg_barrier(instr)) {
++            if (block->cf_node.parent != &impl->cf_node)
++               ok = false;
++            util_dynarray_append(&barriers, instr);
++         }
++      }
++   }
++   if (!ok) {
++      util_dynarray_fini(&barriers);
++      mesa_logw("panvk: %u-invocation workgroup: barrier in control flow or "
++                "subgroup ops, left as is", n);
++      return false;
++   }
++
++   const unsigned nbar = util_dynarray_num_elements(&barriers, nir_instr *);
++   nir_instr **bar = util_dynarray_begin(&barriers);
++   const unsigned nreg = nbar + 1;
++
++   /* Hardware index and the logical-index placeholder go first. */
++   nir_builder b = nir_builder_at(nir_before_impl(impl));
++   nir_def *hw_index = nir_load_local_invocation_index(&b);
++   /* Not nir_undef: undefs are always inserted at the top of the impl. */
++   nir_def *lin_ph = nir_mov(&b, hw_index);
++   nir_instr *ph_instr = nir_def_instr_nonconst(lin_ph);
++   lwg_rewrite_ids(&b, impl, lin_ph, nir_def_instr_nonconst(hw_index), lsize);
++
++   nir_cf_list *regions = calloc(nreg, sizeof(*regions));
++   for (unsigned r = 0; r < nreg; r++) {
++      nir_cursor begin = r == 0 ? nir_after_instr(ph_instr)
++                                : nir_after_instr(bar[r - 1]);
++      nir_cursor end = r == nbar ? nir_after_impl(impl)
++                                 : nir_before_instr(bar[r]);
++      nir_cf_extract(&regions[r], begin, end);
++   }
++
++   /* Function temporaries left after vars_to_ssa are per invocation.  Take
++    * the list before adding the per-copy clones to it. */
++   struct util_dynarray temps;
++   util_dynarray_init(&temps, NULL);
++   nir_foreach_function_temp_variable(var, impl)
++      util_dynarray_append(&temps, var);
++
++   struct hash_table **remap = calloc(k, sizeof(*remap));
++   b.cursor = nir_after_instr(ph_instr);
++   for (unsigned c = 0; c < k; c++) {
++      remap[c] = _mesa_pointer_hash_table_create(NULL);
++      nir_def *lin = nir_iadd_imm(&b, hw_index, c * h);
++      _mesa_hash_table_insert(remap[c], lin_ph, lin);
++      util_dynarray_foreach(&temps, nir_variable *, var) {
++         nir_variable *nvar = nir_variable_clone(*var, nir);
++         nir_function_impl_add_variable(impl, nvar);
++         _mesa_hash_table_insert(remap[c], *var, nvar);
++      }
++   }
++   util_dynarray_fini(&temps);
++
++   for (unsigned r = 0; r < nreg; r++) {
++      for (unsigned c = 0; c < k; c++) {
++         nir_cf_list copy;
++         nir_cf_list_clone(&copy, &regions[r], &impl->cf_node, remap[c]);
++         nir_cf_reinsert(&copy, r == nbar ? nir_after_impl(impl)
++                                          : nir_before_instr(bar[r]));
++      }
++   }
++
++   for (unsigned r = nreg; r-- > 0;)
++      nir_cf_delete(&regions[r]);
++   assert(nir_def_is_unused(lin_ph));
++   nir_instr_remove(ph_instr);
++   for (unsigned c = 0; c < k; c++)
++      _mesa_hash_table_destroy(remap[c], NULL);
++   free(remap);
++   free(regions);
++   util_dynarray_fini(&barriers);
++
++   nir->info.workgroup_size[0] = h;
++   nir->info.workgroup_size[1] = 1;
++   nir->info.workgroup_size[2] = 1;
++
++   nir_progress(true, impl, nir_metadata_none);
++   nir_repair_ssa_impl(impl);
++   mesa_logi("panvk: %ux%ux%u workgroup run as %u x %u invocations",
++             lsize[0], lsize[1], lsize[2], k, h);
++   if (getenv("PANVK_LWG_PRINT"))
++      nir_print_shader(nir, stderr);
++   return true;
++}
++
+ static void
+ panvk_preprocess_nir(struct vk_physical_device *vk_pdev,
+                      nir_shader *nir,
+@@ -718,6 +956,13 @@ panvk_preprocess_nir(struct vk_physical_device *vk_pdev,
+ {
+    struct panvk_physical_device *pdev = to_panvk_physical_device(vk_pdev);
+ 
++#if PAN_ARCH < 9
++   /* Half the limit: a shader over 32 registers halves the threads per core. */
++   if (nir->info.stage == MESA_SHADER_COMPUTE)
++      NIR_PASS(_, nir, panvk_lower_large_workgroup,
++               pdev->kmod.dev->props.max_threads_per_wg / 2);
++#endif
++
+    /* Ensure to regroup output variables at the same location */
+    if (nir->info.stage == MESA_SHADER_FRAGMENT)
+       NIR_PASS(_, nir, nir_opt_vectorize_io_vars, nir_var_shader_out);
+-- 
+2.43.0
+

@@ -1,46 +1,86 @@
 # Chrome and Chromium on x1s
 
-## Current state (2026-11-11): ANGLE on PanVK
+## Current state (2026-11-12): ANGLE on PanVK
 
-**Both browsers now render on the GPU.** The user approved ANGLE on PanVK, a different stack
-from the earlier ANGLE-over-vendor-driver failures. `mesa-vulkan-icd-panvk-kbase` packages
-Zenith's PanVK, which drives the stock kernel's `/dev/mali0` (Mali-G77, kbase JM 11.35) with
-Vulkan 1.3. The shared launcher gives Chromium and Chrome ANGLE's Vulkan back end on it
-whenever the package is installed and `/dev/mali0` is usable, whatever the desktop renderer.
+**Both browsers render on the GPU.** The user approved ANGLE on PanVK.
+`mesa-vulkan-icd-panvk-kbase` packages the driver for the stock kernel's
+`/dev/mali0` (Mali-G77, kbase JM 11.35). The shared launcher selects it
+independently of the desktop renderer.
 
-| Through the installed `chromium-browser` / `google-chrome` | Chromium 156 | Chrome |
+| Capability | Native Chromium 156 | glibc Google Chrome |
 | --- | --- | --- |
-| GPU compositing, WebGL 1/2, WebGPU | enabled | enabled |
-| Renderer | `ANGLE (ARM, Vulkan 1.3.363 (Mali-G77 MC11), panvk)` | same |
-| WebGL readback, compositor capture | correct | correct |
-| Hardware video decoding | **VP9 yes** (android-vaapi 3, below); HEVC and H.264 software | **no**: its glibc VA driver lacks the fix |
-| Hardware video encoding | **no**: no encode profiles advertised | not run |
+| GPU compositing, WebGL 1/2, WebGPU | enabled; captures and readback correct | same |
+| VP9 hardware playback | passes with android-vaapi revision 3 or later | decodes with the private glibc build; one compositor comparison below the SSIM threshold |
+| HEVC / H.264 playback | software fallback | software fallback |
+| WebCodecs hardware encoding | GPU-process crash with the encoder feature enabled | same |
+| WebRTC H.264 / VP9 hardware loopback | works with the encoder feature enabled | no network interfaces / ICE candidates under Bionilux |
 
-Why video is still software:
+Playback and encoding results above use private test launchers and drivers,
+except for the installed-launcher GPU rendering checks. The phone still had
+android-vaapi revision 2 at the 2026-11-12 continuation's inventory. Installing
+revision 4 and repeating VP9 through the installed `chromium-browser` remain
+required. Stop the desktop before replacing its globally preloaded library.
 
-- **Decoding.** Chromium (with ANGLE on Vulkan) imports each decoded frame as a dma-buf, via
-  `vaExportSurfaceHandle`. On Mali, Termux:VA's only usable bridge backend is software
-  (softpipe), whose surfaces were malloc'd, so export failed (`invalid VASurfaceID`).
-  android-vaapi revision 3 gives that backend a winsys whose surfaces are ION dma-bufs
-  (`packages/android-vaapi/tva_ion_winsys.h`). Native Chromium VP9 then passes with
-  `VaapiVideoDecoder`: six fullscreen cycles, 188 frames, none dropped, numbered frames 12 and 36
-  correct at the browser and compositor layers, served by Android's VP9 decoder. Turning off the
-  bridge's end-of-picture wait makes the frame check fail, so that wait stays.
-  HEVC: Exynos's decoder holds back as many pictures as the bridge's rebuilt SPS declares for
-  reordering (3), so the bridge's bounded per-picture wait fails and Chromium falls back to
-  FFmpeg. [X1S-FIREFOX-VIDEO.md](X1S-FIREFOX-VIDEO.md) has the cause and the fix Firefox uses. Native Chromium passes only
-  VP9 on Adreno too; this is a bridge limitation, not Mali's. H.264 hardware decoding is off by
-  default (`disabled_va_codecs`). Chrome uses lfdevs' prebuilt glibc VA driver, which needs the
-  same winsys in a glibc build.
-- **Encoding.** Chromium on Linux encodes through VA-API only with the
-  `AcceleratedVideoEncoder` feature, which no launcher enables on any phone. With it, the
-  private daemon lists `OMX.Exynos.AVC/HEVC/VP9.Encoder` and Chromium creates and drops a
-  VA encoder, but advertises no encode profiles, so WebCodecs `prefer-hardware` is
-  unsupported. Chromium requires CBR rate control (and packed headers for H.264) on the
-  driver's encode config; what Termux:VA reports there has not been checked. Browser
-  encoding was never qualified on Adreno either ([ENCODING.md](ENCODING.md)).
+### Decode surfaces and completion
 
-Evidence: local `temp/gpu-x1s/panvk-runs/30-37*` and `BROWSER-GL-DECISION.md`.
+The software surface backend does not mean software codec execution: Termux:VA
+still calls Exynos MediaCodec. Its original malloc-backed surfaces could not
+be exported to ANGLE. Revision 3 adds an ION dma-buf winsys
+([tva_ion_winsys.h](../../packages/android-vaapi/tva_ion_winsys.h)). Chromium
+VP9 then passes six fullscreen cycles, 188 frames, none dropped, with numbered
+frames 12 and 36 correct at the browser and compositor layers.
+
+The glibc recipe now cross-builds the same pinned bridge and shared patches
+against a pinned Debian ARM64 sysroot. It installs the softpipe driver under
+`android-vaapi-glibc/mali` beside the prebuilt Turnip stack. The launcher selects
+that driver on Mali only. This package change still needs its CI build and
+installed-launcher device qualification; the existing private glibc build is
+the playback evidence, not a qualification of the new package.
+
+Both browsers require `TERMUX_VA_SYNC_END_PICTURE=1`: removing that bounded
+completion wait exposes stale compositor frames. Exynos's HEVC decoder holds
+back as many pictures as the bridge's rebuilt SPS declares for reordering (3),
+so the bridge's 500 ms per-picture wait fails and the browser falls back to
+software. [X1S-FIREFOX-VIDEO.md](X1S-FIREFOX-VIDEO.md) has the cause and the
+`TERMUX_VA_HEVC_REORDER_PICS=0` fix Firefox uses; Chromium has not been run
+with it. The wait must remain until the bridge can handle delayed decoders
+without exposing stale pictures. Native Chromium passes VP9 only on Adreno too.
+H.264 and AV1 remain disabled by default in the VA profile.
+
+Chrome's private glibc VP9 run produces the correct frame numbers and colours,
+but a windowed compositor capture scores SSIM **0.8987**, below **0.90**.
+Software Chrome scores 0.921 in that comparison. Chroma upsampling in the
+ANGLE/Vulkan NV12 path is a hypothesis, not a demonstrated cause. Acceptance
+thresholds remain unchanged.
+
+### Encoding and Chrome networking
+
+`AcceleratedVideoEncoder` remains disabled by default. With that feature on,
+native Chromium's WebRTC loopback uses `OMX.Exynos.AVC.Encoder` and
+`OMX.Exynos.VP9.Encoder`, and the matching hardware decoders: about 284 frames
+per codec with exact received colours. WebRTC uploads ordinary I420 memory.
+Do not add `--video-capture-use-gpu-memory-buffer`. The daemon retries without
+the low-latency key that Exynos rejects; latency in a real call is unqualified.
+
+WebCodecs follows a different path. On Linux,
+`VideoEncodeAcceleratorAdapter` requests `kGpuMemoryBuffer` storage. These
+browsers supply shared memory where `CreateGpuMemoryBufferHandle()` requires
+`gfx::NATIVE_PIXMAP`, causing a CHECK and a GPU-process SIGTRAP. This happens
+in both browsers with VA driver revisions 2 and 3. CBR is also required;
+Chromium blocks VA-API VBR outside ChromeOS. Enabling the feature globally can
+therefore let a WebCodecs page crash the GPU process repeatedly and disable GPU
+acceleration for the session. Native Chromium needs a shared-memory adapter
+or a graceful failure before enabling the feature by default. Prebuilt Chrome
+requires a separate decision about accepting this risk.
+
+Chrome WebRTC produces zero ICE candidates and stays in connection state `new`.
+Its log reports `Could not bind NETLINK socket: Permission denied`. This is a
+Bionilux/network-interface discovery problem, independent of the codec bridge;
+Chrome hardware WebRTC encoding and decoding have not been qualified.
+
+Evidence: local `temp/gpu-x1s/panvk-runs/40-69*`,
+`BROWSER-VIDEO-HANDOFF.md` and `CHROME-VIDEO-FINDINGS.md`.
+For the earlier surface fix see `panvk-runs/30-37*`.
 
 ## Earlier no-ANGLE qualification
 

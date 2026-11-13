@@ -43,3 +43,15 @@ capability in the runtime manifest, but does not change Firefox's remote platfor
 encoder preference. Enable that preference only in private acceptance profiles
 until daemon frame counts, software decoding and pixel checks pass. A `HWENC`
 graphics-probe listing alone does not prove that Firefox can encode.
+
+Revision 4 fixes an empty-encoder drain crash in FFmpeg's shared hardware encoder
+base. Firefox recreates the encoder after a drain, then drains that fresh encoder
+to confirm there is no more output. Timestamp adjustment must skip the missing
+last picture. It also requires android-vaapi revision 8, whose DRM shim resolves
+libdrm loaded with local visibility by Firefox. Neither change enables Firefox's
+remote platform encoder preference.
+
+On the phone, `tests/video-encode/test-firefox-ffmpeg.py --library-dir PATH` checks
+local library loading and an empty drain for all three encoders. Use the session
+VA environment and a private daemon. Browser acceptance must additionally check
+flush, frame count, and software-decoded pixels.

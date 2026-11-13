@@ -1,0 +1,19 @@
+From: LiveCD Termux maintainers
+Subject: [PATCH] Permit draining an encoder before its first input picture
+
+Firefox recreates its encoder after draining and drains again until no packets
+remain. On an empty encoder pic_end is NULL, but input_order and decode_delay
+are both zero, so timestamp adjustment dereferences NULL. No timestamps need
+adjusting without a picture. Keep the normal end-of-stream handling below.
+
+--- a/libavcodec/hw_base_encode.c
++++ b/libavcodec/hw_base_encode.c
+@@ -504,7 +504,7 @@
+ 
+         // Fix timestamps if we hit end-of-stream before the initial decode
+         // delay has elapsed.
+-        if (ctx->input_order <= ctx->decode_delay)
++        if (ctx->pic_end && ctx->input_order <= ctx->decode_delay)
+             ctx->dts_pts_diff = ctx->pic_end->pts - ctx->first_pts;
+     }
+ 

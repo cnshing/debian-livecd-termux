@@ -44,6 +44,10 @@ fi
 wants chromium && packages="$packages chromium"
 # Chrome's GPU and video stack, and the loader that runs it, are packages from this repository.
 wants chrome && packages="$packages gnupg patchelf desktop-file-utils openssl-tool bionilux android-vaapi-glibc termux-va"
+# Mali phones have no Turnip: the browsers use ANGLE on PanVK through Android's own GPU driver.
+if test -r /dev/mali0 && test -w /dev/mali0 && { wants chromium || wants chrome || wants ungoogled-chromium; }; then
+    packages="$packages mesa-vulkan-icd-panvk-kbase"
+fi
 # The pinned ungoogled-chromium is a glibc binary, with small helpers compiled here.
 wants ungoogled-chromium && packages="$packages patchelf clang lld"
 apt-get update

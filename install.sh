@@ -130,6 +130,9 @@ apt-get update
 # An on-device UPower build holds upower, which would stop android-upower replacing it.
 if dpkg -s upower >/dev/null 2>&1; then apt-mark unhold upower; fi
 mapfile -t packages < "$repo/src/native/packages.txt"
+if test -r /dev/mali0 && test -w /dev/mali0; then
+    packages+=(mesa-vulkan-icd-panvk-kbase)
+fi
 "${apt[@]}" install --no-install-recommends "${packages[@]}"
 # Runtime code is owned by livecd-desktop. Setup only connects per-user paths.
 python "$PREFIX/libexec/livecd-native/runtime.py"
@@ -151,7 +154,11 @@ with open(path, 'w') as file:
     json.dump(config, file)
 EOF
 else
-    echo 'No supported GPU driver was set up; the desktop renders in software.'
+    if test -r /dev/mali0 && test -w /dev/mali0; then
+        echo 'PanVK is available: use livecd start --renderer zink, then livecd select after validation.'
+    else
+        echo 'No supported GPU driver was set up; the desktop renders in software.'
+    fi
 fi
 # Earlier versions linked a livecd-pkg command here; pkg install replaces it.
 rm -f "$PREFIX/bin/livecd-pkg"

@@ -4,7 +4,7 @@ TERMUX_PKG_LICENSE="MIT"
 TERMUX_PKG_LICENSE_FILE="docs/license.rst"
 TERMUX_PKG_MAINTAINER="@cnshing"
 TERMUX_PKG_VERSION="27.0.0~devel20261029"
-TERMUX_PKG_REVISION=2
+TERMUX_PKG_REVISION=3
 TERMUX_PKG_SRCURL=https://codeload.github.com/lfdevs/mesa-for-android-container/tar.gz/eb3e7fd4f009cab04b1482aad4843c0bde28a786
 TERMUX_PKG_SHA256=123af0b3b2f7c83273a51f28367a64054201d524cbfa52f99ba76696e619927a
 TERMUX_PKG_AUTO_UPDATE=false
@@ -54,13 +54,30 @@ termux_step_pre_configure() {
 	LDFLAGS+=" --target=aarch64-linux-android29 -landroid-shmem -Wl,-rpath=$TERMUX_PREFIX/lib/android-vaapi"
 	# Without /dev/dma_heap/system, as on Android 11 phones, allocate shared buffers through ION.
 	cp "$TERMUX_PKG_BUILDER_DIR/tva_ion.h" src/gallium/frontends/va/
+	# Without a GPU the bridge can drive (Mali), its software surfaces live in dma-bufs, so
+	# browsers can import decoded frames. See tva_ion_winsys.h.
+	cp "$TERMUX_PKG_BUILDER_DIR/tva_ion_winsys.h" src/gallium/frontends/va/
 	python3 - src/gallium/frontends/va/tva_bridge.c <<-'PY'
 		import sys
 		from pathlib import Path
 		path = Path(sys.argv[1]); text = path.read_text()
-		for before, after in (('#include <linux/dma-heap.h>', '#include <linux/dma-heap.h>\n#include "tva_ion.h"'),
+		for before, after in (('#include <linux/dma-heap.h>',
+		                       '#include <linux/dma-heap.h>\n#include "tva_ion.h"\n#include "tva_ion_winsys.h"'),
 		                      ('if (heap_fd < 0)\n      return -1;',
-		                       'if (heap_fd < 0)\n      return errno == ENOENT ? android_vaapi_tva_alloc_ion(size) : -1;')):
+		                       'if (heap_fd < 0)\n      return errno == ENOENT ? android_vaapi_tva_alloc_ion(size) : -1;'),
+		                      ('struct pipe_screen *pscreen = pipe_loader_create_screen(dev, false);',
+		                       'struct pipe_screen *pscreen = tva_ion_screen_create();\n'
+		                       '    if (pscreen)\n'
+		                       '        fprintf(stderr, "tva: software backend on dma-buf surfaces\\n");\n'
+		                       '    else\n'
+		                       '        pscreen = pipe_loader_create_screen(dev, false);'),
+		                      ('if (tva_sw_backend_enabled())\n',
+		                       'if (tva_sw_backend_enabled() && !tva_ion_winsys_active)\n'),
+		                      ('        return !strcmp(e, "1") || !strcmp(e, "true") || !strcmp(e, "on");\n',
+		                       '        return !strcmp(e, "1") || !strcmp(e, "true") || !strcmp(e, "on");\n'
+		                       '    /* Browsers import an NV12 frame as one dma-buf object. */\n'
+		                       '    if (tva_ion_winsys_active)\n'
+		                       '        return true;\n')):
 		    if text.count(before) != 1:
 		        sys.exit('The pinned Termux:VA bridge changed near: ' + before)
 		    text = text.replace(before, after)

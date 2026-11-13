@@ -474,10 +474,10 @@ def parent(args):
         raise RuntimeError('Another private X display is active; wait for its owner to finish: ' +
                            repr(before['displays']))
     status_before = run([str(HOME / '.local/bin/livecd'), 'status'], capture_output=True, text=True).stdout
-    env = environment('software')
+    env = environment('zink' if args.integrated else 'software')
     for key in ('LIVECD_NATIVE_SESSION', 'XAUTHORITY', 'LIBGL_ALWAYS_SOFTWARE'):
         env.pop(key, None)
-    icd = PAN / 'android/icd.json'
+    icd = Path(env['VK_DRIVER_FILES']) if args.integrated else PAN / 'android/icd.json'
     if args.driver:
         driver = args.driver.resolve(strict=True)
         icd = args.out / 'icd.json'
@@ -493,7 +493,7 @@ def parent(args):
     # Explicit $PREFIX/lib shadows Android platform dependencies: libui then
     # fails its libbinder_ndk version requirement. Default Termux lookup still
     # finds Termux libraries; keep only the private GNOME and X11 paths here.
-    env['LD_LIBRARY_PATH'] = ':'.join([*([] if args.no_xlibs else [str(PAN / 'android/xlibs')]), *(
+    env['LD_LIBRARY_PATH'] = ':'.join([*([] if args.no_xlibs or args.integrated else [str(PAN / 'android/xlibs')]), *(
         p for p in env['LD_LIBRARY_PATH'].split(':') if p != os.environ['PREFIX'] + '/lib')])
     if args.mesa_lib_dir:
         libraries = args.mesa_lib_dir.resolve(strict=True)
@@ -533,7 +533,8 @@ def parent(args):
              *(['--ghostty-probe'] if args.ghostty_probe else []),
              *(['--ghostty-launcher', str(args.ghostty_launcher)] if args.ghostty_launcher else []),
              *(['--ghostty-software'] if args.ghostty_software else []),
-             '--ghostty-gsk', args.ghostty_gsk],
+             '--ghostty-gsk', args.ghostty_gsk,
+             *(['--controller-dir', str(args.controller_dir)] if args.controller_dir else [])],
              env=env, start_new_session=True)
         code = session.wait(timeout=480 + args.soak_seconds)
     finally:
@@ -577,6 +578,8 @@ if __name__ == '__main__':
     parser.add_argument('--driver', type=Path)
     parser.add_argument('--mesa-lib-dir', type=Path)
     parser.add_argument('--no-xlibs', action='store_true', help='Verify the rebuilt driver uses Termux sonames directly')
+    parser.add_argument('--integrated', action='store_true', help='Use the controller-selected packaged PanVK ICD')
+    parser.add_argument('--controller-dir', type=Path, help='Test a privately staged controller directory')
     parser.add_argument('--allow-other-displays', action='store_true',
                         help='Record other private displays without rejecting a short correctness run')
     parser.add_argument('--worker', action='store_true')
@@ -588,5 +591,9 @@ if __name__ == '__main__':
         parser.error('raw DRI3 requires the private lorie server')
     if args.allow_other_displays and args.soak_seconds:
         parser.error('overlapping displays are supported only for short correctness checks')
+    if args.integrated and args.driver:
+        parser.error('the integrated test uses the controller-selected driver')
+    if args.controller_dir:
+        sys.path.insert(0, str(args.controller_dir.resolve(strict=True)))
     signal.signal(signal.SIGTERM, lambda signum, frame: sys.exit(128 + signum))
     sys.exit(gtk(args.out) if args.gtk else worker(args) if args.worker else parent(args))

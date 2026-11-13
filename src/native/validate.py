@@ -11,7 +11,7 @@ import time
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from desktop import DATA, ROOT, PREFIX, SESSION_LOG_START, STATE, bus_call, process_identity, shell_pid
-from graphics import process_gpu
+from graphics import process_gpu, zink_driver
 from gi.repository import Gio
 
 
@@ -31,7 +31,9 @@ def main():
     renderer = os.environ.get('LIVECD_NATIVE_RENDERER', 'software')
     glx = subprocess.check_output(['glxinfo', '-B'], text=True, timeout=20)
     if renderer == 'zink':
-        check('renderer_zink', 'Accelerated: yes' in glx and 'zink' in glx and 'Turnip Adreno' in glx, glx.strip())
+        expected_driver = zink_driver()
+        device_name = 'Mali' if expected_driver == 'panvk' else 'Turnip Adreno'
+        check('renderer_zink', 'Accelerated: yes' in glx and 'zink' in glx and device_name in glx, glx.strip())
     else:
         check('renderer_software', 'llvmpipe' in glx and 'Accelerated: no' in glx, glx.strip())
     shell_graphics = process_gpu(shell_pid(os.environ))
@@ -40,10 +42,13 @@ def main():
         compositor_env = {key: next((v.decode().split('=', 1)[1] for v in raw_env if v.startswith((key + '=').encode())), None)
                           for key in ('LIVECD_NATIVE_RENDERER', 'COGL_DRIVER', 'GALLIUM_DRIVER', 'VK_DRIVER_FILES')}
         check('shell_egl_gles', compositor_env['COGL_DRIVER'] == 'gles2' and compositor_env['GALLIUM_DRIVER'] == 'zink', compositor_env)
-        check('shell_turnip_library', bool(shell_graphics['turnip_libraries']), shell_graphics['turnip_libraries'])
-        check('shell_kgsl_device', bool(shell_graphics['kgsl_devices']), shell_graphics['kgsl_devices'])
+        check('shell_vulkan_driver', shell_graphics['driver'] == expected_driver, shell_graphics)
+        library_key, device_key = (('panvk_libraries', 'mali_devices') if expected_driver == 'panvk'
+                                   else ('turnip_libraries', 'kgsl_devices'))
+        check('shell_' + expected_driver + '_library', bool(shell_graphics[library_key]), shell_graphics[library_key])
+        check('shell_gpu_device', bool(shell_graphics[device_key]), shell_graphics[device_key])
     else:
-        check('shell_software', not shell_graphics['turnip_libraries'] and not shell_graphics['kgsl_devices'], shell_graphics)
+        check('shell_software', not shell_graphics['libraries'] and not shell_graphics['devices'], shell_graphics)
     extensions = bus_call(os.environ, 'org.gnome.Shell.Extensions', '/org/gnome/Shell/Extensions',
         'org.gnome.Shell.Extensions', 'ListExtensions')[0]
     settings = Gio.Settings.new('org.gnome.shell')

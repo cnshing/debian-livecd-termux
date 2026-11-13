@@ -20,7 +20,7 @@ import subprocess
 import sys
 import time
 
-from graphics import apply_renderer, preferred_renderer
+from graphics import apply_renderer, mali_usable, panvk, preferred_renderer, use_panvk
 
 PREFIX = Path('/data/data/com.termux/files/usr')
 ROOT = Path.home() / '.local/opt/livecd-native/acceleration'
@@ -28,6 +28,7 @@ ROOT = Path.home() / '.local/opt/livecd-native/acceleration'
 PACKAGED = {'bionic': PREFIX / 'lib/android-vaapi', 'glibc': PREFIX / 'lib/android-vaapi-glibc'}
 CONFIG = Path.home() / '.config/livecd-native/acceleration.json'
 RECEIPT = Path.home() / '.local/opt/livecd-native/gnome-48/share/doc/mutter/build-source.json'
+BROWSERS = ('chrome', 'chromium', 'ungoogled-chromium')
 
 
 def settings():
@@ -101,12 +102,16 @@ def enabled(profile, config):
     return config.get('hardware_video', True) is not False
 
 
-def gpu_enabled(profile):
+def gpu_enabled(profile, abi='bionic'):
     key = 'LIVECD_' + profile.upper().replace('-', '_') + '_GPU'
     if os.environ.get(key) in ('0', '1'):
         return os.environ[key] == '1'
+    receipt = RECEIPT.is_file() and '0010-clip-pixmap-damage' in RECEIPT.read_text()
+    # On Mali, browsers render through ANGLE on PanVK whatever the desktop uses.
+    if profile in BROWSERS and panvk(abi):
+        return receipt
     renderer = os.environ.get('LIVECD_NATIVE_RENDERER') or preferred_renderer()
-    return renderer == 'zink' and RECEIPT.is_file() and '0010-clip-pixmap-damage' in RECEIPT.read_text()
+    return renderer == 'zink' and receipt
 
 
 def ensure_daemon(env):
@@ -161,9 +166,14 @@ def video_environment(env, selected, abi, config):
         env['LD_LIBRARY_PATH'] = ':'.join(filter(None, [libraries, env.get('LD_LIBRARY_PATH')]))
         env['LD_PRELOAD'] = ':'.join(filter(None, [preloads, env.get('LD_PRELOAD')]))
     env.update(LIBVA_DRIVERS_PATH=str(root / manifest['driver_directory']),
-               LIBVA_DRIVER_NAME='termuxva', TERMUX_VA_BRIDGE='1',
-               TERMUX_VA_GPU_BACKEND='kgsl', TERMUX_VA_X11_DRI3='1',
-               TERMUX_VA_CONTIGUOUS_DMABUF='1')
+               LIBVA_DRIVER_NAME='termuxva', TERMUX_VA_BRIDGE='1')
+    if mali_usable():
+        # CPU surfaces do not disable MediaCodec hardware codec execution.
+        # The KGSL/dma-buf import settings are specific to the Adreno stack.
+        env['TERMUX_VA_GPU_BACKEND'] = 'sw'
+    else:
+        env.update(TERMUX_VA_GPU_BACKEND='kgsl', TERMUX_VA_X11_DRI3='1',
+                   TERMUX_VA_CONTIGUOUS_DMABUF='1')
     if manifest.get('ion_fallback') == 'preload':
         env.setdefault('LIVECD_TVA_ION_FALLBACK', '1')
     for codec in config.get('disabled_va_codecs', ['h264', 'av1']):
@@ -225,15 +235,20 @@ def firefox_video_runtime():
     return None, reason
 
 
-def command_line(profile, command, abi, video, gpu):
+def video_device():
+    # Chromium opens this node for its VA-API display; android-vaapi serves either.
+    return '/dev/mali0' if not os.path.exists('/dev/kgsl-3d0') and mali_usable() else '/dev/kgsl-3d0'
+
+
+def command_line(profile, command, abi, video, gpu, mali=False):
     flags = []
-    if profile in ('chrome', 'chromium', 'ungoogled-chromium'):
+    if profile in BROWSERS:
         flags = (['--use-gl=angle', '--use-angle=vulkan', '--ignore-gpu-blocklist',
                   '--enable-features=Vulkan,VulkanFromANGLE,DefaultANGLEVulkan'] if gpu else ['--disable-gpu'])
         if video:
             flags = ['--use-gl=angle', '--use-angle=vulkan', '--ignore-gpu-blocklist',
                 '--enable-zero-copy', '--enable-native-gpu-memory-buffers',
-                '--hardware-video-device-path=/dev/kgsl-3d0',
+                '--hardware-video-device-path=' + video_device(),
                 '--enable-features=Vulkan,VulkanFromANGLE,DefaultANGLEVulkan,VaapiVideoDecoder,VaapiVideoDecodeLinux,PlatformHEVCDecoderSupport,AcceleratedVideoDecoder,AcceleratedVideoDecodeLinuxGL,VaapiIgnoreDriverChecks',
                 '--disable-features=VaapiVideoMinResolutionForPerformance']
         if abi == 'glibc':
@@ -247,7 +262,9 @@ def command_line(profile, command, abi, video, gpu):
         firefox_preferences(owned, gpu, video)
         flags = ['--profile', str(owned)]
     elif profile == 'mpv':
-        flags = (['--vo=gpu-next', '--gpu-api=vulkan', '--gpu-context=x11vk'] if gpu else ['--vo=x11'])
+        flags = (['--vo=gpu-next', '--gpu-api=opengl', '--gpu-context=x11egl', '--opengl-es=yes']
+                 if gpu and mali else
+                 ['--vo=gpu-next', '--gpu-api=vulkan', '--gpu-context=x11vk'] if gpu else ['--vo=x11'])
         flags += (['--hwdec=mediacodec-copy', '--vd-lavc-o=ndk_codec=1'] if video else ['--hwdec=no'])
     return [command[0], *flags, *command[1:]]
 
@@ -262,11 +279,26 @@ def prepare(profile, command, abi, video_override):
             if key.startswith('LIVECD_') and key.endswith('_HARDWARE_VIDEO'):
                 env[key] = value
     selected = stack(abi)
-    gpu = gpu_enabled(profile)
+    gpu = gpu_enabled(profile, abi)
+    # Browsers on Mali: ANGLE's Vulkan back end on PanVK, never Turnip.
+    mali_vulkan = gpu and profile in BROWSERS and panvk(abi) is not None
+    # The Mali path is qualified for mpv, not for every GL application. Its GLES
+    # backend avoids libplacebo's Vulkan 1.2 requirement on older Mali firmware.
+    from mali import available as mali_available
+    mali = (abi == 'bionic' and profile == 'mpv' and mali_available() and
+            os.environ.get('LIVECD_MPV_GPU') != '0')
+    if mali:
+        gpu = True
     requested = enabled(profile, config) if video_override == 'auto' else video_override == 'on'
     # Stock Termux Chromium compiles VA-API out. Both the source-built Bionic
     # package and the prebuilt glibc route require their own build provenance.
-    video = requested and gpu and (profile == 'mpv' or selected is not None)
+    # MediaCodec decoding is independent of desktop GPU rendering.
+    video = requested and (profile == 'mpv' or (gpu and selected is not None))
+    # Explicit generic VA clients can use an X11 VA display and CPU surfaces on
+    # Mali, independently of GL compositing. This does not emulate a DRM node.
+    if (profile == 'generic' and abi == 'bionic' and selected is not None and requested
+            and os.access('/dev/mali0', os.R_OK | os.W_OK)):
+        video = True
     if profile in ('chromium', 'ungoogled-chromium') and not chromium_has_vaapi(profile, abi):
         video = False
     firefox = None
@@ -282,7 +314,7 @@ def prepare(profile, command, abi, video_override):
         if selected:
             root, manifest = selected
             env['BIONILUX_LIBRARY_PATH'] = ':'.join(str(root / p) for p in manifest['libraries'])
-            if gpu:
+            if gpu and not mali_vulkan:
                 icd = root / manifest['vulkan_icd']
                 mesa = root / manifest['mesa_library_directory']
                 env.update(VK_DRIVER_FILES=str(icd), VK_ICD_FILENAMES=str(icd),
@@ -291,10 +323,10 @@ def prepare(profile, command, abi, video_override):
                 vendors = mesa.parents[1] / 'share/glvnd/egl_vendor.d/50_mesa.json'
                 if vendors.is_file():
                     env['__EGL_VENDOR_LIBRARY_FILENAMES'] = str(vendors)
-        elif gpu:
+        elif gpu and not mali_vulkan:
             raise RuntimeError('Install the shared glibc acceleration stack first')
     else:
-        apply_renderer(env, 'zink' if gpu else 'software')
+        apply_renderer(env, 'zink' if gpu and not (mali or mali_vulkan) else 'software')
     for key in tuple(env):
         if key.startswith(('LIBVA_', 'TERMUX_VA_')):
             env.pop(key, None)
@@ -304,6 +336,10 @@ def prepare(profile, command, abi, video_override):
             env[key] = value
     if video and profile != 'mpv':
         video_environment(env, selected, abi, config)
+        if abi == 'bionic' and env.get('TERMUX_VA_GPU_BACKEND') == 'sw':
+            # The private VA driver builds softpipe, not the system Mesa's LLVM
+            # renderer. Do not inherit the desktop's GALLIUM_DRIVER=llvmpipe.
+            env['GALLIUM_DRIVER'] = 'softpipe'
         if abi == 'bionic' and profile in ('chromium', 'ungoogled-chromium'):
             # ANGLE consumes exported surfaces through implicit DRM sync. The
             # MediaCodec/CPU producer needs an explicit completion boundary.
@@ -353,7 +389,12 @@ def prepare(profile, command, abi, video_override):
             if video and completion.is_file():
                 env['BIONILUX_EXTRA_PRELOAD'] = ':'.join(filter(None,
                     [str(completion), env.get('BIONILUX_EXTRA_PRELOAD')]))
-    argv = command_line(profile, command, abi, video, gpu)
+    if mali_vulkan:
+        # Last, so no earlier library path or ICD choice overrides it.
+        use_panvk(env, abi)
+    argv = command_line(profile, command, abi, video, gpu, mali=mali)
+    if mali:
+        argv[:0] = [sys.executable, str(Path(__file__).with_name('mali.py'))]
     if abi == 'glibc':
         argv.insert(0, str(PREFIX / 'bin/bionilux'))
     return argv, env

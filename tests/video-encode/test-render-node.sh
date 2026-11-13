@@ -58,7 +58,9 @@ expect pass test "$with_decode" = "vah264dec vah264enc vah265dec vah265enc "
 expect pass test "$without_decode" = "vah264enc vah265enc "
 
 echo; echo "=== GL is unchanged: Mesa's renderer on a private Xvfb"
-Xvfb :87 -nolisten tcp >"$out/xvfb.log" 2>&1 </dev/null &
+# Keep the private server alive between clients; its automatic reset can
+# crash after the first GLX connection closes.
+Xvfb :87 -noreset -nolisten tcp >"$out/xvfb.log" 2>&1 </dev/null &
 xvfb=$!
 for _ in $(seq 50); do [ -S "$PREFIX/tmp/.X11-unix/X87" ] && break; sleep 0.1; done
 DISPLAY=:87 same glxinfo sh -c 'glxinfo -B | grep -E "OpenGL (renderer|version|vendor)"'

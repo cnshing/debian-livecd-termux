@@ -99,12 +99,34 @@ Firefox then drains and recreates its encoder, and drains the empty replacement.
 FFmpeg's hardware encoder base dereferences `pic_end` when it is NULL in that
 case (`input_order == decode_delay == 0`). The RDD process dies, the flush fails,
 and the page receives only 59 of the 60 hardware packets. Revision 4 of the private
-Firefox runtime guards this timestamp adjustment. Both fixes are building in
+Firefox runtime guards this timestamp adjustment. Both fixes built successfully in
 [CI 43436860855](https://github.com/cnshing/debian-livecd-termux/actions/runs/43436860855),
 commit `ab84dd2`, on the same CI branch. The device regression
 `tests/video-encode/test-firefox-ffmpeg.py` loads the codec libraries locally and
-checks an empty drain for H.264, HEVC and VP9; run it on the new artifacts before
-another browser probe.
+checks an empty drain for H.264, HEVC and VP9. **All three pass on the new CI
+artifacts without the global-libdrm workaround.**
+
+On revision 4 plus driver revision 8, Firefox WebCodecs H.264 and VP9 both
+return **60 chunks, two key frames, and 60 decoded pictures**, with no encode or
+flush error and no RDD crash. Hardware sessions report 60 input units and 60 output
+packets each. The saved streams decode in standalone software with maximum channel
+error 2. Firefox's own decoder configuration still gives error 22 (16 of 60 pictures
+exceed 16). The tested HEVC configuration remains unsupported, without an encoder
+session. These are private runtime/profile tests; no installed preference changed.
+
+Firefox WebRTC also now reaches the Exynos H.264 encoder: 232 daemon units/packets,
+230 browser frames encoded and decoded, connected ICE. **Its received colour check
+fails**, so it is not accepted. VP9 uses software, encodes 198 and decodes 196 frames,
+and passes colours. The H.264 session requests `fps=450/1` despite an approximately
+30 fps canvas; investigate this rate metadata alongside colour propagation before
+claiming bitrate or latency qualification.
+
+Driver revision 8 passes the native discovery suite (compiler smoke skipped).
+An initial GLX comparison lost its Xvfb server to a segmentation fault after the
+first client's connection closed. The harness now uses `-noreset` to keep its private
+server alive between clients. With that change GLX and surfaceless EGL match with
+and without the preload, and the suite reports zero unexpected results. The live
+`:0` desktop and shared daemon remained running throughout.
 
 The saved 59 VP9 pictures decode correctly in standalone software FFmpeg, maximum
 RGB channel error **2**. Firefox's supplied decoder configuration instead gives
@@ -207,7 +229,7 @@ has AVC and HEVC only.
 | Chromium, WebCodecs `VideoEncoder` | not run | **crashes the GPU process** (Chromium CHECK) |
 | Google Chrome, WebRTC | not run | cannot connect: no network interfaces under Bionilux |
 | Google Chrome, WebCodecs | not run | same crash as Chromium |
-| Firefox | reported blocklisted (`VIDEO_ENCODING_MISSING`) before the probe fix; not rechecked | installed hardware encode fails; VP9 WebRTC software passes; private encoder build succeeds but Firefox VA display creation fails |
+| Firefox | reported blocklisted (`VIDEO_ENCODING_MISSING`) before the probe fix; not rechecked | installed hardware encode fails; VP9 WebRTC software passes; private revision 4 produces hardware H.264/VP9, but WebCodecs and WebRTC colour checks still fail |
 | MediaRecorder, any browser | not run | Firefox VP8 software output passes; hardware encode not accepted |
 
 **Browser hardware encoding is off by default everywhere.** No launcher passes
@@ -301,7 +323,8 @@ changing this preload, which is loaded into every desktop process.
    `tests/packaging/test-mali-acceleration.py` (that test currently asserts the flag is
    absent). Accept only when the WebCodecs probe either encodes or falls back without a GPU
    process crash, and the WebRTC loopback still passes.
-2. **Run Firefox.** It needs no flag: a page with WebCodecs `VideoEncoder`
+2. **Fix Firefox colour handling and qualify defaults.** Private revision 4 hardware
+   output and flush work, but the browser colour checks fail (above). Retest: a page with WebCodecs `VideoEncoder`
    (`hardwareAcceleration: 'prefer-hardware'`, `avc1.42001f`, `vp09.00.10.08`, `hvc1`),
    `MediaRecorder`, and a WebRTC loopback, with
    `MOZ_LOG=FFmpegVideo:5,PlatformEncoderModule:5`. Likely obstacles: the rate-control modes

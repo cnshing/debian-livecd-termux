@@ -1,14 +1,16 @@
 TERMUX_PKG_HOMEPAGE=https://www.mozilla.org/firefox
-TERMUX_PKG_DESCRIPTION="Firefox's KGSL graphics probe and private VA-API FFmpeg decoders for Android"
+TERMUX_PKG_DESCRIPTION="Firefox's KGSL and Mali graphics probe and private VA-API FFmpeg decoders for Android"
 TERMUX_PKG_LICENSE="LGPL-2.1, MPL-2.0"
 TERMUX_PKG_LICENSE_FILE="COPYING.LGPLv2.1"
 TERMUX_PKG_MAINTAINER="@cnshing"
 TERMUX_PKG_VERSION="9.0.2"
+TERMUX_PKG_REVISION=1
 TERMUX_PKG_SRCURL="https://codeload.github.com/FFmpeg/FFmpeg/tar.gz/refs/tags/n${TERMUX_PKG_VERSION}"
 TERMUX_PKG_SHA256=6e374ed621e48faa40639307dff48ba6fe574a509977956d2cce9669b7cc27e9
 TERMUX_PKG_AUTO_UPDATE=false
 TERMUX_PKG_EXCLUDED_ARCHES="arm, i686, x86_64"
-TERMUX_PKG_DEPENDS="firefox, android-vaapi, libc++, libdrm, libva, libx11, libxrandr, mesa"
+# Firefox on PanVK needs the VA driver's own Gallium variable and Zink's dma-buf fence fix.
+TERMUX_PKG_DEPENDS="firefox, android-vaapi (>= 27.0.0~devel20261029-4), libc++, libdrm, libva, libx11, libxrandr, mesa (>= 26.2.6-103)"
 TERMUX_PKG_BUILD_DEPENDS="libnspr"
 
 termux_step_post_get_source() {

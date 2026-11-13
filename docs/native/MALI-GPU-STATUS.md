@@ -134,7 +134,8 @@ In order of value. None of it needs a different driver.
 3. **Browser encoding.** WebRTC works in Chromium behind a feature flag; WebCodecs aborts the
    GPU process inside Chromium, so the flag stays off until our Chromium is patched
    ([ENCODING.md](ENCODING.md)). Chrome's WebRTC has no network under Bionilux. Firefox's
-   encoder is untested.
+   encoder is untested. [VIDEO-ENCODING-HANDOFF.md](VIDEO-ENCODING-HANDOFF.md) has the causes
+   and the order to take them in.
 4. **Ghostty on the GPU by default.** Needs the large-workgroup pass qualified beyond the tested
    shapes and packaged ([GHOSTTY-PANVK-HANDOFF.md](GHOSTTY-PANVK-HANDOFF.md)).
 5. **mpv on the shared driver**, replacing its VirGL route.

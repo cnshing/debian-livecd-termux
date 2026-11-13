@@ -191,6 +191,15 @@ static void sys_dir(char *buf) {
 // /sys/class/drm, and /sys/dev/char entries for major 226, come from the folder.
 static const char *redirect(const char *path, char *buf) {
     static const char *const roots[] = {"/sys/class/drm", "/sys/dev/char/226:"};
+    // Some Mali phones have no /dev/dri directory at all. Use the private
+    // sysfs directory as the backing directory; readdir still presents only
+    // the emulated render node below.
+    if (same(path, DRI) && available()) {
+        sys_dir(buf);
+        if (!buf[0]) return path;
+        strlcat(buf, "/class/drm", PATH_MAX);
+        return buf;
+    }
     if (!path || strncmp(path, "/sys/", 5)) return path;
     for (size_t i = 0; i < sizeof roots / sizeof *roots; i++) {
         size_t len = strlen(roots[i]);

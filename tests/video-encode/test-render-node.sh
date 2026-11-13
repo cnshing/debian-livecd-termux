@@ -69,7 +69,11 @@ same eglinfo-surfaceless sh -c 'eglinfo -B -p surfaceless 2>&1 | grep -E "OpenGL
 echo; echo "=== ordinary programs under the preload"
 expect pass with_preload bash -c 'ls -l /dev/dri && cat /sys/class/drm/renderD128/dev'
 expect pass with_preload python -c 'import json, sqlite3, ssl, subprocess; print(subprocess.run(["uname", "-m"], capture_output=True, text=True).stdout.strip())'
-expect pass with_preload sh -c 'clang --version | head -1'
+if command -v clang >/dev/null; then
+    expect pass with_preload sh -c 'clang --version | head -1'
+else
+    echo 'SKIP compiler smoke check: clang is not installed'
+fi
 bench='import os, time
 t = time.perf_counter()
 for _ in range(100000):

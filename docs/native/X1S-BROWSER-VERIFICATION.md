@@ -10,16 +10,20 @@ independently of the desktop renderer.
 | Capability | Native Chromium 156 | glibc Google Chrome |
 | --- | --- | --- |
 | GPU compositing, WebGL 1/2, WebGPU | enabled; captures and readback correct | same |
-| VP9 hardware playback | passes with android-vaapi revision 3 or later | decodes with the private glibc build; one compositor comparison below the SSIM threshold |
-| HEVC / H.264 playback | software fallback | software fallback |
+| VP9 hardware playback | passes with android-vaapi revision 3 or later | decodes with android-vaapi-glibc revision 1; one of four compositor comparisons below the SSIM threshold |
+| HEVC hardware playback | passes with android-vaapi revision 5 and the launcher of livecd-desktop 0.2.0-17 | passes with android-vaapi-glibc revision 1 and the same launcher |
+| H.264 playback | software (off by default on every phone) | software |
 | WebCodecs hardware encoding | GPU-process crash with the encoder feature enabled | same |
 | WebRTC H.264 / VP9 hardware loopback | works with the encoder feature enabled | no network interfaces / ICE candidates under Bionilux |
 
-Playback and encoding results above use private test launchers and drivers,
-except for the installed-launcher GPU rendering checks. The phone still had
-android-vaapi revision 2 at the 2026-11-12 continuation's inventory. Installing
-revision 4 and repeating VP9 through the installed `chromium-browser` remain
-required. Stop the desktop before replacing its globally preloaded library.
+The GPU rendering rows ran through the installed launchers. The playback rows
+ran on 2026-11-13 through the launcher code now on `main`, with the CI-built
+packages extracted privately and selected as the launcher's stack root: nothing
+was installed. The phone still has android-vaapi revision 2 and the previous
+android-vaapi-glibc. Installing the packages and repeating playback through the
+installed `chromium-browser` and `google-chrome` remains to be done. Stop the
+desktop before replacing android-vaapi: every desktop process preloads one of
+its libraries. The encoding rows are from the earlier private test launchers.
 
 ### Decode surfaces and completion
 
@@ -33,22 +37,36 @@ frames 12 and 36 correct at the browser and compositor layers.
 The glibc recipe now cross-builds the same pinned bridge and shared patches
 against a pinned Debian ARM64 sysroot. It installs the softpipe driver under
 `android-vaapi-glibc/mali` beside the prebuilt Turnip stack. The launcher selects
-that driver on Mali only. This package change still needs its CI build and
-installed-launcher device qualification; the existing private glibc build is
-the playback evidence, not a qualification of the new package.
+that driver on Mali only. It is built for X11 only: Mesa's Wayland code needs a
+wayland-scanner of exactly the sysroot's Wayland version, which the x86_64
+builder cannot run, and neither the VA frontend nor Chrome here uses Wayland.
+
+The package built in CI (run 43412205134) and was run on the phone from a
+private extraction through the launcher: Chrome decodes VP9 (192 units in, 192
+frames out of Android's VP9 decoder) and HEVC (193 units in, 190 frames out of
+`OMX.Exynos.hevc.dec`) on `VaapiVideoDecoder` with GPU compositing on PanVK, no
+GPU-process crash, two fullscreen cycles each. HEVC passes all four frame
+comparisons.
 
 Both browsers require `TERMUX_VA_SYNC_END_PICTURE=1`: removing that bounded
 completion wait exposes stale compositor frames. Exynos's HEVC decoder holds
 back as many pictures as the bridge's rebuilt SPS declares for reordering (3),
-so the bridge's 500 ms per-picture wait fails and the browser falls back to
-software. [X1S-FIREFOX-VIDEO.md](X1S-FIREFOX-VIDEO.md) has the cause and the
-`TERMUX_VA_HEVC_REORDER_PICS=0` fix Firefox uses; Chromium has not been run
-with it. The wait must remain until the bridge can handle delayed decoders
-without exposing stale pictures. Native Chromium passes VP9 only on Adreno too.
-H.264 and AV1 remain disabled by default in the VA profile.
+so that wait failed for every picture and the browser fell back to software
+([X1S-FIREFOX-VIDEO.md](X1S-FIREFOX-VIDEO.md) has the cause). The launcher now
+sets `TERMUX_VA_HEVC_REORDER_PICS=0` for every VA-API client on Mali, which
+makes the decoder return each picture as it is decoded. With it, native
+Chromium plays the HEVC fixture on `VaapiVideoDecoder`: 201 units into and 198
+frames out of `OMX.Exynos.hevc.dec`, none dropped, numbered frames 12 and 36
+correct at the browser and compositor layers over two fullscreen cycles. The
+same run without the variable ends in `vaEndPicture failed` and
+`FFmpegVideoDecoder`. Adreno keeps the bridge's default, so native Chromium
+still passes VP9 only there. H.264 and AV1 remain disabled by default in the
+VA profile.
 
-Chrome's private glibc VP9 run produces the correct frame numbers and colours,
-but a windowed compositor capture scores SSIM **0.8987**, below **0.90**.
+Chrome's VP9 run produces the correct frame numbers and colours, but the
+windowed compositor capture of frame 36 scores SSIM **0.8987**, below **0.90**,
+so that run fails acceptance. The packaged driver gives the same score as the
+earlier research build did. The other three comparisons pass (0.905 to 0.909).
 Software Chrome scores 0.921 in that comparison. Chroma upsampling in the
 ANGLE/Vulkan NV12 path is a hypothesis, not a demonstrated cause. Acceptance
 thresholds remain unchanged.

@@ -64,10 +64,16 @@ pipeline to defaults yet.
 Firefox's installed private FFmpeg was built with encoders disabled. Merely loading
 a full VAAPI FFmpeg still fails: Firefox submits I420 without a hardware frames
 context, while these encoders normally require VA surfaces. Revision 3 adds private
-VAAPI encoders and an I420-to-NV12 upload adapter; it is building in
+VAAPI encoders and an I420-to-NV12 upload adapter; it built successfully in
 [CI 43427375309](https://github.com/cnshing/debian-livecd-termux/actions/runs/43427375309)
-on the same CI branch. It still needs phone acceptance with a private
-`media.use-remote-encoder.video.platform=true` preference. No Firefox preference
+on the same CI branch. Private H.264 and VP9 WebCodecs runs with
+`media.use-remote-encoder.video.platform=true` still return `EncodingError` before
+any daemon encoder session. VP9 logs `Cannot open a VA display from DRM device
+(null)` after selecting render node 0. A private RDD-sandbox-disabled diagnostic
+returns the same failure; no sandbox setting has changed by default. A standalone
+ctypes probe initializes all three new encoders and their upload pools successfully,
+but this is not acceptance of frame encoding. Resolve Firefox VA display creation
+before proceeding to software-decode/pixel acceptance. No Firefox preference
 has changed by default. Firefox's installed WebRTC VP9 software loopback passed
 199 frames with correct colours; H.264 connected but produced no frames. Its VP8
 MediaRecorder output decoded in software to all four expected colour sections
@@ -167,7 +173,7 @@ has AVC and HEVC only.
 | Chromium, WebCodecs `VideoEncoder` | not run | **crashes the GPU process** (Chromium CHECK) |
 | Google Chrome, WebRTC | not run | cannot connect: no network interfaces under Bionilux |
 | Google Chrome, WebCodecs | not run | same crash as Chromium |
-| Firefox | reported blocklisted (`VIDEO_ENCODING_MISSING`) before the probe fix; not rechecked | installed hardware encode fails; VP9 WebRTC software passes; private encoder fix building |
+| Firefox | reported blocklisted (`VIDEO_ENCODING_MISSING`) before the probe fix; not rechecked | installed hardware encode fails; VP9 WebRTC software passes; private encoder build succeeds but Firefox VA display creation fails |
 | MediaRecorder, any browser | not run | Firefox VP8 software output passes; hardware encode not accepted |
 
 **Browser hardware encoding is off by default everywhere.** No launcher passes

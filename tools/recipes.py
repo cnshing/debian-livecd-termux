@@ -46,7 +46,11 @@ EXACT_DEPENDENCIES = {'chromium'}
 BEHAVIOUR_ONLY = {'mesa'}
 # Build-machine libraries that a recipe's own tools link when it is cross-compiled. They are installed
 # in the builder container before the build, since termux-packages refuses sudo inside a recipe.
-HOST_PACKAGES = {'lsp-plugins-lv2': ['libcairo2-dev', 'libsndfile1-dev']}
+HOST_PACKAGES = {'lsp-plugins-lv2': ['libcairo2-dev', 'libsndfile1-dev'],
+                 'android-vaapi-glibc': ['bison', 'flex', 'python3-mako', 'python3-yaml', 'python3-packaging']}
+# Both ABIs use the same pinned VA bridge patches and ION winsys. Staging retains
+# all sibling recipes; include shared source inputs in the glibc artifact's cache key.
+RECIPE_INPUTS = {'android-vaapi-glibc': {'android-vaapi'}}
 # CI reuses a set's packages while everything it is built from stays the same: its recipes, the builder
 # revision and the settings above. Bump this after changing how CI builds packages in some other way,
 # so that every set is built again.
@@ -94,6 +98,9 @@ def checked(names):
 
 def directory_hash(names):
     digest = hashlib.sha256()
+    names = set(names)
+    for name in tuple(names):
+        names.update(RECIPE_INPUTS.get(name, ()))
     for name in sorted(names):
         for path in sorted((PACKAGES / name).rglob('*')):
             # Tests import some recipes' Python, and the bytecode they leave records when that happened.

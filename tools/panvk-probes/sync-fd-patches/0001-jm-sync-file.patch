@@ -1,0 +1,241 @@
+diff --git a/src/panfrost/lib/kmod/kbase_kmod.c b/src/panfrost/lib/kmod/kbase_kmod.c
+index aad56a3..d758ef6 100644
+--- a/src/panfrost/lib/kmod/kbase_kmod.c
++++ b/src/panfrost/lib/kmod/kbase_kmod.c
+@@ -1,5 +1,6 @@
+ /*
+  * Copyright © 2026 Collabora, Ltd.
++ * Copyright 2026 XclipseTools
+  * SPDX-License-Identifier: MIT
+  *
+  * kmod backend for the ARM Mali kbase kernel driver (/dev/mali*).
+@@ -3860,6 +3861,21 @@ kbase_kmod_job_submit_dep(struct pan_kmod_dev *dev, uint64_t jc,
+    return atom.atom_number;
+ }
+ 
++int
++kbase_kmod_jm_export_fence(struct pan_kmod_dev *dev, uint64_t dep0,
++                           uint64_t dep1)
++{
++   struct { int fd; int stream_fd; } fence = {-1, -1};
++   uint64_t atom = kbase_kmod_job_submit_dep(dev, (uintptr_t)&fence,
++      0x202, NULL, 0, dep0, 1, dep1, 1, true);
++   if (!atom || fence.fd < 0) {
++      if (fence.fd >= 0)
++         close(fence.fd);
++      return -1;
++   }
++   return fence.fd;
++}
++
+ void
+ kbase_kmod_atom_release(struct pan_kmod_dev *dev, uint64_t atom_num)
+ {
+diff --git a/src/panfrost/lib/kmod/kbase_kmod.h b/src/panfrost/lib/kmod/kbase_kmod.h
+index 223a2cf..aaf2491 100644
+--- a/src/panfrost/lib/kmod/kbase_kmod.h
++++ b/src/panfrost/lib/kmod/kbase_kmod.h
+@@ -39,6 +39,9 @@ uint64_t kbase_kmod_job_submit(struct pan_kmod_dev *dev, uint64_t jc,
+                               uint32_t nbo,
+                               struct base_external_resource *ext_res,
+                               uint32_t next_res);
++int kbase_kmod_jm_export_fence(struct pan_kmod_dev *dev, uint64_t dep0,
++                              uint64_t dep1);
++
+ uint64_t kbase_kmod_job_submit_dep(struct pan_kmod_dev *dev, uint64_t jc,
+                                   uint32_t core_req, struct pan_kmod_bo **bos,
+                                   uint32_t nbo, uint64_t dep0, uint8_t dep0_type,
+diff --git a/src/panfrost/vulkan/jm/panvk_vX_gpu_queue.c b/src/panfrost/vulkan/jm/panvk_vX_gpu_queue.c
+index 6b50d5c..d78a4a3 100644
+--- a/src/panfrost/vulkan/jm/panvk_vX_gpu_queue.c
++++ b/src/panfrost/vulkan/jm/panvk_vX_gpu_queue.c
+@@ -541,10 +541,28 @@ panvk_per_arch(gpu_queue_submit)(struct vk_queue *vk_queue, struct vk_queue_subm
+    panvk_kbase_sync_set_pending(queue->sync, dev->kmod.dev,
+                                 panvk_jm_kbase_wait_atoms, targets, NULL);
+ 
++   int signal_fd = -1;
++#if PAN_ARCH == 9
++   if (submit->signal_count && (queue->last_submitted_atom || ntargets)) {
++      signal_fd = kbase_kmod_jm_export_fence(dev->kmod.dev,
++         queue->last_submitted_atom, ntargets ? targets[ntargets - 1] : 0);
++      if (signal_fd < 0)
++         return vk_error(&dev->vk, VK_ERROR_DEVICE_LOST);
++   }
++#endif
+    for (unsigned i = 0; i < submit->signal_count; i++) {
+       panvk_kbase_sync_set_pending(submit->signals[i].sync, dev->kmod.dev,
+                                    panvk_jm_kbase_wait_atoms, targets, NULL);
++#if PAN_ARCH == 9
++      VkResult result = panvk_kbase_sync_set_file(&dev->vk,
++         submit->signals[i].sync, signal_fd);
++      if (result != VK_SUCCESS) {
++         if (signal_fd >= 0) close(signal_fd);
++         return result;
++      }
++#endif
+    }
++   if (signal_fd >= 0) close(signal_fd);
+ 
+    /* PANVK_GPU_STATS: JM chains have no cheap GPU timestamps (they need
+     * PERMON and write jobs), so the busy time is the CPU-observed time with
+diff --git a/src/panfrost/vulkan/panvk_physical_device.c b/src/panfrost/vulkan/panvk_physical_device.c
+index 06c661e..2ee9718 100644
+--- a/src/panfrost/vulkan/panvk_physical_device.c
++++ b/src/panfrost/vulkan/panvk_physical_device.c
+@@ -667,6 +667,7 @@ struct kbase_cpu_sync {
+    struct u_cnd_monotonic cond;
+    enum kbase_cpu_sync_state state;
+    VkResult result;
++   int export_fd;
+    void *pending_data;
+    panvk_kbase_sync_wait_func pending_wait;
+    uint64_t targets[PANVK_KBASE_SYNC_TARGET_COUNT];
+@@ -688,6 +689,7 @@ kbase_cpu_sync_init(struct vk_device *device, struct vk_sync *sync,
+       return vk_errorf(device, VK_ERROR_UNKNOWN, "cnd_init failed");
+    }
+ 
++   ks->export_fd = -1;
+    ks->state = initial_value ? KBASE_CPU_SYNC_SIGNALED : KBASE_CPU_SYNC_RESET;
+    ks->result = VK_SUCCESS;
+    ks->pending_data = NULL;
+@@ -705,6 +707,7 @@ kbase_cpu_sync_finish(UNUSED struct vk_device *device, struct vk_sync *sync)
+ {
+    struct kbase_cpu_sync *ks = container_of(sync, struct kbase_cpu_sync, sync);
+    kbase_sync_file_waiter_free(ks);
++   if (ks->export_fd >= 0) close(ks->export_fd);
+    u_cnd_monotonic_destroy(&ks->cond);
+    mtx_destroy(&ks->mutex);
+ }
+@@ -715,6 +718,9 @@ kbase_cpu_sync_signal(UNUSED struct vk_device *device, struct vk_sync *sync,
+ {
+    struct kbase_cpu_sync *ks = container_of(sync, struct kbase_cpu_sync, sync);
+    mtx_lock(&ks->mutex);
++   kbase_sync_file_waiter_free(ks);
++   if (ks->export_fd >= 0) close(ks->export_fd);
++   ks->export_fd = -1;
+    ks->state = KBASE_CPU_SYNC_SIGNALED;
+    ks->result = VK_SUCCESS;
+    ks->pending_data = NULL;
+@@ -730,6 +736,9 @@ kbase_cpu_sync_reset(UNUSED struct vk_device *device, struct vk_sync *sync)
+    struct kbase_cpu_sync *ks = container_of(sync, struct kbase_cpu_sync, sync);
+    mtx_lock(&ks->mutex);
+    assert(ks->state != KBASE_CPU_SYNC_WAITING);
++   kbase_sync_file_waiter_free(ks);
++   if (ks->export_fd >= 0) close(ks->export_fd);
++   ks->export_fd = -1;
+    ks->state = KBASE_CPU_SYNC_RESET;
+    ks->result = VK_SUCCESS;
+    ks->pending_data = NULL;
+@@ -761,6 +770,9 @@ panvk_kbase_sync_set_pending(
+     * (e.g. a reused WSI semaphore that was CPU-waited) is legal.  Only an
+     * in-progress wait on the old payload would be a genuine bug. */
+    assert(ks->state != KBASE_CPU_SYNC_WAITING);
++   kbase_sync_file_waiter_free(ks);
++   if (ks->export_fd >= 0) close(ks->export_fd);
++   ks->export_fd = -1;
+    ks->pending_data = data;
+    ks->pending_wait = wait;
+    memcpy(ks->targets, targets, sizeof(ks->targets));
+@@ -774,6 +786,21 @@ panvk_kbase_sync_set_pending(
+    mtx_unlock(&ks->mutex);
+ }
+ 
++VkResult
++panvk_kbase_sync_set_file(struct vk_device *device, struct vk_sync *sync,
++                          int fd)
++{
++   struct kbase_cpu_sync *ks = container_of(sync, struct kbase_cpu_sync, sync);
++   int copy = fd < 0 ? -1 : dup(fd);
++   if (fd >= 0 && copy < 0)
++      return vk_errorf(device, VK_ERROR_TOO_MANY_OBJECTS, "dup fence failed: %m");
++   mtx_lock(&ks->mutex);
++   if (ks->export_fd >= 0) close(ks->export_fd);
++   ks->export_fd = copy;
++   mtx_unlock(&ks->mutex);
++   return VK_SUCCESS;
++}
++
+ bool
+ panvk_kbase_sync_peek(struct vk_sync *sync, void **data,
+                       uint64_t targets[PANVK_KBASE_SYNC_TARGET_COUNT])
+@@ -871,6 +898,7 @@ kbase_cpu_sync_wait_one(struct vk_device *device, struct kbase_cpu_sync *ks,
+ 
+          mtx_lock(&ks->mutex);
+          if (result == VK_SUCCESS) {
++            kbase_sync_file_waiter_free(ks);
+             ks->state = KBASE_CPU_SYNC_SIGNALED;
+             ks->pending_data = NULL;
+             ks->pending_wait = NULL;
+@@ -964,6 +992,10 @@ kbase_cpu_sync_move(UNUSED struct vk_device *device, struct vk_sync *dst,
+    assert(ks_src->state != KBASE_CPU_SYNC_WAITING);
+    assert(ks_dst->state != KBASE_CPU_SYNC_WAITING);
+ 
++   kbase_sync_file_waiter_free(ks_dst);
++   if (ks_dst->export_fd >= 0) close(ks_dst->export_fd);
++   ks_dst->export_fd = ks_src->export_fd;
++   ks_src->export_fd = -1;
+    ks_dst->state = ks_src->state;
+    ks_dst->result = ks_src->result;
+    ks_dst->pending_data = ks_src->pending_data;
+@@ -1047,6 +1079,9 @@ kbase_cpu_sync_import_sync_file(struct vk_device *device,
+ {
+    struct kbase_cpu_sync *ks = container_of(sync, struct kbase_cpu_sync, sync);
+ 
++   if (sync_file == -1)
++      return kbase_cpu_sync_signal(device, sync, 0);
++
+    if (sync_file < 0) {
+       return vk_errorf(device, VK_ERROR_INVALID_EXTERNAL_HANDLE,
+                        "Invalid sync_file fd: %d", sync_file);
+@@ -1093,6 +1128,12 @@ kbase_cpu_sync_export_sync_file(struct vk_device *device,
+       return result;
+ 
+    mtx_lock(&ks->mutex);
++   if (pan_arch(dev->kmod.dev->props.gpu_id) == 9 &&
++       ks->export_fd >= 0) {
++      fd = dup(ks->export_fd);
++      mtx_unlock(&ks->mutex);
++      goto out;
++   }
+    if (ks->state == KBASE_CPU_SYNC_PENDING ||
+        ks->state == KBASE_CPU_SYNC_WAITING) {
+       if (ks->pending_wait == kbase_sync_file_wait_func) {
+@@ -1122,6 +1163,15 @@ kbase_cpu_sync_export_sync_file(struct vk_device *device,
+       count = 0;
+    }
+ 
++   if (pan_arch(dev->kmod.dev->props.gpu_id) == 9) {
++      result = kbase_cpu_sync_wait_one(device, ks, VK_SYNC_WAIT_COMPLETE,
++                                       UINT64_MAX);
++      if (result != VK_SUCCESS)
++         return result;
++      *sync_file = -1;
++      return VK_SUCCESS;
++   }
++
+    fd = kbase_kmod_csf_export_cqs64_fence(dev->kmod.dev, addrs, vals,
+                                           count);
+ 
+@@ -1170,7 +1220,7 @@ get_device_sync_types_kbase(struct panvk_physical_device *device,
+    uint32_t sync_type_count = 0;
+ 
+    device->drm_syncobj_type = kbase_cpu_sync_type;
+-   if (pan_arch(device->kmod.dev->props.gpu_id) < 10)
++   if (pan_arch(device->kmod.dev->props.gpu_id) < 9)
+       device->drm_syncobj_type.export_sync_file = NULL;
+ 
+    /* Binary CPU sync first (fences need a binary type with CPU_RESET),
+diff --git a/src/panfrost/vulkan/panvk_physical_device.h b/src/panfrost/vulkan/panvk_physical_device.h
+index fd102fa..4700368 100644
+--- a/src/panfrost/vulkan/panvk_physical_device.h
++++ b/src/panfrost/vulkan/panvk_physical_device.h
+@@ -122,6 +122,9 @@ typedef VkResult (*panvk_kbase_sync_wait_func)(
+    const uint64_t targets[PANVK_KBASE_SYNC_TARGET_COUNT],
+    uint64_t abs_timeout_ns);
+ 
++VkResult panvk_kbase_sync_set_file(struct vk_device *device,
++                                   struct vk_sync *sync, int fd);
++
+ void panvk_kbase_sync_set_pending(
+    struct vk_sync *sync, void *data, panvk_kbase_sync_wait_func wait,
+    const uint64_t targets[PANVK_KBASE_SYNC_TARGET_COUNT],

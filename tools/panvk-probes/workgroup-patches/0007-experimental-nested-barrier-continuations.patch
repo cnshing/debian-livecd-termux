@@ -40,10 +40,10 @@ index 17d23dd..fe23146 100644
  
     unsigned char blake3[BLAKE3_KEY_LEN];
 diff --git a/src/panfrost/vulkan/panvk_vX_shader.c b/src/panfrost/vulkan/panvk_vX_shader.c
-index cc9461b..9df5732 100644
+index cc9461b..2cc6b92 100644
 --- a/src/panfrost/vulkan/panvk_vX_shader.c
 +++ b/src/panfrost/vulkan/panvk_vX_shader.c
-@@ -819,6 +819,165 @@ lwg_rewrite_ids(nir_builder *b, nir_function_impl *impl, nir_def *lin,
+@@ -819,6 +819,182 @@ lwg_rewrite_ids(nir_builder *b, nir_function_impl *impl, nir_def *lin,
     }
  }
  
@@ -76,9 +76,11 @@ index cc9461b..9df5732 100644
 +   };
 +   nir_shader **resumes = NULL;
 +   uint32_t num_resumes = 0;
++   mesa_logi("lwg7: splitting nested barriers");
 +   if (!nir_lower_shader_calls(nir, &options, &resumes, &num_resumes, nir))
 +      return false;
 +
++   mesa_logi("lwg7: split %u resumes", num_resumes);
 +   nir_shader **regions = calloc(num_resumes + 1, sizeof(*regions));
 +   regions[0] = nir_shader_clone(nir, nir);
 +   unsigned stride = nir->scratch_size;
@@ -107,6 +109,7 @@ index cc9461b..9df5732 100644
 +      nir_def *entry = nir_load_var(&b, states[c]);
 +      nir_store_var(&b, states[c], nir_imm_int(&b, -1), 1);
 +      for (unsigned r = 0; r <= num_resumes; r++) {
++         mesa_logi("lwg7: cloning copy=%u region=%u", c, r);
 +         nir_push_if(&b, nir_ieq_imm(&b, entry, r));
 +         nir_shader *region = nir_shader_clone(nir, regions[r]);
 +         nir_function_impl *ri = nir_shader_get_entrypoint(region);
@@ -151,9 +154,6 @@ index cc9461b..9df5732 100644
 +            }
 +         }
 +         nir_lower_returns_impl(ri);
-+         nir_cf_list body;
-+         nir_cf_extract(&body, nir_before_impl(ri), nir_after_impl(ri));
-+         body.impl = impl;
 +         struct hash_table *map = _mesa_pointer_hash_table_create(NULL);
 +         struct exec_node *original = exec_list_get_head(&nir->variables);
 +         nir_foreach_variable_in_shader(var, region) {
@@ -171,6 +171,22 @@ index cc9461b..9df5732 100644
 +               _mesa_hash_table_insert(map, var, copy);
 +            }
 +         }
++         nir_foreach_block(block, ri) {
++            nir_foreach_instr(instr, block) {
++               if (instr->type != nir_instr_type_deref)
++                  continue;
++               nir_deref_instr *deref = nir_instr_as_deref(instr);
++               if (deref->deref_type == nir_deref_type_var &&
++                   nir_variable_is_global(deref->var)) {
++                  struct hash_entry *mapped = _mesa_hash_table_search(map, deref->var);
++                  assert(mapped);
++                  deref->var = mapped->data;
++               }
++            }
++         }
++         nir_cf_list body;
++         nir_cf_extract(&body, nir_before_impl(ri), nir_after_impl(ri));
++         body.impl = impl;
 +         nir_cf_list copy;
 +         nir_cf_list_clone(&copy, &body, &impl->cf_node, map);
 +         b.cursor = nir_cf_reinsert(&copy, b.cursor);
@@ -192,6 +208,7 @@ index cc9461b..9df5732 100644
 +                               nir_var_image | nir_var_mem_global);
 +   nir_pop_loop(&b, NULL);
 +
++   mesa_logi("lwg7: validating scheduler");
 +   nir->scratch_size = stride * k;
 +   nir->info.workgroup_size[0] = h;
 +   nir->info.workgroup_size[1] = 1;
@@ -209,7 +226,7 @@ index cc9461b..9df5732 100644
  static bool
  panvk_lower_large_workgroup(nir_shader *nir, unsigned max_hw)
  {
-@@ -861,20 +1020,26 @@ panvk_lower_large_workgroup(nir_shader *nir, unsigned max_hw)
+@@ -861,20 +1037,26 @@ panvk_lower_large_workgroup(nir_shader *nir, unsigned max_hw)
      * hardware subgroup/invocation layout. */
     struct util_dynarray barriers;
     util_dynarray_init(&barriers, NULL);

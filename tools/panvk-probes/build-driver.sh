@@ -102,6 +102,13 @@ else
   # dependencies are supplied privately beside it or via BIONILUX_LIBRARY_PATH.
   patchelf --set-rpath '$ORIGIN' "$out/patched/libvulkan_panfrost.so"
 fi
+if [ "${PANVK_KEEP_SYMBOLS:-0}" = 1 ]; then
+  case "$kind" in
+    android) symbol_file=$(find "$zenith/build/android-ci" -name libvulkan_panfrost.so -print -quit) ;;
+    glibc) symbol_file="$zenith/build/glibc-ci/src/panfrost/vulkan/libvulkan_panfrost.so" ;;
+  esac
+  install -Dm644 "$symbol_file" "$out/patched/symbols/libvulkan_panfrost.so"
+fi
 {
   echo "mesa-commit=$(git -C "$mesa" rev-parse HEAD)"
   echo "mesa-tree=$(git -C "$mesa" rev-parse HEAD^{tree})"

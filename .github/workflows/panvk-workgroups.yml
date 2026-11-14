@@ -78,6 +78,7 @@ jobs:
     - name: Build ICD in CI
       env:
         PANVK_DRIVER_PATCH_DIR: ${{ github.workspace }}/tools/panvk-probes/workgroup-patches
+        PANVK_KEEP_SYMBOLS: 1
       run: bash tools/panvk-probes/build-driver.sh '${{ matrix.kind }}' zenith out
     - uses: actions/checkout@v4
       with:

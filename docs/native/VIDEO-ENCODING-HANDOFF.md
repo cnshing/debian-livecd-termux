@@ -18,8 +18,16 @@ It selects both `kShmem` and CPU frame preparation; its Chromium regression test
 covers ordinary CPU and mappable shared-image frames. The patch applies to the
 prepared source, but that C++ regression test has not been compiled or run.
 
-The patched browser is building in [Packages CI run 43421748237](https://github.com/cnshing/debian-livecd-termux/actions/runs/43421748237)
-on the single CI branch `fix/chromium-webcodecs-shmem`. The S20 still has revision 1.
+[Packages CI run 43421748237](https://github.com/cnshing/debian-livecd-termux/actions/runs/43421748237)
+hit its six-hour job limit at 28,875/28,941 Ninja actions, without a compiler error.
+The adapter compiled for both host and target; its regression test remains unrun.
+Host tools consumed about 1¾ hours of that job. A dependency-only bootstrap,
+[run 43538498322](https://github.com/cnshing/debian-livecd-termux/actions/runs/43538498322),
+now builds and uploads the exact dependency packages, then automatically dispatches
+the normal Chromium build with a fresh six-hour window. The browser job reuses
+matching dependency artifacts from the same single CI branch,
+`fix/chromium-webcodecs-shmem`; build flags are unchanged. The bootstrap does not
+publish an apt repository or a Chromium artifact. The S20 still has revision 1.
 A fresh isolated baseline on its installed stack passed H.264 (283 browser frames,
 285 daemon packets) and VP9 (280 browser frames, 282 daemon packets), with correct
 received colours and no GPU crash. The daemon names Exynos hardware encoders for
@@ -141,6 +149,41 @@ it by loosening pixel checks or changing the page's decoder configuration.
 Evidence is in `firefox3-followup-logs.tgz` (logs/results, no browser profiles),
 `firefox3-vp9-chunks.json`, and `firefox3-vp9-matrix.txt` under the local acceptance
 directory. The diagnostic scripts and source copies are retained there too.
+
+### Explicit BT.709 input control
+
+A further private revision 4/driver 8 diagnostic constructs limited-range I420
+frames with BT.709 coefficients and explicit `VideoFrame.colorSpace` metadata.
+H.264 and VP9 each produce **60 chunks, two key frames, and 60 browser-decoded
+pictures**, with clean flush and no encoder error. Browser maximum channel error
+is 12, with zero pictures above 16. Each Exynos session reports 60 inputs and 60
+packets. Standalone software decode forced to BT.709 gives maximum error 2;
+default/BT.601 interpretation gives 21 (17 pictures above 16). Together with the
+canvas results above, this demonstrates that the hardware preserves the two input
+matrices while output signalling remains insufficient. This control is not
+acceptance of ordinary canvas input or WebRTC.
+
+The reusable [WebCodecs phone probe](../../tests/video-encode/webcodecs.html)
+accepts `codec=avc1.42001f` or `vp09.00.10.08` and `input=canvas` or `bt709` in its
+query string. Serve on localhost/HTTPS through a private browser session; inspect
+`window.RESULT` and confirm hardware use in the private daemon log. The committed probe was also exercised on the phone with VP9/BT.709: 60 chunks,
+60 decoded pictures, clean flush, maximum error 12. Optional
+`save=1` posts chunks to `/chunks` for independent software decoding. Preserve the
+canvas case as the acceptance gate rather than replacing it with this control.
+
+The anomalous WebRTC rate originates before FFmpeg/VA: the existing Mozilla log
+already says `Request platform encoder ... frameRate=450`.
+[`WebrtcMediaDataEncoder::CreateEncoder`](https://github.com/mozilla-firefox/firefox/blob/28b7a7bffb5f82828143d9ad63839ad263b598be/dom/media/webrtc/libwebrtcglue/WebrtcMediaDataEncoderCodec.cpp#L258)
+passes `VideoCodec::maxFramerate` directly into `EncoderConfig`, and
+`FFmpegVideoEncoder` copies that value to `AVCodecContext::framerate`. Investigate
+the upstream WebRTC rate configuration; clamping it in the driver would conceal
+the source and mishandle legitimate high-rate callers.
+
+Evidence: `firefox4-bt709-{avc,vp9}-run.txt`, private daemon logs, saved chunks and
+software-decode results in the local acceptance directory; `firefox4-bt709-logs.tgz`
+contains the results, daemon logs and chunks (gzip integrity checked). LAN SSH on port 8022
+remains available when wireless ADB discovery disappears; verify the saved x1s
+host key before connecting.
 
 ### Exynos kernel lead
 

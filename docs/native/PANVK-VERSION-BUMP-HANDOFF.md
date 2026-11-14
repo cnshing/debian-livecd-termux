@@ -76,8 +76,10 @@ It additionally requires `PANVK_G77_NESTED=1`. New probes cover dynamic loops,
 uniform branches, break/continue, private values live across barriers and a
 769-invocation shape. The first pipeline-creation-only control crashed in the
 compiler **before dispatch**. A region/global-variable ownership fix and symbols
-are in revision `71e7a6f`, building in
+are in revision `71e7a6f`, successfully built in
 [run 43560105312](https://github.com/cnshing/debian-livecd-termux/actions/runs/43560105312).
+The Android binary SHA-256 is
+`9a0d3fb9e89a4f4dbee17242a8f133f6156ddd0d05927e6340e8916c1e22805b`.
 Do not dispatch this prototype until its compile-only control succeeds. Do not
 promote it on the basis of a successful build alone.
 
@@ -88,8 +90,14 @@ absolute, versioned EGL/GLES libraries; overriding `libEGL.so` globally breaks
 Android's `libgui` dependency before CTS starts. `PLATFORM.patch` records the
 platform-only changes, and `BUILD.txt` records the source/build identity.
 [Run 43559427755](https://github.com/cnshing/debian-livecd-termux/actions/runs/43559427755)
-has produced the corrected GLES executable; Vulkan is still building. No CTS
-device result is claimed yet. These targeted command-line runs are qualification
+successfully produced both corrected executables. Their SHA-256 identities are:
+
+| Executable | SHA-256 |
+| --- | --- |
+| `deqp-vk` | `bbfcfef3c5daac858efc9f310f833df96051ea84fb5be1de8f76addacca36d2b` |
+| `deqp-gles31` | `019cb7fc277ac29f159309fa20f1dfa4f3c10b46985ad2052911123dafee7b89` |
+
+No CTS device result is claimed yet. These targeted command-line runs are qualification
 evidence, not a formal Khronos conformance submission.
 
 `tools/panvk-probes/cts/run.py` lists the requested cases and executes one at a
@@ -116,6 +124,32 @@ Run the release/source-baseline controls first, then matched opt-in subsets.
 For Vulkan, select `dEQP-VK.api.info.*`, `dEQP-VK.info.*`, then
 `dEQP-VK.compute.*`. Preserve failures for diagnosis before another run; a partial
 chunk is incomplete, even when every executed case passed.
+
+### Compile control and register statistics
+
+[Probe-only build 43561130311](https://github.com/cnshing/debian-livecd-termux/actions/runs/43561130311)
+passes the Android C build with warnings treated as errors and validates every
+SPIR-V probe. Future probe changes can use the workflow's `probes_only=true`
+input to avoid rebuilding the driver. Set `PANVK_PROBE_STATS=1` to enable
+`VK_KHR_pipeline_executable_properties` and capture all compiler statistics.
+`compile` is an explicit success-without-dispatch mode, distinct from `reject`,
+which requires `VK_ERROR_FEATURE_NOT_PRESENT`:
+
+```sh
+PANVK_G77_LWG=1 PANVK_G77_NESTED=1 PANVK_PROBE_STATS=1 \
+  MESA_SHADER_CACHE_DISABLE=true timeout -k 5 30 \
+  <new-probes/check> <nested-driver.so> <nested.spv> 1024 1 1 compile
+```
+
+Run this once before any nested dispatch; preserve its log and diagnose any
+compiler error first. Once compilation succeeds, use the research branch's
+matching `run.py --nested` and nested SPIR-V probes for CPU-checked dispatches.
+Capture statistics for identical 128/256/512-invocation shaders with the release,
+patched opt-out and patched opt-in modes, then compare the 769/1024 and nested
+cases. Record registers, spills/fills, scratch and instruction counts exposed
+by the driver. Statistics capture and the success control have built in CI but
+have not yet run on the device. Static counts alone do not measure throughput
+or close the register-pressure qualification gate.
 
 ## Desktop qualification still required
 

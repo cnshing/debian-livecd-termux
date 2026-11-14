@@ -18,7 +18,7 @@ int main(int argc, char **argv)
    if (strcmp(argv[6], "run") && strcmp(argv[6], "compile") &&
        strcmp(argv[6], "reject") && strcmp(argv[6], "skip") &&
        strcmp(argv[6], "run-nested") && strcmp(argv[6], "run-nested-if") &&
-       strcmp(argv[6], "run-nested-control")) return 2;
+       strcmp(argv[6], "run-nested-control") && strcmp(argv[6], "run-nested-prime")) return 2;
    const int capture_stats = getenv("PANVK_PROBE_STATS") && !strcmp(getenv("PANVK_PROBE_STATS"), "1");
    unsigned x = strtoul(argv[3], NULL, 10), y = strtoul(argv[4], NULL, 10);
    unsigned z = strtoul(argv[5], NULL, 10), n = x * y * z;

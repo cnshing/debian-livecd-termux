@@ -1,0 +1,24 @@
+{
+  "format": 1,
+  "variant": "sync-fd",
+  "release": "https://github.com/cnshing/debian-livecd-termux/releases/download/panvk-sync-fd-26.3.1-1",
+  "build_run": "https://github.com/cnshing/debian-livecd-termux/actions/runs/43543360366",
+  "build_commit": "568fa16a2d0ea1bc5e95ca165e90c135db48ea3b",
+  "zenith_commit": "cf70e02b918e1864cbcd746a7fefa57b96c673ce",
+  "mesa_base": "5a07217f034b3e50d8c7c7794f97a2df1742613b",
+  "base_tree": "4a8e9a8cbb34b9fb91a9ad2040319aceb075b973",
+  "mesa_tree": "82cfe30d18230650c9d38135353462092601e97d",
+  "patch_level": "p0175",
+  "driver_patches": [
+    {
+      "file": "0001-jm-sync-file.patch",
+      "sha256": "afa2da033e819dd9c771f8761a0eb2c02ce58e5944305d9e1e9ca867e4d9cfd3"
+    }
+  ],
+  "glibc_postprocess": "patchelf --set-rpath $ORIGIN",
+  "source_archive": "prepared-source.tar.zst",
+  "source_archive_kind": "unpatched p0175 tree; apply driver_patches in order to obtain mesa_tree",
+  "source_sha256": "36af384255709374da9c983d418e60c1a830307daa5135ca335a09c2c953b3a0",
+  "bionic_sha256": "9110264db9e497b4eeaa80fe9763537bc21d514b24796be690e41da34cd5b428",
+  "glibc_sha256": "1576ba28e48be9c09d716838cfeeb2d67c9fd9553ceecc554606ba7dcc51c90f"
+}

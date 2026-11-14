@@ -6,7 +6,7 @@ files that Git ignores.
 
 ## Port in progress (2026-11-13)
 
-The package still uses the upstream release. The independent port is
+The normal package still uses the upstream release. The independent port is
 `tools/panvk-probes/sync-fd-patches/0001-jm-sync-file.patch`, built for Bionic
 and arm64 glibc by `panvk-sync-fd.yml` directly on the reconstructed p0175
 baseline. It excludes the two patches that regressed GTK presentation.
@@ -77,12 +77,66 @@ Host evidence: `/home/cs/debian-livecd-termux-sync-fd/temp/sync-fd/`; phone:
 `~/gpu-x1s/sync-fd-port/`. The stronger probe is from CI 43544161945, adding
 an empty submission before any GPU work to the earlier CPU-deadline probe.
 
-**Ghostty DMA-BUF presentation and package promotion remain pending.**
-The separate large-workgroup and GTK renderer limitations below still apply.
-The workgroup-combined private variant is building in
+### Direct dma-buf control and the GTK gate
+
+`tools/panvk-probes/dmabuf-readback.py` bypasses GTK. It clears a GLES3 RGBA8
+texture, exports a real dma-buf, maps it with DMA_BUF_IOCTL_SYNC START/END,
+and checks every pixel without `glFinish` or `glReadPixels`. With the independent
+SYNC_FD ICD and Mesa 104, **30/30 frames and 7,864,320 pixel checks pass**, also
+on a repeat run. With exactly the same ICD, both Mesa 102 and the installed
+Mesa 103 fail at frame 0, row 0. These are the without-wait controls: the
+semaphore port alone does not make exported pixels safe. This constant-color
+probe accepts one plane with linear or implicit modifier and does not qualify
+all layouts or consumers.
+
+The combined workgroup variant also passed
 [CI 43544398129](https://github.com/cnshing/debian-livecd-termux/actions/runs/43544398129).
-Ghostty needs the actual DMA-BUF path and the without-wait control checked;
-ordinary desktop success does not establish either.
+Its Android SHA-256 is
+`4df8da7f3d387d0c1c36970cb95a348d6b35e8bb0742ab290767280a5bdde718`,
+content tree `0978323390ae641ba0a79405ba2cb4414153ff4a`. This build includes the
+original four workgroup patches at commit 5934638, rather than the subsequent
+partial-workgroup/cache follow-up. Caching was disabled and `PANVK_G77_LWG=1`
+was explicit. Ghostty and GTK each pass four fresh terminal/color captures,
+stale-frame rejection, isolation and normal exit. **Ghostty still uses CPU
+readback presentation.** Its log first advertises native fences and GL 4.6,
+then says:
+
+```text
+failed to build dmabuf err=dmabuf support disabled at compile-time.
+failed to import dmabuf, asking renderer for CPU presentation
+```
+
+The error originates in GTK's `gdk_dmabuf_texture_new_from_builder`, not in
+Ghostty's export code. Termux's pinned
+[`gtk4/meson.build.patch`](https://github.com/termux/termux-packages/blob/538685c906074926fd19650e38c6dad91379eb0f/x11-packages/gtk4/meson.build.patch)
+explicitly sets `HAVE_DMABUF` and `HAVE_UDMABUF` to false. GTK's Cairo rendering
+therefore does **not** establish an accepted mapped dma-buf path here.
+`check-ghostty-panvk.py` now reports the CPU fallback and its optional
+`--reject-cpu-fallback` correctly rejects this run. Absence of that warning by
+itself would still not establish successful DMA-BUF presentation.
+
+The next Ghostty gate is a privately built GTK with DMA-BUF support, first
+through Cairo/mmap, then the separately failing GL renderer. Keep udmabuf and
+global launcher defaults unchanged while testing it. The direct EGL control
+above already establishes why Mesa patch 0024 is necessary on this kernel.
+
+### Package candidate
+
+`mesa-vulkan-icd-panvk-kbase-sync-fd` reuses the shared source-package support
+and installs the **independent** tested pair under `$PREFIX/lib/panvk-kbase-sync-fd`.
+No overlay or launcher selects it automatically. The recipe pins the
+[qualification prerelease](https://github.com/cnshing/debian-livecd-termux/releases/tag/panvk-sync-fd-26.3.1-1)
+and installs `SOURCE.json`. That asset set contains both binaries, the
+unmodified p0175 source archive, the exact port patch, its upstream MIT license,
+and both ABI build records. Apply the listed patch to the archive to obtain
+content tree `82cfe30d…`. The glibc `$ORIGIN` RUNPATH is recorded; CI absolute
+search paths are rejected by the package audit.
+
+**Ghostty DMA-BUF presentation and normal-package promotion remain pending.**
+The Chrome oracle failure and installed desktop qualification must remain
+visible when deciding promotion. All phone processes started by this work
+were cleaned; only `X0` and the original managed owner 23548 / Shell 23741
+remained. Package building and audit require no further phone access.
 
 ## The job
 
@@ -127,11 +181,12 @@ driver without SYNC_FD, still needs them.
 2. **Ghostty needs OpenGL 4.3 before any of this matters.** With the packaged driver it runs
    on llvmpipe. See [PANVK-VERSION-BUMP-HANDOFF.md](PANVK-VERSION-BUMP-HANDOFF.md).
 
-Also temper the expectation of zero-copy: in the accepted Ghostty run GTK used its Cairo
-renderer, which maps the dma-buf and copies it on the CPU. That still removes Ghostty's
-`glReadPixels` and its allocation. GTK's GL renderer, which would import the buffer, failed
-with `failed to make EGL context current err=error.BadAccess`
-([GHOSTTY-PANVK-HANDOFF.md](GHOSTTY-PANVK-HANDOFF.md)); nobody has found out why.
+The installed GTK build is another independent gate: Termux compiles DMA-BUF
+support out, so even Cairo uses Ghostty's CPU-readback fallback. The direct EGL
+probe above validates the producer wait without GTK. Rebuild and qualify GTK's
+DMA-BUF consumer before claiming Ghostty DMA-BUF presentation. GTK's GL renderer
+also has the earlier `error.BadAccess` failure recorded in
+[GHOSTTY-PANVK-HANDOFF.md](GHOSTTY-PANVK-HANDOFF.md).
 
 ## Why the packaged driver has no SYNC_FD here
 

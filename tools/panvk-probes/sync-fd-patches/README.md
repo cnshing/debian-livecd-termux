@@ -20,8 +20,9 @@ CSF path and the disabled v6/v7 export path are preserved.
 
 Builds: `.github/workflows/panvk-sync-fd.yml`, Bionic and arm64 glibc. The
 unpatched ICD and `patched/` ICD are separate artifacts in the same build.
-This is a validation artifact; the package recipe still selects its existing
-upstream binaries until qualification and provenance pinning are complete.
+The explicitly selected `mesa-vulkan-icd-panvk-kbase-sync-fd` recipe pins the
+validated pair and installs it beside the existing driver. The normal package
+and launcher selection still use the upstream release.
 
 The pending fixture is specific to the verified x1s JM uAPI 11.35, 56-byte
 v2 atom layout. It submits a software-event wait and a dependent fence trigger;
@@ -48,3 +49,19 @@ SYNC_FD support alone cannot make a dma-buf safe on the S20 kernel. Mesa patch
 completion wait when attaching a fence fails. Keep Mesa patches 0021–0023 for
 older ICDs. Ghostty additionally needs the workgroup/version qualification
 tracked by the version-bump handoff.
+
+`../dmabuf-readback.py` exercises the separate producer handoff without GTK.
+Select the staged Mesa libraries and the independent SYNC_FD ICD with the
+same `LD_LIBRARY_PATH`, `LIBGL_DRIVERS_PATH`, `GALLIUM_DRIVER=zink` and
+`VK_DRIVER_FILES` used by the desktop tests, then run it with Python under a
+30-second process timeout. It creates a surfaceless GLES3 context, clears an
+RGBA8 texture to 30 distinct colors, exports each frame as a real dma-buf and
+maps it using DMA_BUF_IOCTL_SYNC START/END. Every pixel must match, without
+`glFinish` or `glReadPixels`. It accepts a single plane with LINEAR or implicit
+modifier; constant-color checks establish synchronization, not a general
+layout/modifier qualification.
+
+On x1s, Mesa 104 passes all 7,864,320 pixel checks, including a repeat run.
+Both Mesa 102 and the installed Mesa 103 fail at frame 0, row 0 with the same
+new ICD. Those failures are the without-wait controls. GTK is bypassed on
+purpose: Termux's GTK currently compiles out DMA-BUF support.

@@ -45,7 +45,7 @@ def check_pixels(folder, capture, stale=False):
     return {'path': path.name, 'phase': capture['phase'], 'bands': bands}
 
 
-def check(folder, software_control=False):
+def check(folder, software_control=False, reject_cpu_fallback=False):
     result = json.loads((folder / 'result.json').read_text())
     assert result.get('completed'), result.get('error')
     assert json.loads((folder / 'isolation.json').read_text())['ok'], 'shared state changed'
@@ -67,16 +67,25 @@ def check(folder, software_control=False):
         pass
     else:
         raise AssertionError('Negative control accepted stale terminal output')
-    report = {'ok': True, 'software_control': software_control, 'captures': checked,
+    log = (folder / 'ghostty.log').read_text(errors='replace')
+    cpu_fallback = any(message in log for message in (
+        'falling back to CPU presentation', 'asking renderer for CPU presentation'))
+    if reject_cpu_fallback:
+        assert not cpu_fallback, 'Ghostty reported CPU presentation fallback; DMA-BUF is not accepted'
+    report = {'cpu_presentation_fallback_reported': cpu_fallback, 'ok': True,
+              'software_control': software_control, 'captures': checked,
               'stale_negative_control_rejected': True}
     (folder / 'ghostty-pixel-results.json').write_text(json.dumps(report, indent=2) + '\n')
     print(folder.name, 'PASS', len(checked), 'Ghostty captures;',
-          'software control' if software_control else 'PanVK/Mali GPU', '; normal exit')
+          'software control' if software_control else 'PanVK/Mali GPU', '; normal exit;',
+          'CPU presentation fallback' if cpu_fallback else 'presentation path unverified')
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('folder', type=Path)
     parser.add_argument('--software-control', action='store_true')
+    parser.add_argument('--reject-cpu-fallback', action='store_true',
+                        help='Reject a known CPU fallback; absence of the warning alone is not DMA-BUF proof')
     args = parser.parse_args()
-    check(args.folder, args.software_control)
+    check(args.folder, args.software_control, args.reject_cpu_fallback)

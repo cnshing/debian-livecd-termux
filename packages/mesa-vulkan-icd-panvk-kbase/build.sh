@@ -31,6 +31,9 @@ termux_step_post_get_source() {
 		echo '===== panvk-kbase-android (Mesa PanVK with a mali_kbase backend) ====='
 		cat NOTICE.md MIT.txt
 	} > COPYRIGHTS
+	if test -n "${_PANVK_EXTRA_LICENSE:-}"; then
+		cat "$_PANVK_EXTRA_LICENSE" >> COPYRIGHTS
+	fi
 	# The glibc driver needs newer X11 and Wayland client libraries than Google Chrome bundles:
 	# DRI3/Present 1.4 calls (libxcb 1.17) and wl_fixes (Wayland 1.24).
 	local package url sha snapshot archive

@@ -16,6 +16,17 @@ See [PANVK-VERSION-BUMP-HANDOFF.md](PANVK-VERSION-BUMP-HANDOFF.md) for exact new
 hashes, cache UUIDs, build identity, remaining gates and evidence locations.
 The older launcher and results below refer to their original pinned binaries.
 
+## SYNC_FD follow-up, 2026-11-13
+
+The independent port and Zink completion wait are now implemented and tested;
+see [PANVK-SYNC-FD-HANDOFF.md](PANVK-SYNC-FD-HANDOFF.md). A direct EGL dma-buf
+oracle passes with Mesa 104 and fails with Mesa 102/103 on the same SYNC_FD ICD.
+The combined private driver runs Ghostty on GL 4.6 and passes four fresh terminal
+captures, but **GTK rejects DMA-BUF because its support is compiled out**.
+Ghostty then requests CPU readback. This remains a GPU-rendered CPU-presentation
+pass. The checker now reports that fallback explicitly; `--reject-cpu-fallback`
+rejects it. A GTK DMA-BUF build and consumer qualification are the next gate.
+
 ## Current outcome
 
 The Mali-G76 large-workgroup compiler pass **can be adapted to our Mali-G77**.

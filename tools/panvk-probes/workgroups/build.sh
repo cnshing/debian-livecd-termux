@@ -17,5 +17,10 @@ done
 glslangValidator -V --target-env vulkan1.1 -Od -DX=1024 -DY=1 -DZ=1 -DNESTED=1 \
   "$here/check.comp" -o "$out/nested.spv"
 spirv-val --target-env vulkan1.1 "$out/nested.spv"
+for x in 256 512 769 1024; do
+  glslangValidator -V --target-env vulkan1.1 -Od -DX="$x" -DY=1 -DZ=1 \
+    "$here/bare.comp" -o "$out/bare-$x.spv"
+  spirv-val --target-env vulkan1.1 "$out/bare-$x.spv"
+done
 cp "$here/run.py" "$out/"
 (cd "$out" && sha256sum check *.spv > SHA256SUMS)

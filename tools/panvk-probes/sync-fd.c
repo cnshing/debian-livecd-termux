@@ -106,6 +106,18 @@ static int exercise(PFN_vkGetInstanceProcAddr gipa, VkInstance instance,
    VkFenceCreateInfo fci = {.sType=VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
    VkFence fence;
    CHECK(CreateFence(device, &fci, NULL, &fence));
+   VkSubmitInfo first_empty = {.sType=VK_STRUCTURE_TYPE_SUBMIT_INFO,
+      .signalSemaphoreCount=1, .pSignalSemaphores=&sem};
+   CHECK(QueueSubmit(queue, 1, &first_empty, fence));
+   CHECK(WaitForFences(device, 1, &fence, VK_TRUE, 5000000000ull));
+   VkSemaphoreGetFdInfoKHR first_get = {.sType=VK_STRUCTURE_TYPE_SEMAPHORE_GET_FD_INFO_KHR,
+      .semaphore=sem, .handleType=VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_SYNC_FD_BIT};
+   int first_fd = -2;
+   CHECK(GetSemaphoreFdKHR(device, &first_get, &first_fd));
+   if (first_fd < -1 || wait_fd(first_fd)) return 1;
+   if (first_fd >= 0) close(first_fd);
+   CHECK(ResetFences(device, 1, &fence));
+   printf("PASS empty first submission: fd=%d\n", first_fd);
    unsigned real_fds = 0;
    int initial_fds = -1;
    for (unsigned n=0; n<300; n++) {

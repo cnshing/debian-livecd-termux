@@ -23,6 +23,7 @@ import time
 from graphics import apply_renderer, mali_usable, panvk, preferred_renderer, use_panvk
 
 PREFIX = Path('/data/data/com.termux/files/usr')
+DPKG_STATUS = PREFIX / 'var/lib/dpkg/status'
 ROOT = Path.home() / '.local/opt/livecd-native/acceleration'
 # The android-vaapi packages. A stack selected under ROOT, such as a development build, comes first.
 PACKAGED = {'bionic': PREFIX / 'lib/android-vaapi', 'glibc': PREFIX / 'lib/android-vaapi-glibc'}
@@ -253,6 +254,28 @@ def video_device():
     return '/dev/mali0' if not os.path.exists('/dev/kgsl-3d0') and mali_usable() else '/dev/kgsl-3d0'
 
 
+def chromium_encodes_webcodecs():
+    """True when the installed Termux Chromium is revision 3 or later.
+
+    Revision 2 sends WebCodecs frames as shared memory instead of crashing the GPU process,
+    and revision 3 lets VA-API upload them (NV12). Earlier builds crash or fail every frame,
+    so AcceleratedVideoEncoder stays off for them. The package receipt has no revision field.
+    """
+    try:
+        status = DPKG_STATUS.read_text(errors='replace')
+    except OSError:
+        return False
+    for entry in status.split('\n\n'):
+        fields = dict(line.split(': ', 1) for line in entry.splitlines() if ': ' in line and not line.startswith(' '))
+        if fields.get('Package') == 'chromium' and 'installed' in fields.get('Status', '').split():
+            match = re.fullmatch(r'(?:\d+:)?([\d.]+)(?:-(\d+))?', fields.get('Version', ''))
+            if not match:
+                return False
+            version = tuple(int(part) for part in match.group(1).split('.'))
+            return (version, int(match.group(2) or 0)) >= ((156, 0, 8078, 79), 3)
+    return False
+
+
 def command_line(profile, command, abi, video, gpu, mali=False):
     flags = []
     if profile in BROWSERS:
@@ -264,6 +287,10 @@ def command_line(profile, command, abi, video, gpu, mali=False):
                 '--hardware-video-device-path=' + video_device(),
                 '--enable-features=Vulkan,VulkanFromANGLE,DefaultANGLEVulkan,VaapiVideoDecoder,VaapiVideoDecodeLinux,PlatformHEVCDecoderSupport,AcceleratedVideoDecoder,AcceleratedVideoDecodeLinuxGL,VaapiIgnoreDriverChecks',
                 '--disable-features=VaapiVideoMinResolutionForPerformance']
+            # Exynos hardware encoding for WebRTC and WebCodecs, accepted on the S20 with revision 3.
+            if video_device() == '/dev/mali0' and profile == 'chromium' and abi == 'bionic' and chromium_encodes_webcodecs():
+                flags = [flag + ',AcceleratedVideoEncoder' if flag.startswith('--enable-features=') else flag
+                         for flag in flags]
         if abi == 'glibc':
             flags[:0] = ['--no-sandbox', '--disable-dev-shm-usage']
         if profile in ('chromium', 'ungoogled-chromium') and abi == 'glibc' and not any(

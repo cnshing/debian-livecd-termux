@@ -168,6 +168,22 @@ class PanVKBrowsers(unittest.TestCase):
         self.assertFalse(any('AcceleratedVideoEncoder' in arg for arg in argv))
         self.assertNotIn('--video-capture-use-gpu-memory-buffer', argv)
 
+    def chromium_encode_argv(self, version):
+        status = self.tmp / 'status'
+        status.write_text(f'Package: chromium\nStatus: install ok installed\nVersion: {version}\n\n')
+        selected = (self.tmp / 'va', {'libraries': ['lib'], 'preloads': [], 'driver_directory': 'dri'})
+        with mock.patch.object(acceleration, 'stack', return_value=selected), \
+                mock.patch.object(acceleration, 'chromium_has_vaapi', return_value=True), \
+                mock.patch.object(acceleration, 'DPKG_STATUS', status):
+            argv, _ = acceleration.prepare('chromium', ['/chromium'], 'bionic', 'on')
+        return argv
+
+    def test_chromium_encodes_in_hardware_from_revision_3(self):
+        self.assertTrue(any('AcceleratedVideoEncoder' in arg for arg in self.chromium_encode_argv('156.0.8078.79-3')))
+        # Revision 2 fails every WebCodecs frame (NV12 upload); revision 1 crashes the GPU process.
+        self.assertFalse(any('AcceleratedVideoEncoder' in arg for arg in self.chromium_encode_argv('156.0.8078.79-2')))
+        self.assertNotIn('--video-capture-use-gpu-memory-buffer', self.chromium_encode_argv('156.0.8078.79-3'))
+
     def test_adreno_keeps_the_prebuilt_glibc_driver(self):
         root = self.tmp / 'va'
         manifest = {'libraries': ['mesa/lib', 'lib'], 'preloads': [], 'driver_directory': 'mesa/dri',

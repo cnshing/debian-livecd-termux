@@ -5,69 +5,43 @@ rules and pass criteria: [README.md](README.md).
 
 ## Status
 
-**Off by default.** No launcher passes `--enable-features=AcceleratedVideoEncoder`.
+State on 2026-11-14 (evening). **On for Mali when Chromium 156.0.8078.79-3 or later is installed**
+(`chromium_encodes_webcodecs()` in `src/native/acceleration.py` reads dpkg's status file and adds
+`AcceleratedVideoEncoder` for the bionic `chromium` profile on `/dev/mali0`). Older revisions keep it off.
 
-| Use | Adreno | Mali (S20) |
+| Use | Adreno | Mali (S20), revision 3 |
 | --- | --- | --- |
-| WebRTC, H.264 and VP9 | not run | **works behind the flag**: loopback, about 284 frames per codec, hardware encoder and decoder, received colours exact, no GPU crash |
-| WebCodecs `VideoEncoder` | not run | **crashes the GPU process** with the flag on; revision 2 patch being built |
+| WebRTC, H.264 and VP9 | not run | **passes**: loopback 285 frames per codec, `OMX.Exynos.AVC.Encoder` / `OMX.Exynos.VP9.Encoder` 286 in, 286 out, received 640x360 picture correct, no GPU crash |
+| WebCodecs `VideoEncoder` H.264 | not run | **passes**: 60 in, 60 out on `OMX.Exynos.AVC.Encoder`, clean flush, software decode max colour error 12, 0 frames over 16; frames 0, 29, 59 viewed after ffmpeg decode (labels, moving box and colours right) |
+| WebCodecs `VideoEncoder` VP9 | not run | **passes** on `OMX.Exynos.VP9.Encoder`, 60 in/out, software decode max error 12 (pixels checked in-page; not viewed as an image) |
 | MediaRecorder | not run | not run |
 
-## Why the flag stays off
+## What was wrong, and the fixes
 
-The same flag turns on both WebRTC and WebCodecs hardware encoding. WebCodecs crashes:
+1. Revision 1: on Linux `VideoEncodeAcceleratorAdapter` always asks for `kGpuMemoryBuffer` input; the
+   GPU process hits `CHECK_EQ(handle.type, gfx::NATIVE_PIXMAP)` because GPU memory buffers here are
+   shared memory, and SIGTRAP loops three times before GPU acceleration is turned off.
+   `0100-termux-webcodecs-shmem.patch` (revision 2) makes the adapter use shared memory.
+2. Revision 2 (CI 43579240070) no longer crashed, but every frame failed: `VaapiWrapper::UploadVideoFrameToSurface`
+   only copies I420 and logged `Unsupported pixel format: PIXEL_FORMAT_NV12`.
+   `0101-termux-vaapi-upload-nv12.patch` (revision 3, CI 43606485313) copies NV12 planes with
+   `libyuv::NV12Copy`.
 
-- On Linux, `VideoEncodeAcceleratorAdapter` always asks for `kGpuMemoryBuffer` input frames
-  (`media/video/video_encode_accelerator_adapter.cc`). The GPU process then calls
-  `CreateGpuMemoryBufferHandle()`, which does `CHECK_EQ(handle.type, gfx::NATIVE_PIXMAP)`
-  (`media/gpu/chromeos/platform_video_frame_utils.cc`). Here GPU memory buffers are plain shared
-  memory, so the check aborts (SIGTRAP).
-- Chromium restarts the GPU process three times and then turns GPU acceleration off for the
-  session. Any page using WebCodecs with `prefer-hardware` would do this.
+Never add `--video-capture-use-gpu-memory-buffer`. WebCodecs needs `bitrateMode: "constant"`
+(Chromium refuses variable bitrate on VA-API outside ChromeOS).
 
-WebRTC works because it sends ordinary shared memory (I420) and the driver uploads it with
-`vaDeriveImage`/`vaPutImage`. **Never add `--video-capture-use-gpu-memory-buffer`**: it switches
-WebRTC to the crashing path.
+CI: the Chromium dependency set is now looked up by the pinned builder commit when no set matches the
+recipe hash, so a source patch no longer needs the three-hour dependency bootstrap.
 
-## The fix in progress: Chromium revision 2
+## Still open
 
-[`0100-termux-webcodecs-shmem.patch`](https://github.com/cnshing/debian-livecd-termux/blob/fix/chromium-webcodecs-shmem/packages/chromium/0100-termux-webcodecs-shmem.patch),
-on the CI branch `fix/chromium-webcodecs-shmem` only. It makes the adapter use `kShmem` input
-and CPU frame preparation. Its Chromium regression test covers ordinary CPU frames and mappable
-shared-image frames, but has never been compiled or run.
-
-The build is a two-job chain, because Chromium alone nearly fills a six-hour CI job:
-
-1. A dependency bootstrap builds and uploads Chromium's dependency packages, then dispatches the
-   browser build. The artifact is named by the `packages/chromium` recipe's hash. **Do not change
-   `packages/chromium` while the chain runs**, or the browser job will not find its
-   dependencies.
-2. The browser build. Run [43579240070](https://github.com/cnshing/debian-livecd-termux/actions/runs/43579240070)
-   started 2026-11-14 09:10 UTC and was still running at 12:05 UTC.
-
-The chain first failed at upload: an artifact refuses the colon in an epoch file name
-(`ca-certificates-java_1:…`). The workflow now leaves the epoch out (on main as `52e7224`).
-
-## Next steps
-
-1. When 43579240070 finishes, stage the package privately on the S20 (extract it; do not
-   install). Run WebCodecs with `bitrateMode: "constant"` (Chromium refuses variable bitrate on
-   VA-API outside ChromeOS, and WebCodecs defaults to variable), save the chunks, and decode them
-   in software to check pixels. Then H.264 and VP9 WebRTC. **Stop at the first GPU-process
-   crash**; never let it loop.
-2. If both pass, add `AcceleratedVideoEncoder` to Chromium's features in `command_line()` in
-   `src/native/acceleration.py`, on Mali. Gate it on the installed package version read from
-   dpkg (revision 2 or later): the receipt `share/doc/chromium/livecd-vaapi.json` has no revision
-   field, and adding one costs another six-hour build. The host test
-   `test_glibc_mali_driver_precedes_the_prebuilt_mesa` in
-   `tests/packaging/test-mali-acceleration.py` asserts the flag is absent today; update it.
-3. A software fallback that works is not a pass. Require confirmed hardware frames in the daemon
-   log, a clean flush, correct software-decoded pixels, and a WebRTC loopback with no GPU crash.
-4. Run the same on the Note10+, which has never had a browser encode test.
-5. Merge the branch's packages to main once accepted.
-
-Also open: the Exynos encoders refuse MediaCodec's `low-latency` key, so call latency is
-unmeasured.
+- Note10+ (and any Adreno phone) has never run a browser encode test.
+- MediaRecorder not tested.
+- The Exynos encoders refuse MediaCodec's `low-latency` key (logged as `configure failed with
+  low-latency: -10000`, then retried without), so call latency is unmeasured.
+- HEVC WebCodecs encode not tested (the S20 has `OMX.Exynos.HEVC.Encoder`; see
+  [s20-codec-parity.md](s20-codec-parity.md)).
+- Revision 3 must reach the apt repository (merge, then the packages build on main) before users get it.
 
 ## How to test
 

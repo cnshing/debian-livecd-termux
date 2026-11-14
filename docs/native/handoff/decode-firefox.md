@@ -36,8 +36,14 @@ Zink (`gpu_enabled`). On a software desktop it renders and decodes in software.
 2. **H.264**: [decode-h264.md](decode-h264.md). Firefox reports `H264 SWDEC`.
 3. **Flicker.** The user reported Firefox video flickering back and forth on Adreno in early
    November. It was never reproduced: [decode-frame-sync.md](decode-frame-sync.md).
-4. Firefox on a software desktop on Mali could use PanVK as Chromium does, with a small change
-   in `gpu_enabled`. Untested.
+4. Firefox on a software desktop on Mali could use PanVK as Chromium does. No code change is
+   needed to try it: `LIVECD_FIREFOX_GPU=1` makes `gpu_enabled` return true, and
+   `apply_renderer('zink')` then picks PanVK on Mali (`zink_driver`). To make it the default, add
+   `'firefox'` to the PanVK branch of `gpu_enabled`. A host test for that change was written and
+   fails without it (2026-11-14, decode-firefox), but the change was held back: the phone was busy
+   and the default must not change before this passes on the S20:
+   `LIVECD_FIREFOX_GPU=1 python browsers/test-acceleration.py firefox --fixtures fixtures-v2 --out f3`
+   on a software desktop.
 5. Not run: seeking, a soak, and `TERMUX_VA_SYNC_END_PICTURE` (set for Chromium only; Firefox
    passed without it).
 

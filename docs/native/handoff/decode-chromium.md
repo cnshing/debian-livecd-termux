@@ -76,3 +76,10 @@ Nothing changed in code. Step 1 needs the Note10+, which was not attached (`adb 
 listed only the x1s). Step 2 is waiting on the H.264 bridge fix ([decode-h264.md](decode-h264.md)).
 Step 3, the soak and seek runs, needs the x1s, and another agent had claimed it in
 `temp/PHONE-STATUS` (a 20-cycle qualification). So all three next steps are still open as written above.
+
+Later the same day, step 2 was unblocked: android-vaapi 27.0.0~devel20261029-10 (CI run
+43596220676, branch fix/decode-h264) rebuilds the PPS from the slice headers. To test, set
+`disabled_va_codecs=['av1']` in a private config, set `TERMUX_VA_H264_REORDER_FRAMES=0` on Mali,
+and make the fixture with `make-video-fixtures.py --codecs h264-fast`. On Mali, FFmpeg also needs
+the render-node preload from fix/chromium-webcodecs-shmem. The x1s was still busy
+(a Ghostty GL test, with a 30-minute soak queued behind it), so Chromium H.264 has not been run yet.

@@ -67,7 +67,7 @@ RUNPATH are deliberately absent.
 
 ## Rebuilding the libraries from the companion source bundle
 
-Extract `*_sources.tar.xz` and verify `sources/SHA256SUMS`. It contains the
+Extract `*_sources.tar.gz` and verify `sources/SHA256SUMS`. It contains the
 complete GTK/Mesa upstream archives, reconstructed PanVK base source, exact
 project snapshots for each build, the pinned Termux and Zenith repositories,
 and this packaging code. All modifications and build scripts are included;

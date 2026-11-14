@@ -20,10 +20,12 @@ def main():
     sources.mkdir(parents=True, exist_ok=True)
     for kind in ('driver', 'mesa', 'gtk'):
         item = lock[kind]
+        print('Downloading pinned binary artifact:', kind, flush=True)
         subprocess.run(['gh', 'run', 'download', str(item['run']), '-R', lock['repository'],
                         '-n', item['artifact'], '-D', str(inputs / kind)], check=True)
     for item in lock['upstream_sources']:
         path = sources / item['file']
+        print('Downloading verified upstream source:', item['file'], flush=True)
         subprocess.run(['curl', '-fL', '--retry', '3', '-o', str(path), item['url']], check=True)
         if hashlib.file_digest(path.open('rb'), 'sha256').hexdigest() != item['sha256']:
             raise RuntimeError('Source checksum mismatch: ' + str(path))
@@ -31,6 +33,7 @@ def main():
     snapshots += [('termux', 'termux/termux-packages', lock['termux_revision']),
                   ('zenith', 'zenithblue-oss/panvk-kbase-android', lock['zenith_revision'])]
     for kind, repo, revision in snapshots:
+        print('Downloading recipe snapshot:', kind, revision, flush=True)
         with (sources / f'{kind}-recipes-{revision}.tar.gz').open('wb') as output:
             subprocess.run(['gh', 'api', f'repos/{repo}/tarball/{revision}'], stdout=output, check=True)
     revision = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=HERE, text=True).strip()
@@ -45,9 +48,13 @@ def main():
     (sources / 'SHA256SUMS').write_text(''.join(
         hashlib.file_digest(p.open('rb'), 'sha256').hexdigest() + '  ' + p.name + '\n'
         for p in sorted(sources.iterdir()) if p.is_file() and p.name != 'SHA256SUMS'))
-    archive = args.destination / f"{lock['package']}_{lock['version']}_sources.tar.xz"
-    with tarfile.open(archive, 'w:xz') as output:
+    archive = args.destination / f"{lock['package']}_{lock['version']}_sources.tar.gz"
+    # Inputs are already compressed. Avoid spending minutes recompressing
+    # their high-entropy bytes with LZMA just to make the companion envelope.
+    print('Bundling corresponding source:', archive, flush=True)
+    with tarfile.open(archive, 'w:gz', compresslevel=1) as output:
         output.add(sources, arcname='sources')
+    print('Source bundle complete:', archive.stat().st_size, 'bytes', flush=True)
 
 
 if __name__ == '__main__':

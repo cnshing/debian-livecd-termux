@@ -32,7 +32,8 @@ CACHE = Path(os.environ.get('LIVECD_RECIPE_CACHE', str(Path.home() / '.cache/liv
 LARGE = {'chromium', 'firefox'}
 # Recipes that take most of a job's time on their own. Each gets a job of its own, holding only the
 # recipes it needs, so nothing that shares a dependency with it adds to its build time.
-SEPARATE = {'chromium', 'firefox'}
+# Firefox is large but not separate: android-firefox-video pins the Firefox binary it is built beside.
+SEPARATE = {'chromium'}
 # Minutes. GitHub stops any job on its own runners at 360; others stop sooner so the caches still save.
 TIMEOUT, SEPARATE_TIMEOUT = 350, 360
 # Termux's repository keeps only the newest version of each package, so CI takes whatever version it has

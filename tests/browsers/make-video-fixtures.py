@@ -47,7 +47,7 @@ def chart(width, height, number):
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('out', type=Path)
-    p.add_argument('--codecs', nargs='+', choices=('vp9', 'h264', 'hevc', 'av1'), default=['vp9', 'h264', 'hevc'])
+    p.add_argument('--codecs', nargs='+', choices=('vp9', 'h264', 'hevc', 'av1', 'vp8', 'mpeg4'), default=['vp9', 'h264', 'hevc'])
     p.add_argument('--size', default='640x360')
     p.add_argument('--frames', type=int, default=48)
     p.add_argument('--matrix', choices=('bt709', 'smpte170m'), default='bt709')
@@ -57,8 +57,8 @@ def main():
     width, height = map(int, args.size.split('x'))
     if min(width, height) < 128 or width % 2 or height % 2 or not 2 <= args.frames <= 256:
         p.error('Use even dimensions >=128 and 2..256 frames')
-    if args.ten_bit and 'h264' in args.codecs:
-        p.error('10-bit H.264 is outside the hardware test scope; select vp9/hevc/av1')
+    if args.ten_bit and set(args.codecs) & {'h264', 'vp8', 'mpeg4'}:
+        p.error('10-bit H.264, VP8 and MPEG-4 are outside the hardware test scope; select vp9/hevc/av1')
     args.out.mkdir(parents=True, exist_ok=False)
     commands = []
     def run(command):
@@ -73,12 +73,14 @@ def main():
                 output.write(chart(width, height, number))
         manifest['source_sha256'] = sha256(source)
         for codec in args.codecs:
-            ext = 'webm' if codec in ('vp9', 'av1') else 'mp4'
+            ext = 'webm' if codec in ('vp9', 'av1', 'vp8') else 'mp4'
             name = f'chart-{codec}.{ext}'
             encoder = {'vp9': ['libvpx-vp9', '-deadline', 'good', '-cpu-used', '4', '-crf', '18', '-b:v', '0'],
                        'h264': ['libx264', '-preset', 'medium', '-crf', '18', '-bf', '3'],
                        'hevc': ['libx265', '-preset', 'fast', '-crf', '18', '-x265-params', 'pools=none:frame-threads=1'],
-                       'av1': ['libaom-av1', '-cpu-used', '8', '-crf', '18', '-b:v', '0']}[codec]
+                       'av1': ['libaom-av1', '-cpu-used', '8', '-crf', '18', '-b:v', '0'],
+                       'vp8': ['libvpx', '-deadline', 'good', '-cpu-used', '4', '-crf', '8', '-b:v', '4M'],
+                       'mpeg4': ['mpeg4', '-q:v', '2', '-bf', '0']}[codec]
             matrix = 'bt601' if args.matrix == 'smpte170m' else args.matrix
             run(['ffmpeg', '-v', 'error', '-f', 'rawvideo', '-pixel_format', 'rgb24', '-video_size', args.size,
                  '-framerate', '12', '-i', str(source), '-an', '-vf',

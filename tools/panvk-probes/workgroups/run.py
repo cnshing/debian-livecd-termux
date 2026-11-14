@@ -23,8 +23,9 @@ for variant, driver, enabled in (
     driver = driver.resolve(strict=True)
     cases = [(shape, "run") for shape in ("128-1-1", "256-1-1")]
     if enabled:
-        cases += [(shape, "run") for shape in ("512-1-1", "1024-1-1", "32-30-1", "8-8-16")]
-        cases += [("nested", "reject"), ("769-1-1", "reject")]
+        cases += [(shape, "run") for shape in ("257-1-1", "511-1-1", "512-1-1", "513-1-1",
+                  "769-1-1", "1023-1-1", "1024-1-1", "32-30-1", "8-8-16", "17-19-3")]
+        cases += [("nested", "reject")]
     else:
         cases += [("1024-1-1", "skip")]
     for shape, mode in cases:

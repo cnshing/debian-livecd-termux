@@ -1,0 +1,43 @@
+--- a/src/panfrost/vulkan/panvk_vX_shader.c
++++ b/src/panfrost/vulkan/panvk_vX_shader.c
+@@ -833,17 +833,14 @@
+    if (n <= max_hw)
+       return false;
+ 
+-   unsigned k = DIV_ROUND_UP(n, max_hw);
+-   while (k <= n && (n % k || n / k > max_hw))
+-      k++;
+-   if (k > 16 || n % k) {
+-      mesa_logw("panvk: %u-invocation workgroup over the %u limit left as is",
+-                n, max_hw);
++   const unsigned subgroup_size = pan_subgroup_size(PAN_ARCH);
++   const unsigned max_aligned = max_hw & ~(subgroup_size - 1);
++   if (!max_aligned)
+       return false;
+-   }
+-   const unsigned h = n / k;
+-   if (h % pan_subgroup_size(PAN_ARCH))
++   const unsigned k = DIV_ROUND_UP(n, max_aligned);
++   if (k > 16)
+       return false;
++   const unsigned h = ALIGN_POT(DIV_ROUND_UP(n, k), subgroup_size);
+ 
+    nir_function_impl *impl = nir_shader_get_entrypoint(nir);
+    nir_lower_returns_impl(impl);
+@@ -929,8 +926,14 @@
+       for (unsigned c = 0; c < k; c++) {
+          nir_cf_list copy;
+          nir_cf_list_clone(&copy, &regions[r], &impl->cf_node, remap[c]);
+-         nir_cf_reinsert(&copy, r == nbar ? nir_after_impl(impl)
+-                                          : nir_before_instr(bar[r]));
++         b.cursor = r == nbar ? nir_after_impl(impl)
++                              : nir_before_instr(bar[r]);
++         const bool partial = (c + 1) * h > n;
++         if (partial)
++            nir_push_if(&b, nir_ult_imm(&b, hw_index, n - c * h));
++         b.cursor = nir_cf_reinsert(&copy, b.cursor);
++         if (partial)
++            nir_pop_if(&b, NULL);
+       }
+    }
+ 

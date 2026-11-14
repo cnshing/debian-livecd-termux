@@ -256,7 +256,8 @@ disable() { global.compositor.enable_unredirect(); }
             except OSError as error:
                 result['ghostty_audit_error'] = repr(error)
                 gpu = {'pid': terminal.pid}
-            result['ghostty'] = dict(gpu, software_control=args.ghostty_software, window=wid)
+            result['ghostty'] = dict(gpu, software_control=args.ghostty_software, window=wid,
+                                     renderer=args.ghostty_gsk)
             result['ghostty']['geometry'] = run(['xdotool', 'getwindowgeometry', '--shell', wid], capture_output=True, text=True).stdout
             result['ghostty']['active'] = run(['xdotool', 'getactivewindow'], capture_output=True, text=True).stdout.strip()
             screenshot(out / 'ghostty-before-input.png')

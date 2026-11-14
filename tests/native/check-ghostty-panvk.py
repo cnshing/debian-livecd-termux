@@ -2,6 +2,7 @@
 """Check Ghostty's own fresh terminal pixels, GPU identity and normal exit."""
 import argparse
 import json
+import re
 from pathlib import Path
 import subprocess
 
@@ -45,7 +46,7 @@ def check_pixels(folder, capture, stale=False):
     return {'path': path.name, 'phase': capture['phase'], 'bands': bands}
 
 
-def check(folder, software_control=False, reject_cpu_fallback=False, require_dmabuf=False):
+def check(folder, software_control=False, reject_cpu_fallback=False, require_dmabuf=False, require_dmabuf_gl=False):
     result = json.loads((folder / 'result.json').read_text())
     assert result.get('completed'), result.get('error')
     assert json.loads((folder / 'isolation.json').read_text())['ok'], 'shared state changed'
@@ -70,14 +71,21 @@ def check(folder, software_control=False, reject_cpu_fallback=False, require_dma
     log = (folder / 'ghostty.log').read_text(errors='replace')
     cpu_fallback = any(message in log for message in (
         'falling back to CPU presentation', 'asking renderer for CPU presentation'))
-    if reject_cpu_fallback or require_dmabuf:
+    if reject_cpu_fallback or require_dmabuf or require_dmabuf_gl:
         assert not cpu_fallback, 'Ghostty reported CPU presentation fallback; DMA-BUF is not accepted'
     imports = log.count('Creating dmabuf texture, format ')
     downloads = log.count('Used mmap for downloading ')
-    if require_dmabuf:
+    gl_imports = len(re.findall(r'Imported [^\n]+ dmabuf as GL_TEXTURE_', log))
+    cpu_downloads = log.count('Downloading dmabuf texture to CPU')
+    if require_dmabuf or require_dmabuf_gl:
         assert not software_control, 'DMA-BUF acceptance requires the GPU run'
         assert imports >= len(captures), 'Missing positive GTK DMA-BUF import evidence'
-        assert downloads >= len(captures), 'Missing positive GTK mmap download evidence'
+        if require_dmabuf_gl:
+            assert ghostty.get('renderer') == 'gl', 'GPU import requires the explicit GTK GL renderer run'
+            assert gl_imports >= len(captures), 'Missing positive GTK GL DMA-BUF import evidence'
+            assert downloads == 0 and cpu_downloads == 0, 'GTK downloaded a DMA-BUF to CPU memory'
+        else:
+            assert downloads >= len(captures), 'Missing positive GTK mmap download evidence'
         assert any('libgtk-4' in p for p in ghostty['libraries']), 'GTK mapping was not audited'
         log_bytes = (folder / 'ghostty.log').read_bytes()
         for capture in captures:
@@ -86,15 +94,21 @@ def check(folder, software_control=False, reject_cpu_fallback=False, require_dma
             assert 0 <= begin < end <= len(log_bytes), 'Invalid presentation log bounds'
             segment = log_bytes[begin:end].decode(errors='replace')
             assert 'Creating dmabuf texture, format ' in segment, capture['path'] + ': no fresh GTK DMA-BUF import'
-            assert 'Used mmap for downloading ' in segment, capture['path'] + ': no fresh GTK mmap download'
+            if require_dmabuf_gl:
+                assert re.search(r'Imported [^\n]+ dmabuf as GL_TEXTURE_', segment), capture['path'] + ': no fresh GTK GL import'
+            else:
+                assert 'Used mmap for downloading ' in segment, capture['path'] + ': no fresh GTK mmap download'
     report = {'cpu_presentation_fallback_reported': cpu_fallback, 'ok': True,
               'gtk_dmabuf_imports': imports, 'gtk_dmabuf_mmap_downloads': downloads,
               'dmabuf_mmap_verified': require_dmabuf,
+              'gtk_dmabuf_gl_imports': gl_imports, 'gtk_dmabuf_cpu_downloads': cpu_downloads,
+              'dmabuf_gl_verified': require_dmabuf_gl,
               'software_control': software_control, 'captures': checked,
               'stale_negative_control_rejected': True}
     (folder / 'ghostty-pixel-results.json').write_text(json.dumps(report, indent=2) + '\n')
     print(folder.name, 'PASS', len(checked), 'Ghostty captures;',
           'software control' if software_control else 'PanVK/Mali GPU', '; normal exit;',
+          'GTK DMA-BUF GL import verified' if require_dmabuf_gl else
           'GTK DMA-BUF mmap verified' if require_dmabuf else (
               'CPU presentation fallback' if cpu_fallback else 'presentation path unverified'))
 
@@ -105,7 +119,10 @@ if __name__ == '__main__':
     parser.add_argument('--software-control', action='store_true')
     parser.add_argument('--reject-cpu-fallback', action='store_true',
                         help='Reject a known CPU fallback; absence of the warning alone is not DMA-BUF proof')
-    parser.add_argument('--require-dmabuf', action='store_true',
+    presentation = parser.add_mutually_exclusive_group()
+    presentation.add_argument('--require-dmabuf', action='store_true',
                         help='Require positive GTK import/mmap diagnostics for every fresh capture')
+    presentation.add_argument('--require-dmabuf-gl', action='store_true',
+                              help='Require fresh GTK GL imports and reject all DMA-BUF CPU downloads')
     args = parser.parse_args()
-    check(args.folder, args.software_control, args.reject_cpu_fallback, args.require_dmabuf)
+    check(args.folder, args.software_control, args.reject_cpu_fallback, args.require_dmabuf, args.require_dmabuf_gl)

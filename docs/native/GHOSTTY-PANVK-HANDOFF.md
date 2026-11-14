@@ -26,11 +26,14 @@ captures. Installed GTK has DMA-BUF compiled out. A private GTK 4.24.1 build
 now enables it and passes CI, but the first private run still requests CPU
 readback: GTK rejects Zink's implicit `AB24:0xffffffffffffff` modifier.
 Mesa 105's known-linear metadata fix alone does not clear this gate. Revision
-106 adds an opt-in backing conversion, `ZINK_LINEAR_DMABUF_EXPORT=1`, and
-passes CI; its device qualification is pending. The normal desktop and installed GTK are unchanged.
-`check-ghostty-panvk.py --require-dmabuf` now requires positive GTK import/mmap
-logs as well as fresh pixels and isolation. A Cairo/mmap pass would establish
-DMA-BUF transport with a CPU download in GTK, not GPU-only presentation.
+106's opt-in backing conversion, `ZINK_LINEAR_DMABUF_EXPORT=1`, now passes both
+the strict spatial oracle and private Ghostty DMA-BUF acceptance with GTK Cairo:
+four fresh terminal captures, per-capture import/mmap logs, no Ghostty CPU
+fallback, normal exit and isolation. GTK still downloads the imported DMA-BUF
+to CPU memory for Cairo. The GL renderer remains blocked by `EGL BadAccess`;
+a separate private X11 EGL build is being tested. See the SYNC_FD handoff for
+exact artifacts and evidence. Installed GTK and launcher defaults are unchanged.
+
 
 ## Current outcome
 

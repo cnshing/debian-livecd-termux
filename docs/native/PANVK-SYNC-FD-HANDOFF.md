@@ -115,8 +115,8 @@ therefore does **not** establish an accepted mapped dma-buf path here.
 `--reject-cpu-fallback` correctly rejects this run. Absence of that warning by
 itself would still not establish successful DMA-BUF presentation.
 
-The next Ghostty gate is a privately built GTK with DMA-BUF support, first
-through Cairo/mmap, then the separately failing GL renderer. Keep udmabuf and
+The resumed private GTK test below clears the Cairo/mmap DMA-BUF gate.
+The GL renderer remains a separate gate. Keep udmabuf and
 global launcher defaults unchanged while testing it. The direct EGL control
 above already establishes why Mesa patch 0024 is necessary on this kernel.
 
@@ -174,16 +174,15 @@ The final conversion build is
 commit `9ead3bd`, passes both build and repository assembly. It restores the
 previous linear flag if backing allocation fails and uses Mesa's OS timeout API
 for the completion wait. The retrieved AArch64 library contains the opt-in.
-The device became unreachable again before this build finished; revision 106
-is **not accepted on-device yet**.
+The resumed device qualification below accepts its opt-in Cairo/mmap path.
 
 - Artifact `debs-mesa-dfb0a486c20f387e`, ID `14100203452`.
 - `mesa_26.2.6-106_aarch64.deb` SHA-256
   `2c3ae0ddb804e9e63c070b2e767715d58b08a4e0238c5c3251bfb2e4a6cbfda3`.
 - `libgallium-26.2.6.so` SHA-256
   `57b41861251f9fcd3126869b2344b03734d1a29fbc9cc4762e0aa8b1a61b199a`.
-- Host staging: `temp/sync-fd/mesa-106/root/`. It has not been copied to the
-  phone yet. The installed GTK and desktop remain unchanged.
+- Host staging: `temp/sync-fd/mesa-106/root/`. It was copied to the
+  phone before the resumed test below. The installed GTK and desktop remain unchanged.
 
 The diagnostic GTK build is
 [CI 43558928474](https://github.com/cnshing/debian-livecd-termux/actions/runs/43558928474),
@@ -222,6 +221,44 @@ which library the process loaded. A passing Cairo/mmap test would establish
 DMA-BUF transport with a CPU download inside GTK; it would not establish a
 GPU-only presentation path.
 
+### Resumed GTK acceptance (2026-11-13)
+
+**Ghostty DMA-BUF transport through GTK Cairo/mmap passes on x1s.** This uses
+Mesa 106, the diagnostic GTK 4.24.1 revision 101, and the combined SYNC_FD /
+workgroup ICD listed above. Both staged library hashes match their CI artifacts.
+`PANVK_G77_LWG=1` and disabled shader caching remain explicit.
+
+- The strict spatial oracle reports `AB24`, modifier `0` (LINEAR), and passes
+  all 30 frames / 7,864,320 pixel checks without `glFinish` or `glReadPixels`.
+- `ghostty-gtk-dmabuf-106` passes all four fresh terminal captures, fullscreen
+  transitions, stale-frame rejection, GPU/Mali identity, normal exit and isolation.
+- `--require-dmabuf` passes: 51 GTK DMA-BUF texture creations and 59 mmap
+  downloads, with both positive markers inside every command-to-screenshot
+  interval. Ghostty reports no CPU-presentation fallback. The actual private
+  GTK, Mesa and ICD mappings are recorded in `result.json`.
+- The companion GTK oracle passes four captures with maximum pixel error zero.
+  The fullscreen terminal capture was also visually inspected.
+- The managed desktop was already stopped before this resumed test; it stayed
+  stopped. `X0` was preserved, and all test-owned processes cleaned up. This is
+  private-display qualification, not a managed-desktop installation test.
+
+The **GL renderer still fails** with revision 101: `EGL BadAccess` during
+Ghostty surface initialization, before shell readiness. Its failed run
+`ghostty-gtk-dmabuf-106-gl` passes isolation cleanup. This does not invalidate
+the Cairo transport result and does not qualify GPU-only presentation.
+
+An additional opt-in GTK revision 102 restores X11 EGL by omitting Termux's
+`no-egl.patch`; CI `43563316546` is building it. It is a separate private variant.
+`check-ghostty-panvk.py --require-dmabuf-gl` requires fresh GL texture-import
+markers in every capture interval, the explicit GL renderer, and no mmap or
+CPU texture downloads. The diagnostic library marks every DMA-BUF CPU download,
+including the EGL downloader, so EGL-assisted CPU readback cannot satisfy this
+check. The default experiment retains the original X11 EGL workaround.
+
+Host evidence: `temp/sync-fd/evidence/ghostty-gtk-dmabuf-106/` and its `-gl`
+negative run. Phone evidence uses the same names under
+`~/gpu-x1s/sync-fd-port/`. No installed GTK or launcher default changed.
+
 ### Package candidate
 
 `mesa-vulkan-icd-panvk-kbase-sync-fd` reuses the shared source-package support
@@ -244,11 +281,14 @@ the pinned-hash check.
 - `mesa-vulkan-icd-panvk-kbase-sync-fd_26.3.1_aarch64.deb`, SHA-256
   `4cf0242faa11426c80bf7b27d722de70aa167cbe9357f5df312a7e4df7433bf6`.
 
-**Ghostty DMA-BUF presentation and normal-package promotion remain pending.**
+**Ghostty DMA-BUF transport through Cairo/mmap is accepted. GPU-only
+presentation and normal-package promotion remain pending.**
 The Chrome oracle failure and installed desktop qualification must remain
 visible when deciding promotion. All phone processes started by this work
-were cleaned; only `X0` and the original managed owner 23548 / Shell 23741
-remained. Package building and audit require no further phone access.
+were cleaned. The earlier qualification preserved managed owner 23548 / Shell
+23741; the resumed GTK qualification preserved `X0` with the managed desktop
+already stopped before and after the run. Package building and audit require
+no further phone access.
 
 ## The job
 

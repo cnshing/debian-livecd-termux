@@ -30,7 +30,9 @@ jobs:
       run: |
         mkdir -p /tmp/gtk-dmabuf-build
         ./scripts/run-docker.sh ./build-package.sh -I -C -w -a aarch64 gtk4
-        ./scripts/run-docker.sh bash -c 'set -e; config=/home/builder/.termux-build/gtk4/build/config.h; grep "^#define HAVE_DMABUF 1$" "$config"; ! grep -q "^#define HAVE_UDMABUF 1$" "$config"; cp "$config" /home/builder/termux-packages/output/gtk-config.h'
+        cp /tmp/gtk-dmabuf-build/gtk4/build/config.h output/gtk-config.h
+        grep -E "^#define HAVE_DMABUF( +1)?$" output/gtk-config.h
+        ! grep -E "^#define HAVE_UDMABUF( +1)?$" output/gtk-config.h
         sha256sum output/*.deb > output/SHA256SUMS
     - uses: actions/upload-artifact@v4
       if: always()

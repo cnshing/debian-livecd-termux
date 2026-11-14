@@ -22,6 +22,9 @@ int main(int argc, char **argv)
        strcmp(argv[6], "run-nested-control") && strcmp(argv[6], "run-nested-prime")) return 2;
    const int capture_stats = getenv("PANVK_PROBE_STATS") && !strcmp(getenv("PANVK_PROBE_STATS"), "1");
    const int cts_max = !strcmp(argv[6], "run-cts-max") || !strcmp(argv[6], "compile-cts-max");
+   const int full_core = getenv("PANVK_PROBE_CORE_FEATURES") &&
+      !strcmp(getenv("PANVK_PROBE_CORE_FEATURES"), "1");
+   if (full_core && !cts_max) return 2;
    unsigned x = strtoul(argv[3], NULL, 10), y = strtoul(argv[4], NULL, 10);
    unsigned z = strtoul(argv[5], NULL, 10), n = x * y * z;
    if (!x || !y || !z || n > 1024) return 2;
@@ -81,18 +84,26 @@ int main(int argc, char **argv)
       .queueCreateInfoCount = 1, .pQueueCreateInfos = &qi, .pEnabledFeatures = &features};
    VkPhysicalDeviceMaintenance4Features maintenance4 = {
       .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_4_FEATURES};
+   VkPhysicalDeviceVulkan13Features core13 = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES};
+   VkPhysicalDeviceVulkan12Features core12 = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES,
+      .pNext = &core13};
+   VkPhysicalDeviceVulkan11Features core11 = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES,
+      .pNext = &core12};
+   void *feature_chain = full_core ? (void *)&core11 : (cts_max ? &maintenance4 : NULL);
    if (cts_max) {
       INST(vkGetPhysicalDeviceFeatures2);
       VkPhysicalDeviceFeatures2 available = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2,
-         .pNext = &maintenance4};
+         .pNext = feature_chain};
       vkGetPhysicalDeviceFeatures2(physical, &available);
-      if (!maintenance4.maintenance4) return 1;
-      di.pNext = &maintenance4;
+      if (!(full_core ? core13.maintenance4 : maintenance4.maintenance4)) return 1;
+      core13.robustImageAccess = VK_FALSE;
+      di.pNext = feature_chain;
+      printf("coreFeatures11_13=%u\n", full_core);
    }
    const char *stats_extension = VK_KHR_PIPELINE_EXECUTABLE_PROPERTIES_EXTENSION_NAME;
    VkPhysicalDevicePipelineExecutablePropertiesFeaturesKHR stats_feature = {
       .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PIPELINE_EXECUTABLE_PROPERTIES_FEATURES_KHR,
-      .pNext = cts_max ? &maintenance4 : NULL, .pipelineExecutableInfo = VK_TRUE};
+      .pNext = feature_chain, .pipelineExecutableInfo = VK_TRUE};
    if (capture_stats) {
       INST(vkGetPhysicalDeviceFeatures2);
       VkPhysicalDeviceFeatures2 available = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2,

@@ -1,6 +1,6 @@
 # Handoff: SYNC_FD semaphores in the packaged PanVK driver
 
-State on 2026-11-13, Galaxy S20 (`x1s`, Mali-G77, kbase job manager uAPI 11.35, Linux 4.19.87).
+State on 2026-11-14, Galaxy S20 (`x1s`, Mali-G77, kbase job manager uAPI 11.35, Linux 4.19.87).
 For whoever ports sync-file support into the driver we package. Paths under `temp/` are local
 files that Git ignores.
 
@@ -329,7 +329,24 @@ were cleaned. The earlier qualification preserved managed owner 23548 / Shell
 already stopped before and after the run. Package building and audit require
 no further phone access.
 
-## The job
+### Opt-in Ghostty stack package (2026-11-14)
+
+The selected follow-up is packaging the tested stack for explicit opt-in use.
+`tools/ghostty-dmabuf/lock.json` pins the original combined SYNC_FD/four-workgroup
+driver, Mesa 106 and GTK 4.24.1-102, including the measured runtime hashes.
+The manual `ghostty-dmabuf.yml` workflow assembles `ghostty-panvk-dmabuf`
+without rebuilding or changing those libraries. It also supplies a complete
+corresponding source bundle with pinned recipes, patches and build instructions.
+
+The dedicated command uses private GTK/Mesa/ICD paths, requires the tested
+x1s/kernel/JM ABI, disables shader caching, forces the tested LINEAR export
+allocation and starts a separate Ghostty instance. It restores the caller's
+graphics environment for terminal children. There are no maintainer scripts,
+global ICD files, alternatives or changes to the managed desktop and terminal
+defaults. See [installation and source instructions](../../tools/ghostty-dmabuf/README.md).
+CI and extracted-package device results are recorded below when complete.
+
+## Original job
 
 The packaged driver (`mesa-vulkan-icd-panvk-kbase`, Zenith's port, release 26.3.1) cannot
 create, import or export a SYNC_FD semaphore on this phone.
@@ -346,9 +363,9 @@ JimVulkan:  SYNC_FD: importable=1 exportable=1 compatible=0x11 create_exportable
 
 | Gain | Status |
 | --- | --- |
-| Zink reports native fences (`EGL_ANDROID_native_fence_sync`) | follows directly |
-| Mesa patches 0021 to 0023 stop doing anything | follows directly; see below |
-| Ghostty presents its frame as a DMA-BUF instead of reading it back | **needs two more things**, below |
+| Zink reports native fences (`EGL_ANDROID_native_fence_sync`) | observed with the port |
+| Mesa patches 0021 to 0023 stop doing anything | guarded paths bypassed with SYNC_FD; retain for older drivers |
+| Ghostty presents its frame as a DMA-BUF instead of reading it back | private GTK GL qualification passes with the additional fixes below |
 
 The three Zink patches (`packages/mesa/0021`, `0022`, `0023`) each test for the missing
 capability, so with a working driver 0021 passes the query, 0022 no longer refuses export and
@@ -366,17 +383,19 @@ driver without SYNC_FD, still needs them.
    creates the semaphore, the attach fails quietly, and GTK can read the buffer before the
    GPU has finished it. Ghostty's export (`src/renderer/opengl/Target.zig`, `exportDmabuf`)
    blits and exports; it does not wait.
-   The missing piece is a wait in Zink: when the attach fails with `ENOTTY`, finish the batch
-   before the flush that exported the buffer returns. That is a fourth small patch, and the
-   existing stale-frame control is its test.
+   Patch 0024 supplies the required Zink wait: when the attach fails with `ENOTTY`, finish
+   the batch before the flush that exported the buffer returns. The direct readback
+   oracle fails without this wait and passes with it; see the measured controls above.
 2. **Ghostty needs OpenGL 4.3 before any of this matters.** With the packaged driver it runs
-   on llvmpipe. See [PANVK-VERSION-BUMP-HANDOFF.md](PANVK-VERSION-BUMP-HANDOFF.md).
+   on llvmpipe. The opt-in stack uses the tested G77 workgroup driver instead.
+   See [PANVK-VERSION-BUMP-HANDOFF.md](PANVK-VERSION-BUMP-HANDOFF.md).
 
 The installed GTK build is another independent gate: Termux compiles DMA-BUF
 support out, so even Cairo uses Ghostty's CPU-readback fallback. The direct EGL
-probe above validates the producer wait without GTK. Rebuild and qualify GTK's
-DMA-BUF consumer before claiming Ghostty DMA-BUF presentation. GTK's GL renderer
-also has the earlier `error.BadAccess` failure recorded in
+probe above validates the producer wait without GTK. The private GTK revision 102
+enables DMA-BUF detection and X11 EGL; its measured GL import passes above.
+Mesa 106 and its opt-in LINEAR allocation also remain necessary. GTK revision 101
+retains the earlier GL `error.BadAccess` failure recorded in
 [GHOSTTY-PANVK-HANDOFF.md](GHOSTTY-PANVK-HANDOFF.md).
 
 ## Why the packaged driver has no SYNC_FD here
@@ -470,27 +489,26 @@ selected until its installed-desktop and consumer promotion gates are met.
 
 Builds run in GitHub CI, not on the host or the phone.
 
-## Tests, in order
+## Qualification status and remaining gates
 
-1. **Run `tools/panvk-probes/sync-fd.c` with `--exercise`**, then run
-   `jm-pending-fence.py` against the same ICD. These are implemented and the JimVulkan
-   reference control passed (above). The independent port still needs both controls.
-   Use the latest probe CI artifact; normal invocation only reports capabilities.
-2. Zenith's probes (`~/gpu-x1s/panvk/probes`: `compute`, `sync`, `triangle`) on the patched
-   driver, pictures identical to the baseline's.
-3. **The desktop**, because Mutter starts using native fences the moment Zink reports them,
-   the path patch 0021 switched off: `tests/native/panvk-desktop.py --mode shm --cycles 20
-   --driver <patched>`, checked with `tests/native/check-panvk-desktop.py`. No semaphore
-   errors in the Shell log, stale-frame control rejected.
-4. **Firefox video** (`tests/browsers/test-acceleration.py firefox`, VP9 and HEVC). It
-   imports dma-bufs, so Zink now creates a semaphore per plane and tries both ioctls. A Mesa
-   built with assertions aborts there (`assert(!"how did this fail?")`); the package is not,
-   but check.
-5. Chromium and Chrome playback through the installed wrappers, for the glibc driver.
-6. **Ghostty** on the large-workgroup driver with the extra Zink wait:
-   `panvk-desktop.py --ghostty-probe` and `tests/native/check-ghostty-panvk.py`. Its
-   colour-phase control is what catches a frame presented before the GPU finished. Run it
-   without the wait once, to see the control fail.
+| Gate | Status |
+| --- | --- |
+| SYNC_FD exercise and pending-fence fixture | passed on independent Bionic and glibc ports, including FD lifetime and timeout controls |
+| Basic compute/sync/triangle | passed; baseline triangle pixels identical |
+| Private GNOME/GTK desktop | passed 20 SHM cycles / 40 captures; stale control rejected, no semaphore errors |
+| Firefox VP9/HEVC and Chromium VP9 | passed with private candidate drivers and installed wrapper logic |
+| Chrome VP9 | failed frame 36 SSIM threshold; unpatched baseline identical; remains open |
+| Producer fence wait | direct EGL readback passes with 0024; Mesa 102/103 without the wait fail immediately |
+| Ghostty → GTK DMA-BUF | private Mesa 106 + GTK 102 GL import passes four fresh captures with no CPU download; Cairo/mmap also passes |
+| Normal installed desktop/default driver promotion | pending; not implied by private qualification or opt-in packaging |
+
+For a new candidate use `panvk-desktop.py --ghostty-probe --ghostty-gsk gl`,
+then both `check-panvk-desktop.py` and
+`check-ghostty-panvk.py --require-dmabuf-gl`. The strict checker requires fresh
+positive GL import evidence in every capture interval and rejects CPU downloads,
+CPU fallback, stale pixels and abnormal exit. Correct pixels alone do not prove
+DMA-BUF presentation. The earlier direct no-wait controls establish the race;
+a delayed Ghostty screenshot need not reproduce it on every run.
 
 Phone rules are in [VIDEO-ENCODING-HANDOFF.md](VIDEO-ENCODING-HANDOFF.md): private displays
 only, mark `temp/PHONE-STATUS`, check memory between runs.

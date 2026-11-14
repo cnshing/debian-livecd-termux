@@ -33,10 +33,14 @@ def main():
     for kind, repo, revision in snapshots:
         with (sources / f'{kind}-recipes-{revision}.tar.gz').open('wb') as output:
             subprocess.run(['gh', 'api', f'repos/{repo}/tarball/{revision}'], stdout=output, check=True)
+    revision = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=HERE, text=True).strip()
+    subprocess.run(['git', 'archive', '--format=tar.gz', '-o',
+                    str((sources / f'packaging-recipes-{revision}.tar.gz').resolve()), 'HEAD'],
+                   cwd=HERE, check=True)
     # All upstream source, exact recipe snapshots, compiler pins and build
     # workflows accompany the binary. No dependency on artifact retention to
     # obtain source after downloading this bundle.
-    for name in ('lock.json', 'README.md', 'launcher.py', 'package.py', 'fetch.py'):
+    for name in ('lock.json', 'README.md', 'launcher.py', 'package.py', 'fetch.py', 'test.py'):
         shutil.copyfile(HERE / name, sources / name)
     (sources / 'SHA256SUMS').write_text(''.join(
         hashlib.file_digest(p.open('rb'), 'sha256').hexdigest() + '  ' + p.name + '\n'

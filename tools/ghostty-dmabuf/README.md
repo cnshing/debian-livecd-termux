@@ -72,6 +72,9 @@ complete GTK/Mesa upstream archives, reconstructed PanVK base source, exact
 project snapshots for each build, the pinned Termux and Zenith repositories,
 and this packaging code. All modifications and build scripts are included;
 the source bundle can be retained independently of Actions artifact expiry.
+The `packaging-recipes-*.tar.gz` snapshot contains this entire repository at
+the assembly revision, including the packaging workflow and tests. Use that
+snapshot's directory layout when rerunning packaging scripts.
 
 * GTK: extract the `gtk-recipes-8fb9...tar.gz` project snapshot and the
   `termux-recipes-538685...tar.gz` snapshot. Set `GTK_DMABUF_X11_EGL=1` and run

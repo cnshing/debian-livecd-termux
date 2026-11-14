@@ -2,6 +2,12 @@ name: PanVK source rebuild
 
 on:
   workflow_dispatch:
+    inputs:
+      variant:
+        description: Isolated driver change (baseline applies no patches)
+        type: choice
+        options: [baseline, point-size, x11, workgroups, research]
+        default: baseline
   push:
     branches: [research/panvk-kbase-probes]
     paths:
@@ -77,6 +83,8 @@ jobs:
         .venv/bin/pip install 'meson>=1.7,<2'
         echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
     - name: Build ICD in CI
+      env:
+        PANVK_BUILD_VARIANT: ${{ inputs.variant || 'research' }}
       run: bash tools/panvk-probes/build-driver.sh '${{ matrix.kind }}' zenith out
     - uses: actions/upload-artifact@v4
       if: always()

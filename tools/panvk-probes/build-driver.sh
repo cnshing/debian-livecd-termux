@@ -6,6 +6,16 @@ zenith=$(realpath "$2")
 out=$(realpath -m "$3")
 here=$(dirname "$(realpath "$0")")
 patch_dir=${PANVK_DRIVER_PATCH_DIR:-$here/driver-patches}
+case "${PANVK_BUILD_VARIANT:-research}" in
+  research) ;;
+  baseline) patch_dir= ;;
+  x11) patch_dir="$out/selected-patches"; mkdir -p "$patch_dir"
+    cp "$here/driver-patches/0001-termux-x11-sonames.patch" "$patch_dir/" ;;
+  point-size) patch_dir="$out/selected-patches"; mkdir -p "$patch_dir"
+    cp "$here/driver-patches/0002-v9-per-vertex-point-size.patch" "$patch_dir/" ;;
+  workgroups) patch_dir="$here/workgroup-patches" ;;
+  *) echo 'Unknown PANVK_BUILD_VARIANT' >&2; exit 1 ;;
+esac
 mkdir -p "$out"
 mesa="$zenith/work/mesa"
 test -f "$mesa/.panvk-patchlevel"
@@ -43,12 +53,16 @@ else
   ninja -j4 -C "$zenith/build/glibc-ci"
   cp "$zenith/build/glibc-ci/src/panfrost/vulkan/libvulkan_panfrost.so" "$out/"
   llvm-strip-18 "$out/libvulkan_panfrost.so"
+  # Runtime libraries come from the package's glibc/lib directory, selected by
+  # BIONILUX_LIBRARY_PATH. A CI-only RUNPATH must never ship in a package.
+  patchelf --remove-rpath "$out/libvulkan_panfrost.so"
 fi
 readelf -d "$out/libvulkan_panfrost.so" > "$out/DYNAMIC.txt"
 readelf --version-info "$out/libvulkan_panfrost.so" > "$out/VERSIONS.txt"
 cp "$zenith/work/ci-deps/PACKAGES.sha256" "$out/DEPENDENCIES.sha256"
 {
   echo "kind=$kind"
+  echo "variant=${PANVK_BUILD_VARIANT:-research}"
   echo "zenith=$(git -C "$zenith" rev-parse HEAD)"
   echo "mesa-tree=$(git -C "$mesa" rev-parse HEAD^{tree})"
   meson --version
@@ -60,6 +74,12 @@ cp "$zenith/work/ci-deps/PACKAGES.sha256" "$out/DEPENDENCIES.sha256"
 } > "$out/BUILD.txt"
 (cd "$out" && sha256sum libvulkan_panfrost.so > SHA256SUMS)
 cat "$out/BUILD.txt" "$out/DYNAMIC.txt" "$out/SHA256SUMS"
+
+# A source-built baseline is the package qualification control. No driver
+# patch (including the X11 soname patch) is applied to this variant.
+if [ "${PANVK_BUILD_VARIANT:-research}" = baseline ]; then
+  exit 0
+fi
 
 # Keep the unmodified reconstructed driver above as the equivalence control.
 # Build our small series incrementally with the same code generators and deps.

@@ -159,9 +159,42 @@ static int exercise(PFN_vkGetInstanceProcAddr gipa, VkInstance instance,
    return 0;
 }
 
+static int pending(PFN_vkGetInstanceProcAddr gipa, VkInstance instance,
+                   VkDevice device, int fd)
+{
+   PFN_vkCreateSemaphore create = (PFN_vkCreateSemaphore)gipa(instance, "vkCreateSemaphore");
+   PFN_vkDestroySemaphore destroy = (PFN_vkDestroySemaphore)gipa(instance, "vkDestroySemaphore");
+   PFN_vkImportSemaphoreFdKHR import = (PFN_vkImportSemaphoreFdKHR)gipa(instance, "vkImportSemaphoreFdKHR");
+   PFN_vkGetSemaphoreFdKHR export = (PFN_vkGetSemaphoreFdKHR)gipa(instance, "vkGetSemaphoreFdKHR");
+   if (!create || !destroy || !import || !export || fd < 0) return 1;
+   VkExportSemaphoreCreateInfo ex = {.sType=VK_STRUCTURE_TYPE_EXPORT_SEMAPHORE_CREATE_INFO,
+      .handleTypes=VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_SYNC_FD_BIT};
+   VkSemaphoreCreateInfo sci = {.sType=VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO, .pNext=&ex};
+   VkSemaphore sem;
+   CHECK(create(device, &sci, NULL, &sem));
+   VkImportSemaphoreFdInfoKHR imp = {.sType=VK_STRUCTURE_TYPE_IMPORT_SEMAPHORE_FD_INFO_KHR,
+      .semaphore=sem, .flags=VK_SEMAPHORE_IMPORT_TEMPORARY_BIT,
+      .handleType=VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_SYNC_FD_BIT, .fd=fd};
+   CHECK(import(device, &imp));
+   VkSemaphoreGetFdInfoKHR get = {.sType=VK_STRUCTURE_TYPE_SEMAPHORE_GET_FD_INFO_KHR,
+      .semaphore=sem, .handleType=VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_SYNC_FD_BIT};
+   int copy = -2;
+   CHECK(export(device, &get, &copy));
+   if (copy < 0) { fprintf(stderr, "FAIL pending export fd=%d\n", copy); return 1; }
+   struct pollfd p = {.fd=copy, .events=POLLIN};
+   int r = poll(&p, 1, 100);
+   close(copy);
+   destroy(device, sem, NULL);
+   if (r != 0) { fprintf(stderr, "FAIL pending fence signalled: %d %x\n", r, p.revents); return 1; }
+   puts("PASS pending import/export: unsignalled fence timed out after 100 ms");
+   return 0;
+}
+
 int main(int argc, char **argv)
 {
-   if (argc < 2 || argc > 3 || (argc == 3 && strcmp(argv[2], "--exercise"))) return 2;
+   if (argc < 2 || argc > 4 ||
+       (argc == 3 && strcmp(argv[2], "--exercise")) ||
+       (argc == 4 && strcmp(argv[2], "--pending-fd"))) return 2;
    setvbuf(stdout, NULL, _IONBF, 0);
    alarm(60);
    void *lib = dlopen(argv[1], RTLD_NOW | RTLD_LOCAL);
@@ -228,8 +261,9 @@ int main(int argc, char **argv)
       if (rc == VK_SUCCESS) destroy_sem(device, sem, NULL);
    }
    int result = 0;
-   if (argc == 3) {
+   if (argc >= 3) {
       if (!supported) { puts("SKIP exercise: SYNC_FD unsupported"); result = 77; }
+      else if (argc == 4) result = pending(gipa, instance, device, atoi(argv[3]));
       else result = exercise(gipa, instance, physical, device);
    }
    destroy_device(device, NULL);

@@ -14,6 +14,7 @@ on:
     - tools/panvk-probes/add-dump.py
     - tools/panvk-probes/glibc-deps.sh
     - tools/panvk-probes/sync-fd.c
+    - tools/panvk-probes/jm-pending-fence.py
 
 permissions:
   contents: read
@@ -43,6 +44,8 @@ jobs:
       run: bash tools/panvk-probes/build.sh zenith vulkan-headers out
     - name: Build wider Android feature and AHB probes
       run: bash tools/panvk-probes/build-features.sh zenith vulkan-headers out/features
+    - name: Include pending-fence fixture
+      run: cp tools/panvk-probes/jm-pending-fence.py out/
     - uses: actions/upload-artifact@v4
       with:
         name: panvk-probes-android-aarch64

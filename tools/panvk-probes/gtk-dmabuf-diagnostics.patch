@@ -4,6 +4,11 @@ No change to import acceptance, layout checks or synchronization.
 
 --- a/gdk/gdkdmabuftexture.c
 +++ b/gdk/gdkdmabuftexture.c
+@@ -158,3 +158,4 @@
+   GdkDmabufTexture *self = GDK_DMABUF_TEXTURE (texture);
+   Download download = { self, data, *layout, color_state, 0 };
++  g_message ("Downloading dmabuf texture to CPU");
+ 
 @@ -271,7 +271,7 @@
    GDK_TEXTURE (self)->format = format;
    self->dmabuf = dmabuf;

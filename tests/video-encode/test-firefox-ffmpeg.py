@@ -22,11 +22,12 @@ import sys
 EOF = -541478725  # AVERROR_EOF
 EAGAIN = -11
 WIDTH, HEIGHT, BITRATE, PICTURES = 640, 360, 2000000, 120
-# (label, declared frame rate or 0 for none, microseconds between pictures)
-RATES = [('30 fps declared and sent', 30, 33333),
-         ('450 fps declared, 30 sent', 450, 33333),
-         ('no rate declared, 30 sent', 0, 33333),
-         ('30 fps declared, 15 sent', 30, 66667)]
+# (label, declared frame rate or 0 for none, microseconds between pictures, repeating)
+RATES = [('30 fps declared and sent', 30, (33333,)),
+         ('450 fps declared, 30 sent', 450, (33333,)),
+         ('no rate declared, 30 sent', 0, (33333,)),
+         ('30 fps declared, 15 sent', 30, (66667,)),
+         ('450 fps declared, 33 and 50 ms apart', 450, (33333, 50000))]
 
 
 class Frame(C.Structure):  # The start of AVFrame, libavutil 61.
@@ -95,7 +96,7 @@ def probe(directory, name, rate=None):
         codec.avcodec_free_context(C.byref(context))
 
 
-def encode(util, codec, context, packet, interval):
+def encode(util, codec, context, packet, intervals):
     """Encode PICTURES pictures of fresh 8x8 blocks, which cost bits at any quantizer."""
     util.av_frame_alloc.restype = C.c_void_p
     util.av_frame_get_buffer.argtypes = [C.c_void_p, C.c_int]
@@ -106,7 +107,7 @@ def encode(util, codec, context, packet, interval):
     if not pointer:
         raise MemoryError('frame')
     frame, output = Frame.from_address(pointer.value), Packet.from_address(packet.value)
-    size = packets = 0
+    size = packets = pts = 0
 
     def receive():
         nonlocal size, packets
@@ -133,7 +134,8 @@ def encode(util, codec, context, packet, interval):
                     C.memmove(frame.data[0] + (block * 8 + line) * frame.linesize[0], row, WIDTH)
             for plane in (1, 2):
                 C.memset(frame.data[plane], 128, frame.linesize[plane] * (HEIGHT // 2))
-            frame.pts = index * interval
+            frame.pts = pts
+            pts += intervals[index % len(intervals)]
             ret = codec.avcodec_send_frame(context, pointer)
             if ret < 0:
                 raise RuntimeError(f'send {index}: {ret}')
@@ -144,7 +146,7 @@ def encode(util, codec, context, packet, interval):
     finally:
         util.av_frame_free(C.byref(pointer))
     return {'packets': packets, 'bytes': size,
-            'kbps': round(size * 8 / (PICTURES * interval / 1e6) / 1000, 1)}
+            'kbps': round(size * 8 / (pts / 1e6) / 1000, 1)}
 
 
 def rates(directory, name):

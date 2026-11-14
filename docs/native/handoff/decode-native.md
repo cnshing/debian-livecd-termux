@@ -37,6 +37,9 @@ These come from reading the code; none has been run on a phone.
 
 ## Next steps
 
+These serve the parity criterion; [s20-codec-parity.md](s20-codec-parity.md) adds VP8, MPEG-4,
+10-bit and 4K/8K work on top of them.
+
 1. Decide what the session should offer, then make it match the launcher. The simplest fix is
    to apply the same codec list and Mali variables in `native_encode()` as `video_environment`
    does, sharing the code. Add a host test beside the existing desktop tests.

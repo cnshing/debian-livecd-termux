@@ -11,7 +11,7 @@ find the encoder with no settings.
 
 | Program | Adreno (Note10+) | Mali (S20) |
 | --- | --- | --- |
-| Encoders found | H.264, HEVC (`OMX.qcom.*`) | H.264, HEVC, VP9 (`OMX.Exynos.*`); no AV1; 8-bit only |
+| Encoders found | H.264, HEVC (`OMX.qcom.*`) | H.264, HEVC, VP9 (`OMX.Exynos.*`). The phone also has VP8, MPEG-4 and H.263 encoders, which the bridge does not offer ([parity](s20-codec-parity.md)). The bridge sends 8-bit NV12 only |
 | Daemon's own protocol test | passes | 28 of 30; both failures are an extra key frame (below) |
 | FFmpeg `h264_vaapi`, `hevc_vaapi` | 46 of 46, live camera at 720p30 in real time | 46 of 46 with driver revision 7 and a VA-API FFmpeg, privately. Colours right only with added metadata (below) |
 | GStreamer `vah264enc`, `vah265enc`; Serein | pass in a test prefix | camera key frames and pixels pass (revision 6); low bitrate and screen sharing fail |
@@ -51,6 +51,9 @@ find the encoder with no settings.
   screen-share pipeline managed 51 frames in 118 s, so screen sharing is not usable.
 
 ## Next steps
+
+These serve the parity criterion; [s20-codec-parity.md](s20-codec-parity.md) adds VP8, 10-bit and
+4K/8K work on top of them.
 
 1. Find why the S20 is not offered `ffmpeg` `9.0.2-100`, and fix it.
 2. Rerun the full native suite on `android-vaapi` revision 8 on both phones, then merge 6–8 to

@@ -1,6 +1,13 @@
 # Video handoffs, one per feature
 
-State on 2026-11-14. Each page covers one feature: what works, what is broken and why, and the
+State on 2026-11-14.
+
+**Acceptance criterion:** feature parity with the S20's own encoding and decoding: every
+hardware codec Android offers on that phone, up to its limits.
+[s20-codec-parity.md](s20-codec-parity.md) has the target, the gaps and the order of work. The
+other pages feed into it.
+
+Each page covers one feature: what works, what is broken and why, and the
 next steps in order. They are written to stand on their own. Evidence kept outside Git (under
 `temp/` or on the phone) is named only where it helps; nothing here depends on it.
 
@@ -24,8 +31,10 @@ Two phones were used:
 | Chromium encode | not run | WebRTC works behind a flag; WebCodecs crashes; patch in CI | no | [encode-chromium.md](encode-chromium.md) |
 | Chrome encode | not run | WebRTC has no network; WebCodecs crash cannot be patched | no | [encode-chrome.md](encode-chrome.md) |
 | Firefox encode | not run | off by the user's decision; two Firefox bugs | no | [encode-firefox.md](encode-firefox.md) |
+| **Parity with the S20's codecs** | n/a | not met: H.264 decode off; VP8, MPEG-4 and H.263 not offered; 10-bit, 4K and 8K untested; nothing on a fresh install | n/a | [s20-codec-parity.md](s20-codec-parity.md) |
 
-AV1 is disabled on every phone. The Snapdragon 855 has no AV1 decoder; the S20 was never tried.
+AV1 is disabled on every phone. Neither the Snapdragon 855 nor the S20 has an AV1 decoder, so
+software AV1 is parity.
 
 ## The shared path
 

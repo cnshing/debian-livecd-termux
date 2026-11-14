@@ -15,5 +15,6 @@ library_dir = Path(os.environ.get('PANVK_GTK_LIB_DIR',
 os.environ['LD_LIBRARY_PATH'] = ':'.join(filter(None, (
     str(library_dir), os.environ.get('LD_LIBRARY_PATH', ''))))
 os.environ['GDK_DEBUG'] = ','.join(filter(None, (os.environ.get('GDK_DEBUG', ''), 'dmabuf')))
+os.environ['ZINK_LINEAR_DMABUF_EXPORT'] = '1'
 ghostty = str(Path(os.environ['PREFIX']) / 'bin/ghostty')
 os.execv(ghostty, [ghostty, *sys.argv[1:]])

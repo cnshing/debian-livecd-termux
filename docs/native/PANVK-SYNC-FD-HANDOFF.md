@@ -125,25 +125,40 @@ above already establishes why Mesa patch 0024 is necessary on this kernel.
 `.github/workflows/gtk-dmabuf.yml` builds the pinned Termux GTK 4.24.1
 recipe with `HAVE_DMABUF` header detection restored. UDMABUF remains disabled,
 and the existing X11 EGL workaround remains in place. Debug diagnostics are
-retained for `GDK_DEBUG=dmabuf`. This workflow produces a qualification artifact
+retained; revision 101 also logs the two positive path markers unconditionally. This workflow produces a qualification artifact
 only; it does not add GTK to the normal repository or change launcher defaults.
 Extract its `libgtk-4.so.1` privately and prepend that directory only for Ghostty.
 The checked-in `tools/panvk-probes/ghostty-gtk-dmabuf.py` launcher does this
 when copied beside `gtk-dmabuf/lib/` and passed as `--ghostty-launcher` to the
 desktop probe. `PANVK_GTK_LIB_DIR` can select another private directory.
 
-The first build [43557476296](https://github.com/cnshing/debian-livecd-termux/actions/runs/43557476296)
-compiled and packaged successfully, including the DMA-BUF implementation. Its
-post-build check failed because it expected Meson's boolean define to include
-`1`; the corrected workflow accepts the presence-only definition. The phone
-became unreachable during private library transfer, before any test launched.
-Device acceptance is still pending.
+[GTK CI 43558508034](https://github.com/cnshing/debian-livecd-termux/actions/runs/43558508034)
+passes, including the generated configuration audit: `#define HAVE_DMABUF` and
+`#undef HAVE_UDMABUF`. Earlier builds compiled and packaged successfully but
+failed an overly strict post-build check expecting a numeric boolean define.
+
+The first private device run, `ghostty-gtk-dmabuf-1`, loads the staged GTK
+library (confirmed in `/proc` mappings). It passes four fresh Ghostty captures,
+normal exit and isolation, but **still uses CPU fallback**: GTK rejects
+`Unsupported dmabuf format: AB24:0xffffffffffffff`. The compile-time gate is
+cleared; the modifier gate remains. Ghostty replaces `GDK_DEBUG` during startup,
+so the private revision 101 build adds unconditional positive import/download
+messages, without changing acceptance checks or synchronization.
 
 GTK's mmap importer advertises and accepts only `DRM_FORMAT_MOD_LINEAR`.
-The earlier EGL oracle reported `DRM_FORMAT_MOD_INVALID`, which must not simply
-be relabelled as linear. `dmabuf-readback.py --spatial` now checks four distinct
-quadrants on each changing frame; `--require-linear` additionally rejects an
-implicit modifier. These new device checks have not run yet.
+The implicit modifier must not simply be relabelled for unknown layouts.
+`dmabuf-readback.py --spatial` passes 30 frames and 7,864,320 pixel checks with
+Mesa 104, using four distinct quadrants on each changing frame. Its additional
+`--require-linear` check rejects Mesa 104, matching GTK's rejection.
+
+Mesa revision 105 adds
+`0025-zink-export-linear-image-modifier.patch`: report LINEAR only when Zink's
+resource records that the image was created with `VK_IMAGE_TILING_LINEAR` and
+its modifier was otherwise INVALID. The existing Vulkan subresource offset and
+row pitch are retained. Unknown/optimal layouts keep their existing modifier.
+This follows the [Vulkan linear-tiling definition](https://docs.vulkan.org/refpages/latest/refpages/source/VkImageTiling.html)
+and [DRM linear-layout contract](https://www.kernel.org/doc/html/latest/userspace-api/dma-buf-alloc-exchange.html).
+Runtime qualification of revision 105 is pending its CI build.
 
 `check-ghostty-panvk.py --require-dmabuf` requires positive GTK texture-import
 and mmap-download diagnostics at least once per fresh capture, in addition to

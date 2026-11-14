@@ -11,6 +11,26 @@ import terminal
 
 
 class Terminal(unittest.TestCase):
+    def test_qualified_package_routes_normal_launches_without_glx_probe(self):
+        source = {'GALLIUM_DRIVER': 'llvmpipe', 'GSK_RENDERER': 'cairo'}
+        with mock.patch.object(terminal, 'dmabuf_available', return_value=True), \
+             mock.patch.object(terminal.subprocess, 'run') as run:
+            argv = terminal.command(['--working-directory=/tmp/with spaces', '-e', 'echo', 'hello'], source)
+            self.assertEqual(argv[0], str(terminal.PREFIX / 'bin/ghostty-panvk-dmabuf'))
+            self.assertEqual(argv[1:], ['--working-directory=/tmp/with spaces', '-e', 'echo', 'hello'])
+            self.assertEqual(terminal.environment(source), source)
+            run.assert_not_called()
+
+    def test_failed_device_or_hash_check_and_explicit_disable_keep_normal_terminal(self):
+        for result in (subprocess.CompletedProcess([], 1, ''), subprocess.CompletedProcess([], 0, '')):
+            with mock.patch.object(Path, 'is_file', return_value=True), \
+                 mock.patch.object(terminal.subprocess, 'run', return_value=result):
+                self.assertEqual(terminal.dmabuf_available({}), result.returncode == 0)
+        with mock.patch.object(terminal.subprocess, 'run') as run:
+            self.assertFalse(terminal.dmabuf_available({'LIVECD_GHOSTTY_DMABUF': '0'}))
+            self.assertEqual(terminal.command([], {'LIVECD_GHOSTTY_DMABUF': '0'}), [str(terminal.PREFIX / 'bin/ghostty')])
+            run.assert_not_called()
+
     def test_low_version_panvk_uses_software_only_for_the_terminal(self):
         original = {'LIVECD_NATIVE_VULKAN_DRIVER': 'panvk', 'LIVECD_NATIVE_RENDERER': 'zink',
                     'VK_DRIVER_FILES': '/panvk.json', 'GALLIUM_DRIVER': 'zink'}

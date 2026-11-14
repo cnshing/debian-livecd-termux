@@ -1,0 +1,9 @@
+{
+  "version": "1.0-2",
+  "release": "https://github.com/cnshing/debian-livecd-termux/releases/download/ghostty-panvk-dmabuf-1.0-2",
+  "file": "ghostty-panvk-dmabuf_1.0-2_aarch64.deb",
+  "sha256": "dcefab5047d84a82a33337591adee9a88f8b0d42185369533051b897233d7631",
+  "source_file": "ghostty-panvk-dmabuf_1.0-2_sources.tar.gz",
+  "source_sha256": "92d3a06d279cde2a01f4d3f7ee380deed2e60fdaa2556848e865fec4905923af",
+  "run": 43596695017
+}

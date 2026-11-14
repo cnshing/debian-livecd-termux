@@ -134,6 +134,37 @@ if test -r /dev/mali0 && test -w /dev/mali0; then
     packages+=(mesa-vulkan-icd-panvk-kbase)
 fi
 "${apt[@]}" install --no-install-recommends "${packages[@]}"
+# The measured G77 stack has a specific device/kernel/JM ABI. Reuse its guard
+# before installing; /dev/mali0 alone also matches incompatible Mali devices.
+if test -r /dev/mali0 && test -w /dev/mali0 && python - "$repo/tools/ghostty-dmabuf/launcher.py" <<'EOF'
+import runpy, sys
+try:
+    runpy.run_path(sys.argv[1])['check_device']()
+except (OSError, RuntimeError):
+    raise SystemExit(1)
+EOF
+then
+    read -r stack_version stack_url stack_sha stack_file < <(python - "$repo/packages/ghostty-panvk-dmabuf/release.lock.json" <<'EOF'
+import json, sys
+p = json.load(open(sys.argv[1]))
+print(p['version'], p['release'], p['sha256'], p['file'])
+EOF
+    )
+    if apt-cache show "ghostty-panvk-dmabuf=$stack_version" >/dev/null 2>&1; then
+        "${apt[@]}" install "ghostty-panvk-dmabuf=$stack_version"
+    elif test -n "$offline"; then
+        echo 'This offline repository lacks the qualified Mali Ghostty stack. Use a newer offline tarball.' >&2
+        exit 2
+    else
+        # Compatibility with releases made before the recipe joined the repo.
+        mkdir -p "$state/downloads"
+        curl --fail --location --retry 3 "$stack_url/$stack_file" -o "$state/downloads/$stack_file"
+        printf '%s  %s\n' "$stack_sha" "$state/downloads/$stack_file" | sha256sum --check --status
+        "${apt[@]}" install "$state/downloads/$stack_file"
+    fi
+    "$PREFIX/bin/ghostty-panvk-dmabuf" --check
+    echo 'Compatible Mali-G77 detected: Ghostty uses the qualified GTK GL DMA-BUF stack by default.'
+fi
 # Runtime code is owned by livecd-desktop. Setup only connects per-user paths.
 python "$PREFIX/libexec/livecd-native/runtime.py"
 if ! test -f "$HOME/.local/lib/livecd/config.json"; then

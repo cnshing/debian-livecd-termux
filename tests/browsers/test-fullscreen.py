@@ -268,7 +268,7 @@ pixel:Array.from(pixel),error:gl.getError(),lost:gl.isContextLost()};
             def do_GET(self):
                 if self.path == '/probe.html':
                     body = b'''<!doctype html><title>Fullscreen compositor probe</title>
-<style>html,body{width:100%;height:100%;margin:0;overflow:hidden;background:#234;color:white}
+<style>html,body{width:100%;height:100%;margin:0;padding:4px;box-sizing:border-box;overflow:hidden;background:#234;color:white}
 canvas,video{display:block;width:100%;height:100%;object-fit:contain}</style>
 <canvas id=c width=640 height=360></canvas><script>
 let ctx=c.getContext('2d');function draw(t){ctx.fillStyle=`hsl(${t/20%360} 70% 40%)`;

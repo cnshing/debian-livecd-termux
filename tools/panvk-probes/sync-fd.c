@@ -1,5 +1,6 @@
 /* Separate extension presence from actual SYNC_FD import/export support. */
 #include <dlfcn.h>
+#include <dirent.h>
 #include <errno.h>
 #include <poll.h>
 #include <signal.h>
@@ -14,6 +15,18 @@
    VkResult r_ = (call); \
    if (r_ != VK_SUCCESS) { fprintf(stderr, "FAIL %s: %d\n", #call, r_); return 1; } \
 } while (0)
+
+static int fd_count(void)
+{
+   DIR *dir = opendir("/proc/self/fd");
+   if (!dir) return -1;
+   int count = 0;
+   struct dirent *entry;
+   while ((entry = readdir(dir)))
+      if (strcmp(entry->d_name, ".") && strcmp(entry->d_name, "..")) count++;
+   closedir(dir);
+   return count;
+}
 
 static int wait_fd(int fd)
 {
@@ -94,6 +107,7 @@ static int exercise(PFN_vkGetInstanceProcAddr gipa, VkInstance instance,
    VkFence fence;
    CHECK(CreateFence(device, &fci, NULL, &fence));
    unsigned real_fds = 0;
+   int initial_fds = -1;
    for (unsigned n=0; n<300; n++) {
       VkSubmitInfo submit = {.sType=VK_STRUCTURE_TYPE_SUBMIT_INFO,
          .commandBufferCount=1, .pCommandBuffers=&cmd,
@@ -125,7 +139,14 @@ static int exercise(PFN_vkGetInstanceProcAddr gipa, VkInstance instance,
       CHECK(WaitForFences(device, 1, &fence, VK_TRUE, 5000000000ull));
       CHECK(ResetFences(device, 1, &fence));
       memset(map, 0, 4096);
+      if (n == 0) initial_fds = fd_count();
    }
+   int final_fds = fd_count();
+   if (initial_fds < 0 || final_fds != initial_fds) {
+      fprintf(stderr, "FAIL FD lifetime: first=%d final=%d\n", initial_fds, final_fds);
+      return 1;
+   }
+   printf("PASS FD lifetime: first=%d final=%d\n", initial_fds, final_fds);
    printf("PASS real-work/export/poll/import/reuse: 300 iterations, real_fds=%u\n", real_fds);
    VkSubmitInfo empty = {.sType=VK_STRUCTURE_TYPE_SUBMIT_INFO,
       .signalSemaphoreCount=1, .pSignalSemaphores=&sem};
@@ -175,7 +196,27 @@ static int pending(PFN_vkGetInstanceProcAddr gipa, VkInstance instance,
    VkImportSemaphoreFdInfoKHR imp = {.sType=VK_STRUCTURE_TYPE_IMPORT_SEMAPHORE_FD_INFO_KHR,
       .semaphore=sem, .flags=VK_SEMAPHORE_IMPORT_TEMPORARY_BIT,
       .handleType=VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_SYNC_FD_BIT, .fd=fd};
+   int fence_fd = dup(fd);
+   if (fence_fd < 0) return 1;
    CHECK(import(device, &imp));
+   PFN_vkCreateFence create_fence = (PFN_vkCreateFence)gipa(instance, "vkCreateFence");
+   PFN_vkImportFenceFdKHR import_fence = (PFN_vkImportFenceFdKHR)gipa(instance, "vkImportFenceFdKHR");
+   PFN_vkWaitForFences wait_fence = (PFN_vkWaitForFences)gipa(instance, "vkWaitForFences");
+   PFN_vkDestroyFence destroy_fence = (PFN_vkDestroyFence)gipa(instance, "vkDestroyFence");
+   if (!create_fence || !import_fence || !wait_fence || !destroy_fence) return 1;
+   VkFence fence;
+   VkFenceCreateInfo fci = {.sType=VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
+   CHECK(create_fence(device, &fci, NULL, &fence));
+   VkImportFenceFdInfoKHR fi = {.sType=VK_STRUCTURE_TYPE_IMPORT_FENCE_FD_INFO_KHR,
+      .fence=fence, .flags=VK_FENCE_IMPORT_TEMPORARY_BIT,
+      .handleType=VK_EXTERNAL_FENCE_HANDLE_TYPE_SYNC_FD_BIT, .fd=fence_fd};
+   CHECK(import_fence(device, &fi));
+   VkResult wait_result = wait_fence(device, 1, &fence, VK_TRUE, 100000000ull);
+   if (wait_result != VK_TIMEOUT) {
+      fprintf(stderr, "FAIL pending CPU wait: %d\n", wait_result); return 1;
+   }
+   destroy_fence(device, fence, NULL);
+   puts("PASS pending CPU wait: VK_TIMEOUT");
    VkSemaphoreGetFdInfoKHR get = {.sType=VK_STRUCTURE_TYPE_SEMAPHORE_GET_FD_INFO_KHR,
       .semaphore=sem, .handleType=VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_SYNC_FD_BIT};
    int copy = -2;
@@ -229,10 +270,11 @@ int main(int argc, char **argv)
    float priority = 1;
    VkDeviceQueueCreateInfo qci = {.sType=VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
       .queueFamilyIndex=0, .queueCount=1, .pQueuePriorities=&priority};
-   const char *extension = VK_KHR_EXTERNAL_SEMAPHORE_FD_EXTENSION_NAME;
+   const char *extensions[] = {VK_KHR_EXTERNAL_SEMAPHORE_FD_EXTENSION_NAME,
+      VK_KHR_EXTERNAL_FENCE_FD_EXTENSION_NAME};
    VkDeviceCreateInfo dci = {.sType=VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
       .queueCreateInfoCount=1, .pQueueCreateInfos=&qci,
-      .enabledExtensionCount=1, .ppEnabledExtensionNames=&extension};
+      .enabledExtensionCount=argc == 4 ? 2 : 1, .ppEnabledExtensionNames=extensions};
    VkDevice device;
    VkResult rc = create_device(physical, &dci, NULL, &device);
    if (rc) { printf("create_device=%d\n", rc); return 1; }

@@ -42,6 +42,7 @@ for variant, driver, enabled in (
         env = os.environ.copy()
         for name in ("LD_PRELOAD", "LD_LIBRARY_PATH", "PANVK_G77_LWG", "PANVK_G77_NESTED", "MESA_GL_VERSION_OVERRIDE",
                      "MESA_GLSL_VERSION_OVERRIDE", "PANVK_LWG_PRINT", "PANVK_PROBE_ROBUST",
+                     "PANVK_PROBE_CORE_FEATURES", "PANVK_PROBE_COPY_READBACK", "PANVK_PROBE_STATS",
                      "PANVK_G77_NO_MERGE"):
             env.pop(name, None)
         env["PANVK_G77_LWG"] = "1" if enabled else "0"

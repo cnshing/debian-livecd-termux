@@ -20,6 +20,13 @@ import sys
 args = dict(arg[2:].split('=', 1) for arg in sys.argv[1:])
 assert os.environ.get('PANVK_G77_NO_MERGE') == os.environ.get('FAKE_EXPECT_NO_MERGE', '0')
 assert os.environ.get('PANVK_DEBUG', '') == os.environ.get('FAKE_EXPECT_DEBUG', '')
+if os.environ.get('FAKE_EXPECT_TRACE'):
+    assert args['deqp-vk-library-path'].endswith('/trace.so')
+    assert os.environ['PANVK_TRACE_LOADER'].endswith('/lib/libvulkan.so')
+    assert Path(os.environ['PANVK_TRACE_SPIRV_DIR']).is_dir()
+else:
+    assert 'PANVK_TRACE_LOADER' not in os.environ
+    assert 'PANVK_TRACE_SPIRV_DIR' not in os.environ
 if args.get('deqp-runmode') == 'txt-caselist':
     Path(args['deqp-caselist-export-file']).write_text(
         'GROUP: dEQP-VK.compute\\nTEST: dEQP-VK.compute.a\\nTEST: dEQP-VK.compute.b\\n')
@@ -102,6 +109,24 @@ class Results(unittest.TestCase):
                                        env={'FAKE_EXPECT_DEBUG': 'no_wb_mmap'})
             self.assertEqual(code, 0)
             self.assertTrue(report['identity']['uncached_host_memory'])
+
+    def test_trace_mode_is_explicit(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            trace = root / 'trace.so'
+            trace.write_bytes(b'fake trace loader')
+            code, report = self.invoke(root, 'traced', ['--trace-loader', str(trace)],
+                                       env={'FAKE_EXPECT_TRACE': '1'})
+            self.assertEqual(code, 0)
+            self.assertEqual(report['identity']['trace_loader_sha256'], runner.digest(trace))
+
+    def test_inherited_trace_mode_is_cleared(self):
+        with tempfile.TemporaryDirectory() as directory:
+            code, report = self.invoke(Path(directory), 'clean-trace',
+                                       env={'PANVK_TRACE_LOADER': '/wrong/loader.so',
+                                            'PANVK_TRACE_SPIRV_DIR': '/wrong/spirv'})
+            self.assertEqual(code, 0)
+            self.assertNotIn('trace_loader_sha256', report['identity'])
 
 
 if __name__ == '__main__':

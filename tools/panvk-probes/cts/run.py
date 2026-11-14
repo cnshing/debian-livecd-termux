@@ -66,6 +66,8 @@ def main():
                         help='Opt in to the experimental G77 unmerged compute mode')
     parser.add_argument('--uncached-host-memory', action='store_true',
                         help='Disable the optional write-back host-memory type for diagnosis')
+    parser.add_argument('--trace-loader', type=Path,
+                        help='Diagnostic forwarding loader; records setup and mapped readback')
     parser.add_argument('--case-timeout', type=int, default=45)
     parser.add_argument('--max-seconds', type=int, default=600)
     parser.add_argument('--max-cases', type=int, default=0, help='0 means all selected cases')
@@ -73,6 +75,8 @@ def main():
     args = parser.parse_args()
     if args.nested and not args.large_workgroups:
         parser.error('--nested requires --large-workgroups')
+    if args.trace_loader and args.suite != 'vk':
+        parser.error('--trace-loader is only for the Vulkan suite')
     if min(args.case_timeout, args.max_seconds) < 1 or args.max_cases < 0:
         parser.error('Invalid run bounds')
     prefix = Path(os.environ['PREFIX'])
@@ -83,6 +87,9 @@ def main():
                 'large_workgroups': args.large_workgroups, 'nested': args.nested,
                 'unmerged_compute': args.unmerged_compute,
                 'uncached_host_memory': args.uncached_host_memory}
+    if args.trace_loader:
+        args.trace_loader = args.trace_loader.resolve(strict=True)
+        identity['trace_loader_sha256'] = digest(args.trace_loader)
     args.out = args.out.resolve()
     args.out.mkdir(parents=True, exist_ok=False)
     with (Path(os.environ['TMPDIR']) / 'livecd-panvk-cts.lock').open('a') as lock:
@@ -99,7 +106,8 @@ def run(args, prefix, cts, driver, executable, identity):
                  'MESA_GL_VERSION_OVERRIDE', 'MESA_GLSL_VERSION_OVERRIDE', 'BIONILUX_LIBRARY_PATH',
                  'MESA_SHADER_CACHE_DIR', '__EGL_VENDOR_LIBRARY_FILENAMES',
                  'LIBGL_ALWAYS_SOFTWARE', 'LIBGL_ALWAYS_INDIRECT', 'ZINK_DEBUG',
-                 'MESA_VK_DEVICE_SELECT', 'DRI_PRIME', 'PANVK_KBASE_DRI3', 'PANVK_DEBUG'):
+                 'MESA_VK_DEVICE_SELECT', 'DRI_PRIME', 'PANVK_KBASE_DRI3', 'PANVK_DEBUG',
+                 'PANVK_TRACE_LOADER', 'PANVK_TRACE_SPIRV_DIR'):
         env.pop(name, None)
     if args.uncached_host_memory:
         env['PANVK_DEBUG'] = 'no_wb_mmap'
@@ -115,7 +123,12 @@ def run(args, prefix, cts, driver, executable, identity):
                '--deqp-shadercache=disable', '--deqp-surface-type=pbuffer',
                '--deqp-surface-width=64', '--deqp-surface-height=64']
     if args.suite == 'vk':
-        command.append('--deqp-vk-library-path=' + str(prefix / 'lib/libvulkan.so'))
+        loader = prefix / 'lib/libvulkan.so'
+        if args.trace_loader:
+            spirv = args.out / 'spirv'
+            spirv.mkdir()
+            env.update(PANVK_TRACE_LOADER=str(loader), PANVK_TRACE_SPIRV_DIR=str(spirv))
+        command.append('--deqp-vk-library-path=' + str(args.trace_loader or loader))
     selected = []
     for index, pattern in enumerate(args.pattern):
         listing = args.out / f'cases-{index}.txt'

@@ -188,9 +188,9 @@ time, recording QPA results, exit status, mapped libraries and binary hashes.
 It stops at the first failure/crash/timeout, enforces a 3 GB available-memory
 floor and a run time limit, and never counts an empty or all-skipped run as a
 pass. Bounded successful chunks can resume only with matching binary identities
-and selection. Resumed results retain their original QPA/log directory. Seven
+and selection. Resumed results retain their original QPA/log directory. Nine
 host tests cover parsing, resume, failure stopping, process exit failures,
-all-skipped runs and the explicit merge/host-memory modes. Use only the X11 dependency directory in
+all-skipped runs, explicit merge/host-memory modes and trace isolation. Use only the X11 dependency directory in
 `LD_LIBRARY_PATH`; the Vulkan suite loads Termux's Vulkan **loader**, not the raw
 ICD as a loader. For example, with a freshly extracted CTS artifact on the phone:
 
@@ -249,6 +249,16 @@ Evidence: `temp/panvk-qualification/evidence/compiler-stats-01/` and
 counts, not GPU throughput measurements; register-pressure performance remains
 an open gate.
 
+`--trace-loader <trace-loader.so>` is a Vulkan-only diagnostic. The probes-only
+Actions artifact includes this forwarding loader. It forwards Vulkan inputs to
+Termux's loader, logs device extensions/feature structure types, allocations,
+specialization and post-invalidate mapped words, and saves shader modules under
+`<output>/spirv/`. The report records its binary hash; normal runs clear inherited
+trace settings. For example, repeat only the first failing case with this flag,
+then run the exact saved SPIR-V through `check ... run-cts-max`. Additional CPU
+logging/reads can affect timing, so a traced pass alone cannot clear the original
+failure. Keep untraced controls and both logs.
+
 ## Desktop qualification still required
 
 The fixed `0007` binary passed **20 private GNOME/Ghostty cycles** with caching
@@ -265,6 +275,17 @@ workloads exited, but isolation failed; this is not a completed soak. Evidence:
 stopped deliberately to yield the shared lock to a previously queued short
 package test. Neither partial interval counts toward the required continuous
 1,800 seconds.
+
+After a soak, run `tests/native/check-panvk-soak.py <evidence-directory>` as
+well as both pixel checkers. It requires at least 1,800 continuous seconds,
+samples with no gap over 90 seconds, stable Shell/cube/gears PIDs, the same
+mapped PanVK path and Mali FDs in every sample and final audit, changing capture
+files, GL frame progress covering the interval and preserved session isolation.
+It reports RSS and FD counts without treating warm-up growth as a leak verdict.
+Eight host tests reject interrupted, short, gapped, restarted, driver-switched,
+isolation-failed, stalled and missing-capture evidence. This is stability
+evidence; it does not establish pixel correctness for every soak frame or GPU
+throughput.
 
 The private harness can run the 20 capture cycles and 30-minute soak together:
 

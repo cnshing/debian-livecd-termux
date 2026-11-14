@@ -53,6 +53,12 @@ int main(int argc, char **argv)
    if (!strcmp(argv[6], "skip")) { puts("FAIL: expected a limit rejection"); return 1; }
    VkPhysicalDeviceFeatures features;
    vkGetPhysicalDeviceFeatures(physical, &features);
+   const char *robust_mode = getenv("PANVK_PROBE_ROBUST");
+   if (robust_mode) {
+      if (!strcmp(robust_mode, "0")) features.robustBufferAccess = VK_FALSE;
+      else if (strcmp(robust_mode, "1")) return 2;
+   }
+   printf("robustBufferAccess=%u\n", features.robustBufferAccess);
    uint32_t queues = 0;
    vkGetPhysicalDeviceQueueFamilyProperties(physical, &queues, NULL);
    VkQueueFamilyProperties *qp = calloc(queues, sizeof(*qp));

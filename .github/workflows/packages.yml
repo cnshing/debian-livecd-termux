@@ -363,6 +363,15 @@ jobs:
           !~/.termux-build/chromium/cache/chromium-*-linux.tar.xz
         key: ${{ steps.deps.outputs.cache-primary-key }}
 
+    # Termux names a package file with its version's epoch, as in ca-certificates-java_1:2026.10.20-1,
+    # and an artifact refuses a colon. Debian's archive leaves the epoch out of the file name.
+    - name: Leave the epoch out of package file names
+      if: steps.build.outcome == 'success'
+      run: |
+        for deb in termux-packages/output/*:*.deb; do
+          test -e "$deb" || continue
+          mv -- "$deb" "${deb%/*}/$(basename -- "$deb" | sed 's/_[0-9]*:/_/')"
+        done
     # Kept for later runs, which take the set from here while it stays the same. 90 days is the most
     # GitHub keeps an artifact; after that the set is simply built again.
     - uses: actions/upload-artifact@v7

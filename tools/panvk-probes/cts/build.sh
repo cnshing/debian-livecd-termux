@@ -1,0 +1,37 @@
+#!/bin/bash
+# CI-only standalone Android CTS executables, following Khronos' Android recipe.
+set -euo pipefail
+cts=$(realpath "$1")
+target=$2
+out=$(realpath -m "$3")
+case "$target" in deqp-vk|deqp-gles31) ;; *) exit 2 ;; esac
+ndk=${ANDROID_NDK_LATEST_HOME:-${ANDROID_NDK_HOME:?no NDK}}
+mkdir -p "$out/data"
+python3 "$cts/external/fetch_sources.py"
+cmake -S "$cts" -B "$cts/build-$target" -GNinja \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DCMAKE_TOOLCHAIN_FILE="$ndk/build/cmake/android.toolchain.cmake" \
+  -DANDROID_NDK_PATH="$ndk" -DCMAKE_ANDROID_NDK="$ndk" \
+  -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-29 -DANDROID_STL=c++_static \
+  -DDE_ANDROID_API=29 -DDEQP_TARGET_TOOLCHAIN=ndk-modern \
+  -DDEQP_TARGET=android -DDEQP_ANDROID_EXE=ON \
+  -DGLES_ALLOW_DIRECT_LINK=OFF -DDEQP_DISABLE_VK_VIDEO_TESTS=ON
+cmake --build "$cts/build-$target" --target "$target" --parallel 4
+if [ "$target" = deqp-vk ]; then
+  cp "$cts/build-$target/external/vulkancts/modules/vulkan/deqp-vk" "$out/"
+  cp -a "$cts/external/vulkancts/data/vulkan" "$out/data/"
+else
+  cp "$cts/build-$target/modules/gles31/deqp-gles31" "$out/"
+  mkdir -p "$out/data/gles31"
+  cp -a "$cts/data/gles31/data" "$cts/data/gles31/shaders" "$out/data/gles31/"
+fi
+"$ndk/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip" "$out/$target"
+{
+  printf 'cts=%s\ntarget=%s\n' "$(git -C "$cts" rev-parse HEAD)" "$target"
+  cat "$ndk/source.properties"
+  cmake --version | head -1
+  git -C "$cts" status --short --untracked-files=no
+} > "$out/BUILD.txt"
+cp "$cts/external/fetch_sources.py" "$out/FETCH-SOURCES.py"
+readelf -d "$out/$target" > "$out/DYNAMIC.txt"
+(cd "$out" && sha256sum "$target" > SHA256SUMS)

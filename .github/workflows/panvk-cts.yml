@@ -1,0 +1,44 @@
+name: PanVK qualification CTS executables
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+    - .github/workflows/panvk-cts.yml
+    - tools/panvk-probes/cts/build.sh
+permissions:
+  contents: read
+concurrency:
+  group: panvk-cts-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  cts:
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [deqp-vk, deqp-gles31]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions/checkout@v4
+      with:
+        repository: KhronosGroup/VK-GL-CTS
+        # vulkan-cts-1.4.7.1
+        ref: 0d18b347943e5e843529a05c95220e27fe30c538
+        path: cts
+    - name: Install CTS build tools
+      run: |
+        sudo apt-get update -qq
+        sudo apt-get install -y cmake ninja-build python3-lxml
+    - name: Build the standalone Android executable
+      run: bash tools/panvk-probes/cts/build.sh cts '${{ matrix.target }}' out
+    - uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: panvk-cts-${{ matrix.target }}-android-aarch64
+        path: |
+          out/
+          cts/build-*/CMakeCache.txt
+          cts/build-*/CMakeFiles/CMakeConfigureLog.yaml
+        if-no-files-found: error

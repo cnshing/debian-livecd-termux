@@ -12,7 +12,8 @@ and arm64 glibc by `panvk-sync-fd.yml` directly on the reconstructed p0175
 baseline. It excludes the two patches that regressed GTK presentation.
 [Driver build 43543360366](https://github.com/cnshing/debian-livecd-termux/actions/runs/43543360366)
 and [Mesa build 43543486396](https://github.com/cnshing/debian-livecd-termux/actions/runs/43543486396)
-are the first qualification builds; runtime results belong here when available.
+are passing builds. The initial driver tree is
+`82cfe30d18230650c9d38135353462092601e97d`.
 
 The stronger probe is implemented. CI
 [43543662112](https://github.com/cnshing/debian-livecd-termux/actions/runs/43543662112)
@@ -40,11 +41,48 @@ any plane cannot attach its fence. It does so before notifying flush
 completion, covering the normal synchronous export flush. The unsupported
 EXPORT_SYNC_FILE ioctl no longer asserts. Patches 0021–0023 remain.
 
-**Neither the driver port nor Ghostty DMA-BUF presentation is accepted yet.**
-The desktop, browsers, kernel-ioctl fallback and stale-frame controls must pass
-with the built binaries before package promotion. The separate large-workgroup
-and GTK renderer limitations below still apply. All phone runs so far used
-private files with no changes to the managed desktop.
+### Results on the port
+
+The independent port passed the following on x1s, with privately staged files:
+
+| Check | Result |
+| --- | --- |
+| Bionic SYNC_FD exercise | 300/300 GPU fills, 299 real exported FDs, FD count 11 → 11; empty first submit exports `-1`; completed export and import of `-1` pass |
+| glibc SYNC_FD exercise under Bionilux | same 300/300 and 299 real FDs; FD count 9 → 9 |
+| Pending fixture, both ABIs | Vulkan CPU wait returns `VK_TIMEOUT`; imported/re-exported semaphore stays unsignalled for 100 ms; release control signals cleanly |
+| Basic Android probes | 7/7 exit zero; compute 10/10, binary/fence/idle sync controls pass |
+| Triangle, vertex-buffer triangle, constant triangle | all readbacks match the baseline byte for byte, SHA-256 `fa9117cf…80d0c2` |
+| GNOME/GTK4, SHM, 20 cycles, Mesa 104 | checker passes 40 captures, max pixel error 0, stale-frame negative control rejected; isolation passes; no semaphore/SYNC_FD errors in Shell log; Shell, Files and Settings captures visually inspected |
+| EGL native fences | `eglinfo` reports `EGL_ANDROID_native_fence_sync` on Zink |
+| Firefox 159.0.1, VP9 and HEVC | hardware decoding and GPU output pass; 67 VA-API frames each, about 48.1 dB / 0.971 SSIM; isolation and cleanup pass |
+| Chromium, VP9, two fullscreen cycles | passes browser and compositor pixel checks; `VaapiVideoDecoder`, PanVK ANGLE renderer with GPU compositing enabled, patched Bionic ICD mapped and Mali FDs held |
+| Chrome, VP9, two fullscreen cycles | hardware decoding and GPU output run with the patched glibc ICD, but compositor frame 36 misses SSIM (0.898662 vs 0.9); **unpatched source control gives identical metrics and byte-identical normalized captures**. This remains a failed acceptance check, not a SYNC_FD regression |
+
+Browser launchers used the installed `acceleration.prepare()` code with a private
+`graphics.PANVK` root, preserving its normal flags and video stack. Firefox also
+prepended the private Mesa 104 libraries. The managed desktop and installed
+packages were unchanged. Runs serialized on the phone's fullscreen-test lock.
+
+Artifacts from driver CI 43543360366, `out/patched/libvulkan_panfrost.so`:
+
+- Bionic SHA-256 `9110264db9e497b4eeaa80fe9763537bc21d514b24796be690e41da34cd5b428`.
+- glibc SHA-256 `1576ba28e48be9c09d716838cfeeb2d67c9fd9553ceecc554606ba7dcc51c90f`.
+- Mesa `mesa_26.2.6-104_aarch64.deb`, CI artifact `debs-mesa-a5e834489f2ae549`
+  (ID 14092634222), SHA-256
+  `d329c6c508e619b7c9c3c2b8b7dc308c4da6f2ad8d05834f92858a91c5989260`.
+- Its `libgallium-26.2.6.so` SHA-256
+  `3e066bca3e51aacab7014d2ed031ba893fb0d4f42656ea849edba78dee70ccd8`.
+
+Host evidence: `/home/cs/debian-livecd-termux-sync-fd/temp/sync-fd/`; phone:
+`~/gpu-x1s/sync-fd-port/`. The stronger probe is from CI 43544161945, adding
+an empty submission before any GPU work to the earlier CPU-deadline probe.
+
+**Ghostty DMA-BUF presentation and package promotion remain pending.**
+The separate large-workgroup and GTK renderer limitations below still apply.
+The workgroup-combined private variant is building in
+[CI 43544398129](https://github.com/cnshing/debian-livecd-termux/actions/runs/43544398129).
+Ghostty needs the actual DMA-BUF path and the without-wait control checked;
+ordinary desktop success does not establish either.
 
 ## The job
 
@@ -184,12 +222,10 @@ Builds run in GitHub CI, not on the host or the phone.
 
 ## Tests, in order
 
-1. **Extend `tools/panvk-probes/sync-fd.c`.** Today it reads the capability and creates a
-   semaphore. Add: submit real work that signals an exportable semaphore, export the fd,
-   `poll` it with a deadline and require it to signal; export from an already signalled
-   semaphore and accept -1; import a sync file that never signals and require a timeout,
-   not a hang; import a signalled one. Run it against JimVulkan's release first: that
-   settles whether the kernel half works before any porting.
+1. **Run `tools/panvk-probes/sync-fd.c` with `--exercise`**, then run
+   `jm-pending-fence.py` against the same ICD. These are implemented and the JimVulkan
+   reference control passed (above). The independent port still needs both controls.
+   Use the latest probe CI artifact; normal invocation only reports capabilities.
 2. Zenith's probes (`~/gpu-x1s/panvk/probes`: `compute`, `sync`, `triangle`) on the patched
    driver, pictures identical to the baseline's.
 3. **The desktop**, because Mutter starts using native fences the moment Zink reports them,

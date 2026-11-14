@@ -2,6 +2,11 @@ name: PanVK G77 workgroup experiment
 
 on:
   workflow_dispatch:
+    inputs:
+      probes_only:
+        description: Build probes without rebuilding the driver
+        type: boolean
+        default: false
   push:
     branches: [research/panvk-g77-workgroups]
     paths:
@@ -24,6 +29,7 @@ env:
 
 jobs:
   source:
+    if: ${{ !inputs.probes_only }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
@@ -94,3 +100,25 @@ jobs:
           out/
           zenith/build/**/*.log
           zenith/build/**/meson-logs/
+
+  probes:
+    if: ${{ inputs.probes_only }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions/checkout@v4
+      with:
+        repository: KhronosGroup/Vulkan-Headers
+        ref: v1.4.363
+        path: vulkan-headers
+    - name: Install SPIR-V tools
+      run: |
+        sudo apt-get update -qq
+        sudo apt-get install -y glslang-tools spirv-tools
+    - name: Build probes
+      run: bash tools/panvk-probes/workgroups/build.sh vulkan-headers out/workgroups
+    - uses: actions/upload-artifact@v4
+      with:
+        name: panvk-workgroups-probes-android-aarch64
+        path: out/workgroups/

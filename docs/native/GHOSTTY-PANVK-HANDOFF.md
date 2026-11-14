@@ -22,10 +22,15 @@ The independent port and Zink completion wait are now implemented and tested;
 see [PANVK-SYNC-FD-HANDOFF.md](PANVK-SYNC-FD-HANDOFF.md). A direct EGL dma-buf
 oracle passes with Mesa 104 and fails with Mesa 102/103 on the same SYNC_FD ICD.
 The combined private driver runs Ghostty on GL 4.6 and passes four fresh terminal
-captures, but **GTK rejects DMA-BUF because its support is compiled out**.
-Ghostty then requests CPU readback. This remains a GPU-rendered CPU-presentation
-pass. The checker now reports that fallback explicitly; `--reject-cpu-fallback`
-rejects it. A GTK DMA-BUF build and consumer qualification are the next gate.
+captures. Installed GTK has DMA-BUF compiled out. A private GTK 4.24.1 build
+now enables it and passes CI, but the first private run still requests CPU
+readback: GTK rejects Zink's implicit `AB24:0xffffffffffffff` modifier.
+Mesa 105's known-linear metadata fix alone does not clear this gate. Revision
+106 adds an opt-in backing conversion, `ZINK_LINEAR_DMABUF_EXPORT=1`, and
+passes CI; its device qualification is pending. The normal desktop and installed GTK are unchanged.
+`check-ghostty-panvk.py --require-dmabuf` now requires positive GTK import/mmap
+logs as well as fresh pixels and isolation. A Cairo/mmap pass would establish
+DMA-BUF transport with a CPU download in GTK, not GPU-only presentation.
 
 ## Current outcome
 

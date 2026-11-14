@@ -79,6 +79,14 @@ def check(folder, software_control=False, reject_cpu_fallback=False, require_dma
         assert imports >= len(captures), 'Missing positive GTK DMA-BUF import evidence'
         assert downloads >= len(captures), 'Missing positive GTK mmap download evidence'
         assert any('libgtk-4' in p for p in ghostty['libraries']), 'GTK mapping was not audited'
+        log_bytes = (folder / 'ghostty.log').read_bytes()
+        for capture in captures:
+            begin, end = (capture.get(key) for key in ('presentation_log_start', 'presentation_log_end'))
+            assert isinstance(begin, int) and isinstance(end, int), 'Missing per-capture presentation log bounds'
+            assert 0 <= begin < end <= len(log_bytes), 'Invalid presentation log bounds'
+            segment = log_bytes[begin:end].decode(errors='replace')
+            assert 'Creating dmabuf texture, format ' in segment, capture['path'] + ': no fresh GTK DMA-BUF import'
+            assert 'Used mmap for downloading ' in segment, capture['path'] + ': no fresh GTK mmap download'
     report = {'cpu_presentation_fallback_reported': cpu_fallback, 'ok': True,
               'gtk_dmabuf_imports': imports, 'gtk_dmabuf_mmap_downloads': downloads,
               'dmabuf_mmap_verified': require_dmabuf,

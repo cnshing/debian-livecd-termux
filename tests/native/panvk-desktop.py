@@ -313,12 +313,15 @@ print("GHOSTTY INPUT PASS", phase, flush=True)
                 identity.unlink(missing_ok=True)
                 run(['xdotool', 'type', '--clearmodifiers', '--delay', '2',
                      'python ' + shlex.quote(str(command_file)) + ' ' + str(phase)])
+                presentation_log_start = (out / 'ghostty.log').stat().st_size
                 run(['xdotool', 'key', 'Return'])
                 wait(identity_ready)
                 time.sleep(1)
                 path = out / f'ghostty-{phase:02d}.png'
                 screenshot(path)
                 result['ghostty']['captures'].append({'path': path.name, 'phase': phase,
+                    'presentation_log_start': presentation_log_start,
+                    'presentation_log_end': (out / 'ghostty.log').stat().st_size,
                     'fullscreen_requested': full,
                     'wm_state': run(['xprop', '-id', wid, '_NET_WM_STATE'], capture_output=True, text=True).stdout,
                     'geometry': run(['xdotool', 'getwindowgeometry', '--shell', wid],

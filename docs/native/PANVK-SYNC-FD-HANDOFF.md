@@ -169,10 +169,53 @@ rebind/copy path before export metadata queries, requests DMA-BUF backing
 (which uses a linear image or an explicit modifier), and waits for the copy.
 Unsupported conversions fail instead of inventing a modifier. The private
 Ghostty launcher enables this option; normal launcher defaults do not.
-Runtime qualification is pending CI 43559993100.
+The final conversion build is
+[CI 43560757547](https://github.com/cnshing/debian-livecd-termux/actions/runs/43560757547),
+commit `9ead3bd`, passes both build and repository assembly. It restores the
+previous linear flag if backing allocation fails and uses Mesa's OS timeout API
+for the completion wait. The retrieved AArch64 library contains the opt-in.
+The device became unreachable again before this build finished; revision 106
+is **not accepted on-device yet**.
+
+- Artifact `debs-mesa-dfb0a486c20f387e`, ID `14100203452`.
+- `mesa_26.2.6-106_aarch64.deb` SHA-256
+  `2c3ae0ddb804e9e63c070b2e767715d58b08a4e0238c5c3251bfb2e4a6cbfda3`.
+- `libgallium-26.2.6.so` SHA-256
+  `57b41861251f9fcd3126869b2344b03734d1a29fbc9cc4762e0aa8b1a61b199a`.
+- Host staging: `temp/sync-fd/mesa-106/root/`. It has not been copied to the
+  phone yet. The installed GTK and desktop remain unchanged.
+
+The diagnostic GTK build is
+[CI 43558928474](https://github.com/cnshing/debian-livecd-termux/actions/runs/43558928474),
+`gtk4_4.24.1-101_aarch64.deb`. Its privately staged `libgtk-4.so.1` SHA-256 is
+`a638d8e0730ec8c0b1a482bcd2da2cba44e2a3aebb503dc9317b905f2c73f6d5`;
+the device copy matched. The private staging root remains
+`~/gpu-x1s/sync-fd-port/`.
+
+Copy the latest `panvk-desktop.py` and private launcher to the phone first;
+the harness now records log byte intervals for each capture.
+After extracting the follow-up Mesa artifact into `mesa-106/` there, retry the
+spatial oracle with `ZINK_LINEAR_DMABUF_EXPORT=1`, the private Mesa 106 library
+and DRI directories, and `--spatial --require-linear`. Require 30 exact frames
+and an explicit modifier of zero. Then run:
+
+```sh
+PANVK_G77_LWG=1 MESA_SHADER_CACHE_DISABLE=true \
+  timeout -k 10 180 python ~/gpu-x1s/sync-fd-port/panvk-desktop.py \
+  --mode shm --cycles 2 --ghostty-probe \
+  --ghostty-launcher ~/gpu-x1s/sync-fd-port/ghostty-gtk-dmabuf.py \
+  --driver ~/gpu-x1s/sync-fd-port/workgroups/libvulkan_panfrost.so \
+  --mesa-lib-dir ~/gpu-x1s/sync-fd-port/mesa-106/lib \
+  --out ~/gpu-x1s/sync-fd-port/ghostty-gtk-dmabuf-106
+```
+
+Retrieve the evidence and require `check-ghostty-panvk.py --require-dmabuf`,
+as well as the GTK color and isolation checks. The shared display lock is
+managed by the desktop probe. Keep the normal desktop and installed GTK intact.
 
 `check-ghostty-panvk.py --require-dmabuf` requires positive GTK texture-import
-and mmap-download diagnostics at least once per fresh capture, in addition to
+and mmap-download diagnostics within each fresh capture’s command-to-screenshot
+log interval, in addition to
 all pixel, GPU identity, normal-exit and isolation checks. It rejects the saved
 CPU-fallback run. `panvk-desktop.py` now records GTK library mappings to prove
 which library the process loaded. A passing Cairo/mmap test would establish

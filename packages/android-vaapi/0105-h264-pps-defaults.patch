@@ -1,0 +1,196 @@
+Rebuild the H.264 PPS with the stream's real default reference counts.
+
+VA-API does not carry num_ref_idx_l{0,1}_default_active_minus1, so the bridge
+guessed min(DPB, 3) - 1. When the guess is wrong and the stream uses weighted
+prediction (x264 -preset fast), MediaCodec reads pred_weight_table with the
+wrong length, drops pictures and vaSyncSurface never returns. Each slice NAL
+reaches the driver whole, so read num_ref_idx_active_override_flag from its
+header: a P or B slice without an override uses the defaults, and its active
+counts from the VA slice parameters are the defaults. The PPS is resent when
+they change. Streams where every slice overrides keep the old guess, which
+does not matter to them.
+
+Also let the launcher set the SPS max_num_reorder_frames through
+TERMUX_VA_H264_REORDER_FRAMES, as 0103 does for HEVC.
+
+--- a/src/gallium/frontends/va/tva_bridge.c	2026-11-14 04:20:50.206333819 -0800
++++ b/src/gallium/frontends/va/tva_bridge.c	2026-11-14 04:21:12.598443288 -0800
+@@ -557,6 +557,8 @@
+     bool h264_pps_defaults_valid;
+     unsigned h264_pps_l0_default;
+     unsigned h264_pps_l1_default;
++    bool h264_pps_l0_known;
++    bool h264_pps_l1_known;
+     /* The VA HEVC picture descriptor omits max_sub_layers_minus1.  Keep the
+      * largest temporal id observed in the access units so synthesized VPS/SPS
+      * parameter sets accept streams which use temporal scalability. */
+@@ -2216,13 +2218,133 @@
+     tva_bw_ue(&w, 0);                    /* max_bits_per_mb_denom */
+     tva_bw_ue(&w, 11);                   /* log2_max_mv_length_horizontal */
+     tva_bw_ue(&w, 11);                   /* log2_max_mv_length_vertical */
+-    tva_bw_ue(&w, max_refs > 2 ? 2 : 0); /* max_num_reorder_frames */
++    /* The launcher knows the decoder: Exynos holds this many pictures back. */
++    unsigned reorder = max_refs > 2 ? 2 : 0;
++    const char *reorder_env = getenv("TERMUX_VA_H264_REORDER_FRAMES");
++    if (reorder_env && *reorder_env >= '0' && *reorder_env <= '9')
++        reorder = MIN2((unsigned)atoi(reorder_env), max_refs ? max_refs : 1);
++    tva_bw_ue(&w, reorder);              /* max_num_reorder_frames */
+     tva_bw_ue(&w, max_refs ? max_refs : 1); /* max_dec_frame_buffering */
+     tva_bw_rbsp_trailing(&w);
+     *out = w.buf;
+     return w.len;
+ }
+ 
++/* Bit reader over a slice header copied without emulation-prevention bytes. */
++struct tva_br {
++    const uint8_t *d;
++    size_t bits;
++    size_t pos;
++    bool over;
++};
++
++static unsigned
++tva_br_u(struct tva_br *r, unsigned n)
++{
++    unsigned v = 0;
++    for (unsigned i = 0; i < n; i++) {
++        if (r->pos >= r->bits) {
++            r->over = true;
++            return 0;
++        }
++        v = (v << 1) | ((r->d[r->pos >> 3] >> (7 - (r->pos & 7))) & 1);
++        r->pos++;
++    }
++    return v;
++}
++
++static unsigned
++tva_br_ue(struct tva_br *r)
++{
++    unsigned zeros = 0;
++    while (!tva_br_u(r, 1)) {
++        if (r->over || ++zeros > 31) {
++            r->over = true;
++            return 0;
++        }
++    }
++    return zeros ? ((1u << zeros) - 1 + tva_br_u(r, zeros)) : 0;
++}
++
++/* VA-API hands over each slice NAL whole, but not the PPS, so it cannot say
++ * whether a slice relied on num_ref_idx_l{0,1}_default_active_minus1.  Read
++ * num_ref_idx_active_override_flag from the last P or B slice header in the
++ * access unit.  Returns 0 or 1, or -1 when there is no such slice or it
++ * cannot be read.  A 0 means the slice's active counts are the PPS defaults. */
++static int
++tva_h264_slice_override(const uint8_t *data, size_t len,
++                        const struct pipe_h264_pps *pps, bool *is_b)
++{
++    const struct pipe_h264_sps *sps = pps->sps;
++    int result = -1;
++    size_t scan = 0;
++
++    while (scan < len) {
++        size_t sc = tva_next_start_code(data, len, scan);
++        if (sc >= len)
++            break;
++        size_t nal = sc + 3;
++        scan = nal;
++        if (nal >= len)
++            break;
++        unsigned nal_type = data[nal] & 0x1f;
++        if (nal_type != 1 && nal_type != 5)
++            continue;
++
++        /* The header up to the override flag is at most a few dozen bytes. */
++        uint8_t rbsp[64];
++        size_t n = 0, zeros = 0;
++        for (size_t i = nal + 1; i < len && n < sizeof(rbsp); i++) {
++            uint8_t b = data[i];
++            if (zeros >= 2 && b == 3) {
++                zeros = 0;
++                continue;
++            }
++            if (zeros >= 2 && b <= 2)
++                break;
++            rbsp[n++] = b;
++            zeros = b ? 0 : zeros + 1;
++        }
++        struct tva_br r = { rbsp, n * 8, 0, false };
++        tva_br_ue(&r);                                   /* first_mb_in_slice */
++        unsigned slice_type = tva_br_ue(&r) % 5;
++        if (slice_type == 2 || slice_type == 4)          /* I, SI */
++            continue;
++        tva_br_ue(&r);                                   /* pic_parameter_set_id */
++        if (sps->separate_colour_plane_flag)
++            tva_br_u(&r, 2);                             /* colour_plane_id */
++        tva_br_u(&r, sps->log2_max_frame_num_minus4 + 4); /* frame_num */
++        unsigned field_pic = 0;
++        if (!sps->frame_mbs_only_flag) {
++            field_pic = tva_br_u(&r, 1);
++            if (field_pic)
++                tva_br_u(&r, 1);                         /* bottom_field_flag */
++        }
++        if (nal_type == 5)
++            tva_br_ue(&r);                               /* idr_pic_id */
++        if (sps->pic_order_cnt_type == 0) {
++            tva_br_u(&r, sps->log2_max_pic_order_cnt_lsb_minus4 + 4);
++            if (pps->bottom_field_pic_order_in_frame_present_flag && !field_pic)
++                tva_br_ue(&r);                           /* delta_pic_order_cnt_bottom */
++        } else if (sps->pic_order_cnt_type == 1 &&
++                   !sps->delta_pic_order_always_zero_flag) {
++            tva_br_ue(&r);                               /* delta_pic_order_cnt[0] */
++            if (pps->bottom_field_pic_order_in_frame_present_flag && !field_pic)
++                tva_br_ue(&r);                           /* delta_pic_order_cnt[1] */
++        }
++        if (pps->redundant_pic_cnt_present_flag)
++            tva_br_ue(&r);                               /* redundant_pic_cnt */
++        if (slice_type == 1)
++            tva_br_u(&r, 1);                             /* direct_spatial_mv_pred */
++        unsigned override = tva_br_u(&r, 1);
++        if (r.over)
++            continue;
++        result = override;
++        *is_b = slice_type == 1;
++    }
++    return result;
++}
++
+ /* PPS NALU: nal_ref_idc=3, type=8 */
+ static size_t
+ tva_build_h264_pps(enum pipe_video_profile profile,
+@@ -3895,6 +4017,24 @@
+             struct pipe_h264_picture_desc *h264 =
+                 (struct pipe_h264_picture_desc *)picture;
+             if (h264 && h264->pps && h264->pps->sps) {
++                /* A P or B slice without an override uses the PPS defaults,
++                 * so its active counts are the true defaults.  Learn them
++                 * and resend the PPS when they change. */
++                bool slice_b = false;
++                if (tva_h264_slice_override(c->acc, c->acc_len, h264->pps,
++                                            &slice_b) == 0) {
++                    c->h264_pps_l0_default = h264->num_ref_idx_l0_active_minus1;
++                    c->h264_pps_l0_known = true;
++                    if (slice_b) {
++                        c->h264_pps_l1_default =
++                            h264->num_ref_idx_l1_active_minus1;
++                        c->h264_pps_l1_known = true;
++                    } else if (!c->h264_pps_l1_known) {
++                        c->h264_pps_l1_default = 0;
++                    }
++                    c->h264_pps_defaults_valid = true;
++                    c->h264_bootstrap_done = true;
++                }
+                 if (!c->h264_bootstrap_done &&
+                     c->base.max_references >= 5) {
+                     if (h264->num_ref_idx_l0_active_minus1 >=
+@@ -3935,7 +4075,8 @@
+                  * with a two-reference PPS default unchanged while allowing
+                  * the five-reference vertical AVC stream to select its
+                  * five-entry default before subsequent no-override slices. */
+-                if (c->base.max_references >= 5 &&
++                if (!c->h264_pps_l0_known &&
++                    c->base.max_references >= 5 &&
+                     h264->num_ref_idx_l0_active_minus1 >=
+                     c->base.max_references - 1 &&
+                     c->h264_pps_l0_default < c->base.max_references - 1) {

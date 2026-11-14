@@ -184,6 +184,8 @@ def video_environment(env, selected, abi, config):
         # Chromium's wait for each picture. Declaring none returns each picture as it is
         # decoded. See X1S-FIREFOX-VIDEO.md.
         env['TERMUX_VA_HEVC_REORDER_PICS'] = '0'
+        # The same holds for H.264's max_num_reorder_frames (decode-h264.md).
+        env['TERMUX_VA_H264_REORDER_FRAMES'] = '0'
     else:
         env.update(TERMUX_VA_GPU_BACKEND='kgsl', TERMUX_VA_X11_DRI3='1',
                    TERMUX_VA_CONTIGUOUS_DMABUF='1')

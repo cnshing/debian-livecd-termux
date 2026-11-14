@@ -1,0 +1,41 @@
+name: GTK DMA-BUF experiment
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  gtk:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 90
+    steps:
+    - uses: actions/checkout@v7
+    - name: Read the shared builder pin
+      id: config
+      run: python3 tools/recipes.py config >> "$GITHUB_OUTPUT"
+    - uses: actions/checkout@v7
+      with:
+        repository: termux/termux-packages
+        ref: ${{ steps.config.outputs.revision }}
+        path: termux-packages
+    - name: Restore DMA-BUF header detection in the pinned GTK recipe
+      run: python3 tools/panvk-probes/prepare-gtk-dmabuf.py termux-packages
+    - name: Build the experimental GTK package
+      working-directory: termux-packages
+      env:
+        TERMUX_BUILDER_IMAGE_NAME: ${{ steps.config.outputs.image }}
+        TERMUX_DOCKER_RUN_EXTRA_ARGS: --volume /tmp/gtk-dmabuf-build:/home/builder/.termux-build
+      run: |
+        mkdir -p /tmp/gtk-dmabuf-build
+        ./scripts/run-docker.sh ./build-package.sh -I -C -w -a aarch64 gtk4
+        ./scripts/run-docker.sh bash -c 'set -e; config=/home/builder/.termux-build/gtk4/build/config.h; grep "^#define HAVE_DMABUF 1$" "$config"; ! grep -q "^#define HAVE_UDMABUF 1$" "$config"; cp "$config" /home/builder/termux-packages/output/gtk-config.h'
+        sha256sum output/*.deb > output/SHA256SUMS
+    - uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: gtk4-dmabuf-aarch64
+        path: |
+          termux-packages/output/
+          /tmp/gtk-dmabuf-build/gtk4/build/meson-logs/

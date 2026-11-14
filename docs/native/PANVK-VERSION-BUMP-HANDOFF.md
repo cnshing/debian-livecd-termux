@@ -53,6 +53,99 @@ The default runner still disables the cache. For the presentation check, use
 the new driver with `PANVK_G77_LWG=1 MESA_SHADER_CACHE_DISABLE=false`, the existing
 staged `mesa-102/lib`, `--ghostty-probe` and `--cycles 4`.
 
+## Qualification follow-up: variable sizes, nested barriers and CTS
+
+The actual Zink variable-size path now has a passing device probe:
+`tools/panvk-probes/workgroups/variable-size.py`. One OpenGL program uses
+`ARB_compute_variable_group_size`, shared memory and a barrier, then dispatches
+512, 769, 1024, 17x19x3 and 8x8x16 local shapes across six workgroups each.
+All **206,304 output words** match the CPU oracle using the `0001`–`0006`
+driver above. The probe checks the mapped ICD and Mali/Zink renderer without a
+version override. Host log: `temp/panvk-qualification/variable-gl-02.log`;
+phone report: `~/gpu-x1s/qualification/variable-gl-02/results.json`.
+Zink specializes the local dimensions before PanVK's lowering pass; this closes
+the previously untested GL variable-size path for these cases, rather than
+establishing full conformance. The shader must use `gl_LocalGroupSizeARB`:
+the extension prohibits `gl_WorkGroupSize` in a variable-size shader.
+
+Nested-barrier work is isolated on `research/panvk-nested-barriers`, not in the
+default or accepted experimental binary. Its `0007` prototype uses NIR shader
+continuations to spill values across barriers and reconstruct loops/branches,
+with a per-logical-invocation program counter and separate scratch slices.
+It additionally requires `PANVK_G77_NESTED=1`. New probes cover dynamic loops,
+uniform branches, break/continue, private values live across barriers and a
+769-invocation shape. The first pipeline-creation-only control crashed in the
+compiler **before dispatch**. A region/global-variable ownership fix and symbols
+are in revision `71e7a6f`, building in
+[run 43560105312](https://github.com/cnshing/debian-livecd-termux/actions/runs/43560105312).
+Do not dispatch this prototype until its compile-only control succeeds. Do not
+promote it on the basis of a successful build alone.
+
+CTS executables are built in `.github/workflows/panvk-cts.yml`, pinned to
+VK-GL-CTS `vulkan-cts-1.4.7.1` (`0d18b347943e5e843529a05c95220e27fe30c538`).
+The Android API 33 standalone build matches this phone. GLES opens Termux's
+absolute, versioned EGL/GLES libraries; overriding `libEGL.so` globally breaks
+Android's `libgui` dependency before CTS starts. `PLATFORM.patch` records the
+platform-only changes, and `BUILD.txt` records the source/build identity.
+[Run 43559427755](https://github.com/cnshing/debian-livecd-termux/actions/runs/43559427755)
+has produced the corrected GLES executable; Vulkan is still building. No CTS
+device result is claimed yet. These targeted command-line runs are qualification
+evidence, not a formal Khronos conformance submission.
+
+`tools/panvk-probes/cts/run.py` lists the requested cases and executes one at a
+time, recording QPA results, exit status, mapped libraries and binary hashes.
+It stops at the first failure/crash/timeout, enforces a 3 GB available-memory
+floor and a run time limit, and never counts an empty or all-skipped run as a
+pass. Bounded successful chunks can resume only with matching binary identities
+and selection. Five host tests cover parsing, resume, failure stopping, process
+exit failures and all-skipped runs. Use only the X11 dependency directory in
+`LD_LIBRARY_PATH`; the Vulkan suite loads Termux's Vulkan **loader**, not the raw
+ICD as a loader. For example, with a freshly extracted CTS artifact on the phone:
+
+```sh
+LD_LIBRARY_PATH=$PREFIX/lib/panvk-kbase/bionic/x11 python cts/run.py \
+  --suite gles31 --cts <artifact/out> --driver <baseline.so> \
+  --pattern 'dEQP-GLES31.info.*' --out <new-info-control>
+LD_LIBRARY_PATH=$PREFIX/lib/panvk-kbase/bionic/x11 python cts/run.py \
+  --suite gles31 --cts <artifact/out> --driver <accepted-workgroups.so> \
+  --large-workgroups --pattern 'dEQP-GLES31.functional.compute.*' \
+  --max-seconds 600 --max-cases 100 --out <new-compute-chunk>
+```
+
+Run the release/source-baseline controls first, then matched opt-in subsets.
+For Vulkan, select `dEQP-VK.api.info.*`, `dEQP-VK.info.*`, then
+`dEQP-VK.compute.*`. Preserve failures for diagnosis before another run; a partial
+chunk is incomplete, even when every executed case passed.
+
+## Desktop qualification still required
+
+The private harness can run the 20 capture cycles and 30-minute soak together:
+
+```sh
+python panvk-desktop.py --mode shm --cycles 20 --soak-seconds 1800 \
+  --driver <qualified.so> --ghostty-probe --out <new-directory>
+```
+
+Retrieve the whole directory and run both host checkers. Check `PHONE-STATUS`,
+memory and the shared private-display lock first; do not overlap the soak with
+another GPU qualification. Preserve the managed session and stop only owned
+test processes. This harness starts a private compositor, not the complete
+installed controller, so its captures cannot count as the installed 30/30 gate.
+
+For that final gate, the current controller's `graphics.PANVK` selects only
+`$PREFIX/lib/panvk-kbase`; simply installing the source package does not switch
+it. Prepare a controller copy with **only** `PANVK` set to the candidate's
+installed root, check both ABI ICD library paths and provenance, and run the
+private harness with `--integrated --controller-dir <staged-controller>` first.
+Once those checks pass and an interruption is agreed, save the installed
+controller file/hash and session renderer, stop the managed desktop through
+its controller, atomically install that same tested graphics module, and start
+the normal Zink session. Run `desktop.py validate` in that session, preserving
+the output and compositor maps proving the candidate actually loaded. Restore
+the saved graphics module and restart the previous renderer on failure; do not
+repin the normal package unless all 30 checks pass. The live session has not
+been interrupted for this step.
+
 ## Where the versions stand
 
 Measured on the phone with the packaged driver (`mesa-vulkan-icd-panvk-kbase` 26.3.1) and
@@ -115,7 +208,8 @@ The pass is a working subset behind an environment variable. To ship it:
    real GL programs hit it and decide with the user. The 769-invocation refusal is now fixed:
    `0005` pads each hardware group to a subgroup boundary and masks excess lanes inside each
    cloned region, leaving workgroup barriers unconditional.
-2. **Variable workgroup sizes** (`ARB_compute_variable_group_size`) are not handled.
+2. **Variable workgroup sizes** (`ARB_compute_variable_group_size`) now pass the
+   five-shape GL probe above; extend coverage with the conformance subset.
 3. **Run a conformance subset**, not only our probes: `dEQP-VK.compute.*` and
    `dEQP-GLES31.functional.compute.*` are the relevant groups. None has been run.
 4. **Cache identity is now covered.** `0006` hashes the architecture-9 opt-in into the

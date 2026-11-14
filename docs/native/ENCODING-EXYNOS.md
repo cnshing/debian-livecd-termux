@@ -30,7 +30,10 @@ refuses Android's software encoders. On the S20 these are:
 | HEVC | `OMX.Exynos.HEVC.Encoder` |
 | VP9 | `OMX.Exynos.VP9.Encoder` |
 
-There is no AV1 encoder, and only 8-bit input is supported.
+The phone also has VP8, MPEG-4 Part 2 and H.263 encoders. The bridge does not offer them, and
+VA-API has no encode entry point for MPEG-4 or H.263. There is no AV1 encoder. The bridge sends
+8-bit pictures only; whether the encoders take 10-bit has not been checked. The full comparison
+with what Android offers is in [handoff/s20-codec-parity.md](handoff/s20-codec-parity.md).
 
 **Direct V4L2 access is not possible.** The MFC encoder is a V4L2 device (`/dev/video*`), and
 Linux VA-API drivers for V4L2 exist, such as [libva-v4l2](https://github.com/Halhadus/va-v4l2).

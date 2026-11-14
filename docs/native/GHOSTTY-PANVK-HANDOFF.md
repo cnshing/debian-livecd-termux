@@ -30,12 +30,14 @@ Mesa 105's known-linear metadata fix alone does not clear this gate. Revision
 the strict spatial oracle and private Ghostty DMA-BUF acceptance with GTK Cairo:
 four fresh terminal captures, per-capture import/mmap logs, no Ghostty CPU
 fallback, normal exit and isolation. GTK still downloads the imported DMA-BUF
-to CPU memory for Cairo. The GL renderer remains blocked by `EGL BadAccess`;
-a separate private X11 EGL build is being tested. See the SYNC_FD handoff for
-exact artifacts and evidence. Installed GTK and launcher defaults are unchanged.
+to CPU memory for Cairo. A separate private GTK revision 102 restores X11 EGL
+and clears `EGL BadAccess`: GTK GL imports also pass four fresh captures,
+with 48 successful imports, zero mmap/CPU downloads, normal exit and isolation.
+See the SYNC_FD handoff for exact artifacts and reproduction. This qualifies
+Ghostty → GTK GL import; installed GTK and launcher defaults are unchanged.
 
 
-## Current outcome
+## Original workgroup outcome
 
 The Mali-G76 large-workgroup compiler pass **can be adapted to our Mali-G77**.
 The experimental Android driver built in CI and correctly executed the tested
@@ -48,8 +50,8 @@ so the former 4.3 context/version gate is overcome. **GPU Ghostty now passes
 with privately staged Mesa 26.2.6-102, GTK Cairo and CPU-readback presentation.**
 The terminal renderer uses Zink/PanVK on Mali; readback copies the finished GPU
 frame into CPU memory for GTK. This is not software terminal rendering or
-zero-copy presentation. DMA-BUF remains unsupported with this ICD; GTK's GL path
-has no acceptance pass.
+zero-copy presentation. These original runs did not qualify DMA-BUF or GTK's
+GL path; the later SYNC_FD/GTK follow-up above does.
 
 Keep the installed Ghostty software fallback. The experimental ICD was staged
 privately and was not installed or selected for the managed desktop.

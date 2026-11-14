@@ -76,8 +76,11 @@ livecd start
 Turnip driver and the desktop renders through Zink; elsewhere it renders in software.
 
 Firefox, Chromium and Google Chrome are installed with GPU rendering and Android's hardware video
-decoding and encoding. Chrome is downloaded from Google during installation, because its license
-does not allow this project to redistribute it.
+decoding. Chrome is downloaded from Google during installation, because its license does not
+allow this project to redistribute it. Hardware video **encoding** has limited support: native
+programs can use it on Snapdragon phones, Exynos phones have known faults, and browsers do not
+hardware-encode by default. See [hardware encoding](docs/native/ENCODING.md) and
+[Exynos encoding](docs/native/ENCODING-EXYNOS.md).
 
 The desktop's Android integrations start with it: the phone microphone, or a connected Bluetooth
 headset (pair it in Android with **Calls** enabled), EasyEffects, GSConnect, whole-device CPU and

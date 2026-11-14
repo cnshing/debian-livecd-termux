@@ -3,6 +3,10 @@
 Raw capture paths beginning with `temp/` refer to local files excluded from Git.
 See the [privacy notes](../privacy.md).
 
+**Hardware encoding has limited support.** This page covers the Snapdragon phone. For Samsung
+Exynos phones, including what does not work there and why, see
+[ENCODING-EXYNOS.md](ENCODING-EXYNOS.md).
+
 Built and tested on the connected Galaxy Note10+
 (Snapdragon 855, Adreno 640, Android 11), with Termux:VA `ae14813` and Mesa for
 Android Container `eb3e7fd4`. Nothing here is installed on the phone yet, and the
@@ -152,7 +156,7 @@ All changes are generic: none is specific to a program.
 | OBS Studio | Termux's recipe removes VAAPI on purpose (its patch 0007) and builds without V4L2. Restoring both needs a recipe override and libpci, which Termux does not package. Not built or tested |
 | Chromium (Termux) | Our VA-API build passes private Mali WebRTC H.264/VP9 loopback. Hardware encoding stays disabled by default because WebCodecs crashes the GPU process |
 | Google Chrome, ungoogled-chromium | Use their separate glibc stack. Chrome WebRTC is blocked by network discovery under Bionilux; ungoogled-chromium encoding is untested |
-| Firefox | Encoding not tested |
+| Firefox | Off by decision: two problems in Firefox's own code, described in [ENCODING-EXYNOS.md](ENCODING-EXYNOS.md#browsers) |
 
 ## Limits
 

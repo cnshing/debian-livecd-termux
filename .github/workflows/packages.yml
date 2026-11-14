@@ -311,6 +311,12 @@ jobs:
         unbound=-w
         test "$EXACT" != true || unbound=
         ./scripts/run-docker.sh ./build-package.sh -I -C $unbound -a aarch64 $PACKAGES
+        # The builder skips a recipe it has already "built" by downloading Termux's package of that
+        # name as some dependency's dependency, and still succeeds. Every recipe must leave a package.
+        for package in $PACKAGES; do
+          test -n "$(find output -name "${package}_*.deb" -print -quit)" ||
+            { echo "::error::$package was not built; Termux's package of that name stood in for it."; exit 1; }
+        done
 
     - name: Check native network package artifacts
       if: steps.build.outcome == 'success' && contains(format(' {0} ', matrix.packages), ' gvfs ')

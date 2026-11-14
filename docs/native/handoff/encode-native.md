@@ -20,17 +20,22 @@ find the encoder with no settings.
 
 ## Why a fresh S20 gets no hardware encoder
 
-1. **FFmpeg has no VA-API.** The S20 had Termux's FFmpeg `9.0.2-1`. This project's `ffmpeg`
-   `9.0.2-100` (VA-API on) was not offered by the phone's package source. The cause has not been
-   found: start with `apt-cache policy ffmpeg` on the phone and the livecd repository's index.
-   See also how the Termux mirror's versions drift from the builder's pin.
+1. **FFmpeg has no VA-API.** Found 2026-11-14: no release carried this project's `ffmpeg`.
+   `ffmpeg` is in the v0.12.0 tarball's pin list but no `ffmpeg_*.deb` is in its pool, so APT
+   fell back to Termux's build. In CI's video set (run 43414277233), `android-firefox-video`
+   was built before `ffmpeg`; Termux's `firefox`, its dependency, depends on `ffmpeg`, so the
+   builder downloaded Termux's `ffmpeg_9.0.2-2` and then printed `ffmpeg@9.0.2-100 built -
+   skipping`, and the job still succeeded. Fixed on `fix/encode-native`: `android-firefox-video`
+   build-depends on `ffmpeg` so the planner orders it first, a test checks the order, and the
+   build step now fails when a recipe leaves no package. Needs a CI build and a fresh-install
+   check on the phone.
 2. **The driver cannot find the Mali GPU.** `android-vaapi` revision 5 (on main) presents only
    the Snapdragon GPU. Revisions 7 and 8, on the CI branch
    [`fix/chromium-webcodecs-shmem`](https://github.com/cnshing/debian-livecd-termux/tree/fix/chromium-webcodecs-shmem),
    present `/dev/mali0`, also when `/dev/dri` is missing, and pick CPU-backed surfaces on Mali.
    Revision 8 adds a lookup through an already-loaded libdrm when `RTLD_NEXT` fails (libdrm
    loaded as a local dependency, as in Firefox).
-3. **GStreamer has no VA plugin.** `gst-plugins-va` is a recipe, but no overlay installs it.
+3. **GStreamer has no VA plugin.** `gst-plugins-va` is a recipe and is in the release, but no overlay installed it. The Video Player overlay installs it from `fix/encode-native`. Not yet checked on a phone.
 
 ## Faults in the encoded video
 
@@ -55,11 +60,11 @@ find the encoder with no settings.
 These serve the parity criterion; [s20-codec-parity.md](s20-codec-parity.md) adds VP8, 10-bit and
 4K/8K work on top of them.
 
-1. Find why the S20 is not offered `ffmpeg` `9.0.2-100`, and fix it.
+1. Done in code (above); build it in CI and check `apt-cache policy ffmpeg` on a fresh S20 install.
 2. Rerun the full native suite on `android-vaapi` revision 8 on both phones, then merge 6–8 to
    main and install them. Keep the ordinary-process and GL/EGL checks: the preload is loaded
    into every desktop process.
-3. Install `gst-plugins-va` from the Video Player overlay.
+3. Done in code: the Video Player overlay installs `gst-plugins-va`. Check on a phone.
 4. Colour metadata in the daemon.
 5. The Exynos bitrate-mode extension, accepting pixels, one output per input and bitrate
    together. Do not allow frame dropping in Serein's test.

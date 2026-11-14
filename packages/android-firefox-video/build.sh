@@ -11,7 +11,10 @@ TERMUX_PKG_AUTO_UPDATE=false
 TERMUX_PKG_EXCLUDED_ARCHES="arm, i686, x86_64"
 # Firefox on PanVK needs the VA driver's own Gallium variable and Zink's dma-buf fence fix.
 TERMUX_PKG_DEPENDS="firefox, android-vaapi (>= 27.0.0~devel20261029-5), libc++, libdrm, libva, libx11, libxrandr, mesa (>= 26.2.6-103)"
-TERMUX_PKG_BUILD_DEPENDS="libnspr"
+# ffmpeg only orders the build: Termux's firefox depends on ffmpeg, so without it CI built this first,
+# downloaded Termux's ffmpeg as firefox's dependency and then skipped our ffmpeg as already built,
+# and no release carried the VA-API ffmpeg.
+TERMUX_PKG_BUILD_DEPENDS="ffmpeg, libnspr"
 
 termux_step_post_get_source() {
 	local commit path sha name

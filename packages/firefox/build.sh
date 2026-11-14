@@ -114,6 +114,10 @@ termux_step_configure() {
 ac_add_options --enable-debug-symbols
 ac_add_options --disable-install-strip
 END
+	else
+		# A GitHub runner's 16 GB cannot link gkrust with LTO and full debug info: rustc was
+		# killed at 31 minutes. The installed package is stripped either way.
+		echo 'ac_add_options --disable-debug-symbols' >> .mozconfig
 	fi
 
 	./mach configure

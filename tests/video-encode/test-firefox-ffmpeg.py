@@ -10,6 +10,8 @@ The rate checks encode the same pictures with the frame rates Firefox declares
 and the timestamps it sends. Firefox's WebRTC declares the H.264 level's limit
 (450 fps at 320x180) for a 30 fps capture, and WebCodecs may declare none. The
 stream's bitrate over its own timestamps must stay near the plain 30 fps run.
+The last case lowers bit_rate halfway, as Firefox's WebRTC does when congestion
+control moves its target; the second half must follow the new bitrate.
 """
 import argparse
 import ctypes as C
@@ -27,7 +29,9 @@ RATES = [('30 fps declared and sent', 30, (33333,)),
          ('450 fps declared, 30 sent', 450, (33333,)),
          ('no rate declared, 30 sent', 0, (33333,)),
          ('30 fps declared, 15 sent', 30, (66667,)),
-         ('450 fps declared, 33 and 50 ms apart', 450, (33333, 50000))]
+         ('450 fps declared, 33 and 50 ms apart', 450, (33333, 50000)),
+         # A fourth field is the bitrate set on the open encoder from picture PICTURES // 2 on.
+         ('30 fps, bitrate lowered to 500 kb/s halfway', 30, (33333,), 500000)]
 
 
 class Frame(C.Structure):  # The start of AVFrame, libavutil 61.
@@ -83,7 +87,7 @@ def probe(directory, name, rate=None):
         if ret < 0:
             raise RuntimeError(f'open: {ret}')
         if rate:
-            print(json.dumps(encode(util, codec, context, packet, rate[1])))
+            print(json.dumps(encode(util, codec, context, packet, rate[1], rate[2] if len(rate) > 2 else None)))
             return
         ret = codec.avcodec_send_frame(context, None)
         if ret not in (0, EOF):
@@ -96,7 +100,7 @@ def probe(directory, name, rate=None):
         codec.avcodec_free_context(C.byref(context))
 
 
-def encode(util, codec, context, packet, intervals):
+def encode(util, codec, context, packet, intervals, change=None):
     """Encode PICTURES pictures of fresh 8x8 blocks, which cost bits at any quantizer."""
     util.av_frame_alloc.restype = C.c_void_p
     util.av_frame_get_buffer.argtypes = [C.c_void_p, C.c_int]
@@ -108,6 +112,7 @@ def encode(util, codec, context, packet, intervals):
         raise MemoryError('frame')
     frame, output = Frame.from_address(pointer.value), Packet.from_address(packet.value)
     size = packets = pts = 0
+    half = None
 
     def receive():
         nonlocal size, packets
@@ -134,6 +139,12 @@ def encode(util, codec, context, packet, intervals):
                     C.memmove(frame.data[0] + (block * 8 + line) * frame.linesize[0], row, WIDTH)
             for plane in (1, 2):
                 C.memset(frame.data[plane], 128, frame.linesize[plane] * (HEIGHT // 2))
+            if index == PICTURES // 2:
+                half = (size, pts)
+                if change:
+                    ret = util.av_opt_set(context, b'b', str(change).encode(), 0)
+                    if ret < 0:
+                        raise RuntimeError(f'bitrate change: {ret}')
             frame.pts = pts
             pts += intervals[index % len(intervals)]
             ret = codec.avcodec_send_frame(context, pointer)
@@ -146,13 +157,14 @@ def encode(util, codec, context, packet, intervals):
     finally:
         util.av_frame_free(C.byref(pointer))
     return {'packets': packets, 'bytes': size,
-            'kbps': round(size * 8 / (pts / 1e6) / 1000, 1)}
+            'kbps': round(size * 8 / (pts / 1e6) / 1000, 1),
+            'second_half_kbps': round((size - half[0]) * 8 / ((pts - half[1]) / 1e6) / 1000, 1)}
 
 
 def rates(directory, name):
     """Run every rate case in a child and compare each with the plain 30 fps stream."""
     measured, failed = [], 0
-    for index, (label, _, _) in enumerate(RATES):
+    for index, (label, *_) in enumerate(RATES):
         result = subprocess.run([sys.executable, __file__, '--library-dir', str(directory),
                                  '--codec', name, '--rate', str(index)],
                                 capture_output=True, text=True, timeout=180)
@@ -166,12 +178,15 @@ def rates(directory, name):
     if failed:
         return failed
     plain = measured[0]['kbps']
-    for (label, _, _), item in zip(RATES, measured):
+    for (label, *case), item in zip(RATES, measured):
         # The first case is held to the requested bitrate, the others to the first.
         target, what = (BITRATE / 1000, 'requested') if item is measured[0] else (plain, 'plain 30 fps')
-        ok = item['packets'] == PICTURES and 0.6 * target <= item['kbps'] <= 1.6 * target
+        value = item['kbps']
+        if len(case) > 2:
+            target, what, value = case[2] / 1000, 'changed to', item['second_half_kbps']
+        ok = item['packets'] == PICTURES and 0.6 * target <= value <= 1.6 * target
         failed += not ok
-        print(f'{"PASS" if ok else "FAIL"} {name}: {label}: {item["kbps"]} kb/s in {item["packets"]} packets, '
+        print(f'{"PASS" if ok else "FAIL"} {name}: {label}: {value} kb/s in {item["packets"]} packets, '
               f'{what} {target:g} kb/s', flush=True)
     return failed
 

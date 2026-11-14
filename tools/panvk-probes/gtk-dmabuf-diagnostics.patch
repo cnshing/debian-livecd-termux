@@ -24,3 +24,8 @@ No change to import acceptance, layout checks or synchronization.
                       "Used mmap for downloading %dx%d dmabuf (format %.4s:%#" G_GINT64_MODIFIER "x)",
                       gdk_texture_get_width (texture), gdk_texture_get_height (texture),
                       (char *)&dmabuf->fourcc, dmabuf->modifier);
+--- a/gdk/gdkdmabufegl.c
++++ b/gdk/gdkdmabufegl.c
+@@ -412 +412 @@
+-  GDK_DISPLAY_DEBUG (display, DMABUF,
++  g_message (

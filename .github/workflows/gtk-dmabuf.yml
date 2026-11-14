@@ -2,6 +2,11 @@ name: GTK DMA-BUF experiment
 
 on:
   workflow_dispatch:
+    inputs:
+      x11_egl:
+        description: Restore X11 EGL for private GPU-import tests
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -21,6 +26,8 @@ jobs:
         ref: ${{ steps.config.outputs.revision }}
         path: termux-packages
     - name: Restore DMA-BUF header detection in the pinned GTK recipe
+      env:
+        GTK_DMABUF_X11_EGL: ${{ inputs.x11_egl && '1' || '0' }}
       run: python3 tools/panvk-probes/prepare-gtk-dmabuf.py termux-packages
     - name: Build the experimental GTK package
       working-directory: termux-packages
@@ -37,7 +44,7 @@ jobs:
     - uses: actions/upload-artifact@v4
       if: always()
       with:
-        name: gtk4-dmabuf-aarch64
+        name: gtk4-dmabuf-aarch64${{ inputs.x11_egl && '-x11-egl' || '' }}
         path: |
           termux-packages/output/
           /tmp/gtk-dmabuf-build/gtk4/build/meson-logs/

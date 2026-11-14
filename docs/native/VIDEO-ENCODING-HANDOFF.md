@@ -10,6 +10,61 @@ Read [ENCODING.md](ENCODING.md) for the design and the Adreno results, and
 what works, what is blocked and by what, and what to do next. Paths under `temp/` are local
 files that Git ignores.
 
+## Takeover checkpoint — 2026-11-14 01:31 UTC (Nov 13 Pacific)
+
+This session has stopped at the user's request so another agent can continue.
+**Browser hardware encoding is not enabled by default.** Native encoding already
+uses hardware where the driver is installed. Do not enable browser defaults until
+actual browser output, software-decoded pixels and WebRTC all pass.
+
+- **Worktree:** `/home/cs/debian-livecd-termux/temp/encoding-ci-worktree`.
+  Use the existing **single CI branch `fix/chromium-webcodecs-shmem`**, or main;
+  the user explicitly prohibited multiple branches. Latest implementation/evidence
+  commit before this checkpoint is `d5e3c11`; CI bootstrap is `0feaa97`.
+  The root checkout contains older/user changes: leave them untouched and work in
+  this worktree. Production package builds go through GitHub CI.
+- **CI:** dependency bootstrap [43538498322](https://github.com/cnshing/debian-livecd-termux/actions/runs/43538498322)
+  is **in progress in Build**, checked at this checkpoint. It automatically
+  dispatches the normal Chromium build after success. Do not start a duplicate.
+  Inspect the child run when it appears; only the child produces the Chromium
+  revision 2 artifact. The original six-hour run timed out (details below).
+- **Phone released:** `temp/PHONE-STATUS` is available. All private processes from
+  these probes stopped. Desktop PID 23548, X server 23573, GNOME shell 23741 and
+  shared daemon 26041 were still running unchanged. Recheck ownership under
+  `temp/PHONE-STATUS.lock` before taking the phone.
+- **Connection:** wireless ADB currently has no device. LAN SSH works via the
+  ignored helper `temp/gpu-x1s/encoding-acceptance-20261113/ssh-lan`; it connects
+  to `192.168.1.238:8022` and verifies `temp/gpu-x1s/known_hosts` with host alias
+  `x1s-gpu`. The older `temp/gpu-x1s/ssh` helper depends on ADB and fails here.
+- **Private tested runtime:** phone
+  `~/gpu-x1s/eaccept-ff4/root/data/data/com.termux/files/usr` contains Firefox
+  FFmpeg revision 4 and VA driver revision 8 from successful CI 43436860855.
+  These are extracted test libraries, not installed package replacements.
+- **Results:** Firefox H.264/VP9 hardware output and flush work (60/60), but
+  ordinary canvas WebCodecs and H.264 WebRTC colours still fail. Explicit BT.709
+  input controls pass; they isolate the matrix/signalling issue, not acceptance
+  of the normal path. HEVC's requested WebCodecs config remains unsupported.
+  The anomalous 450 fps comes from Mozilla's WebRTC encoder configuration before
+  FFmpeg/VA. Detailed measurements and source links follow below.
+- **Evidence:** ignored host directory
+  `temp/gpu-x1s/encoding-acceptance-20261113/` has `status.json`, CI timeout log,
+  source snapshots, probe scripts, and gzip-validated `firefox4-phone-logs.tgz`
+  plus `firefox4-bt709-logs.tgz`. Archives exclude browser profiles. The committed
+  `tests/video-encode/webcodecs.html` was exercised on the S20 with VP9/BT.709:
+  60 chunks/60 decoded pictures, no encode/flush error, maximum channel error 12.
+  H.264 and VP9 explicit-input controls also independently software-decode with
+  error 2 under BT.709 versus 21 under default/BT.601.
+
+**Next agent:** follow the existing CI chain and privately stage Chromium revision
+2 when ready. Run constant-bitrate WebCodecs with saved-stream software pixel
+checks, then H.264/VP9 WebRTC; installed revision 1's baseline is not acceptance
+of revision 2. Meanwhile fix colour conversion/signalling without changing decoder
+settings or loosening pixel thresholds, and trace the WebRTC frame-rate source.
+Default gating must distinguish fixed Bionic Chromium revision 2 from revision 1
+and prebuilt Chrome; the existing `livecd-vaapi.json` receipt lacks a revision
+field, so a version-only check is insufficient. Firefox, Chrome and Serein defaults
+remain gated by their failures below.
+
 ## Acceptance in progress (2026-11-13)
 
 The Linux/Bionic WebCodecs adapter now has a shared-memory input patch in
@@ -33,11 +88,12 @@ A fresh isolated baseline on its installed stack passed H.264 (283 browser frame
 received colours and no GPU crash. The daemon names Exynos hardware encoders for
 both sessions. This baseline does not accept the WebCodecs fix.
 
-Firefox WebCodecs was also probed through its installed launcher and a private
+The initial installed-runtime Firefox WebCodecs baseline was probed through its launcher and a private
 profile/display. With `hardwareAcceleration: "prefer-hardware"` and constant
 bitrate, `isConfigSupported` returned false for `avc1.42001f`, `vp09.00.10.08`,
 and `hvc1.1.6.L93.B0`. No encoder session was opened. The `HWENC` profile listing
-therefore still does not establish an accepted Firefox encode.
+therefore does not establish an accepted Firefox encode. Private revision 4 follow-up
+results below supersede this baseline for the experimental runtime.
 
 Next: stage the CI binary privately and run WebCodecs with constant bitrate and
 software decode/pixel checks, followed by the H.264/VP9 WebRTC loopback. Stop the
@@ -360,12 +416,15 @@ changing this preload, which is loaded into every desktop process.
 
 ## What to do next, in order
 
-1. **Patch Chromium for blocker 1**, then add `AcceleratedVideoEncoder` to Chromium's features
+1. **Accept the already-patched Chromium revision 2 after the CI chain completes**,
+   then add `AcceleratedVideoEncoder` to Chromium's features
    on Mali in `command_line()` of `src/native/acceleration.py`, with a host test beside
    `test_glibc_mali_driver_precedes_the_prebuilt_mesa` in
    `tests/packaging/test-mali-acceleration.py` (that test currently asserts the flag is
-   absent). Accept only when the WebCodecs probe either encodes or falls back without a GPU
-   process crash, and the WebRTC loopback still passes.
+   absent). Require confirmed hardware frames, a clean flush, independently software-decoded
+   correct pixels and a passing WebRTC loopback without a GPU crash. A successful
+   software fallback alone does not qualify a hardware default. Gate by fixed package
+   revision; leave prebuilt Chrome and older Chromium builds unchanged.
 2. **Fix Firefox colour handling and qualify defaults.** Private revision 4 hardware
    output and flush work, but the browser colour checks fail (above). Retest: a page with WebCodecs `VideoEncoder`
    (`hardwareAcceleration: 'prefer-hardware'`, `avc1.42001f`, `vp09.00.10.08`, `hvc1`),
@@ -374,7 +433,10 @@ changing this preload, which is loaded into every desktop process.
    and packed headers Firefox wants against what the driver reports, and the upload path of
    the software surface backend.
 3. **Chrome networking** (blocker 3), then rerun the Chrome WebRTC loopback.
-4. **Deploy accepted Mali revision 7** (blocker 4), retaining the existing native tests.
+4. **Qualify Mali revision 8 for deployment** (blocker 4), retaining the existing
+   native tests. Revision 7 passed 46/46 FFmpeg checks; revision 8 passes native
+   discovery and the Firefox local-library/empty-drain regressions. Rerun the full
+   native encoding suite on revision 8 before treating those as its results.
    Investigate the all-intra bitrate mode through the LineageOS OMX mapping above;
    accept pixels, one output per input, and bitrate together. Screen-share VPP still
    needs performance work.

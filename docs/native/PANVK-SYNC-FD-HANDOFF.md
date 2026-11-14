@@ -132,6 +132,16 @@ and both ABI build records. Apply the listed patch to the archive to obtain
 content tree `82cfe30d…`. The glibc `$ORIGIN` RUNPATH is recorded; CI absolute
 search paths are rejected by the package audit.
 
+[Package CI 43546461791](https://github.com/cnshing/debian-livecd-termux/actions/runs/43546461791)
+passed the candidate build and ABI/provenance audit. The retrieved package also
+passed the host audit; deliberately corrupting its Bionic ICD was rejected by
+the pinned-hash check.
+
+- Artifact `debs-mesa-vulkan-icd-panvk-kbase-sync-fd-f8477a1c80efa833`,
+  ID 14094670041.
+- `mesa-vulkan-icd-panvk-kbase-sync-fd_26.3.1_aarch64.deb`, SHA-256
+  `4cf0242faa11426c80bf7b27d722de70aa167cbe9357f5df312a7e4df7433bf6`.
+
 **Ghostty DMA-BUF presentation and normal-package promotion remain pending.**
 The Chrome oracle failure and installed desktop qualification must remain
 visible when deciding promotion. All phone processes started by this work
@@ -241,10 +251,10 @@ The packaged driver already has the pieces to hang this on:
 | Import | `kbase_cpu_sync_import_sync_file` | already there; check it against a fence that never signals |
 | Queue submit | the v9 backend, `jm-v9/002` | pass the batch's signal syncs down so the fd lands on them |
 
-Carry it as a patch in `tools/panvk-probes/driver-patches/`, applied to the reconstructed
-p0175 tree, with JimVulkan's copyright line in what is copied (both projects are MIT). Do not
-copy the whole file: JimVulkan's submission is asynchronous with its own event thread, the
-packaged driver's is not, and swapping that model is a far larger change than this needs.
+The port is carried separately in `tools/panvk-probes/sync-fd-patches/` and applies to
+the reconstructed p0175 tree. Its source attribution and JimVulkan's MIT license are
+preserved. It adapts the fence-trigger mechanism to the existing atom allocator rather
+than replacing the whole file or adopting JimVulkan's event-thread submission model.
 
 Watch for:
 
@@ -259,19 +269,23 @@ Watch for:
 
 ## Building and packaging
 
-The package installs upstream's release binaries, so it cannot carry a patch today.
-`.github/workflows/panvk-driver.yml` already reconstructs the release's source and builds the
-Bionic and glibc drivers in CI, with a `patched/` variant from `driver-patches/`
-(`tools/panvk-probes/prepare-driver.sh`, `build-driver.sh`). Two things stand between that
-and a package:
+`.github/workflows/panvk-sync-fd.yml` reconstructs the pinned p0175 tree and builds
+both ABIs, retaining the unmodified baseline and the independent `patched/` variant.
+The optional `workgroups=true` workflow input combines the two experimental series
+for private Ghostty tests. It does not change the candidate recipe's pinned pair.
 
-- **The existing `patched/` variant breaks GTK presentation** (`zink: could not create
-  swapchain`), from one of its two patches or their combination; never bisected
-  ([PANVK-X1S-RESEARCH.md](PANVK-X1S-RESEARCH.md)). Build this port as its own variant on the
-  unmodified baseline, as the workgroup experiment did.
-- **The recipe has to take a built driver.** Either `mesa-vulkan-icd-panvk-kbase` builds the
-  reconstructed tree itself, or it pins a CI artifact by hash as it pins the release now. The
-  version-bump handoff needs the same step; do it once.
+The earlier X11/point-size `driver-patches/` variant regressed GTK presentation.
+Neither of those patches is included in this port or its candidate package. The
+workgroup experiment also remains separate from the ordinary SYNC_FD candidate.
+
+The source-package prerequisite is implemented once in the shared
+`mesa-vulkan-icd-panvk-kbase` recipe support; `-source` pins the baseline and
+`-sync-fd` pins this independent port. Each installs beside the normal release,
+with its own `SOURCE.json` and hash-checked binary assets. The new candidate adds
+the port's MIT attribution to the inherited copyright bundle. Updating a candidate
+requires a new immutable asset set and reviewed hash/provenance lock, followed by
+`packages.yml` and `check-panvk-artifact.py`. Keep the existing normal package
+selected until its installed-desktop and consumer promotion gates are met.
 
 Builds run in GitHub CI, not on the host or the phone.
 

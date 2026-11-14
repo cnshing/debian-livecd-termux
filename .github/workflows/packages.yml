@@ -37,6 +37,10 @@ on:
         description: Space-separated package names. Empty builds every package.
         required: false
         default: ""
+      chromium_dependencies_only:
+        description: Build Chromium's pinned dependencies, then automatically start the browser build.
+        type: boolean
+        default: false
       release:
         description: Release tag to publish. Needs every package, so leave packages empty.
         required: false
@@ -139,6 +143,7 @@ jobs:
         INPUT_PACKAGES: ${{ inputs.packages }}
         INPUT_RELEASE: ${{ inputs.release }}
         INPUT_REBUILD: ${{ inputs.rebuild }}
+        CHROMIUM_DEPENDENCIES_ONLY: ${{ inputs.chromium_dependencies_only }}
         TARBALLS: ${{ inputs.tarballs || vars.REPO_TARBALLS || 'net' }}
         GH_TOKEN: ${{ github.token }}
         DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
@@ -160,6 +165,12 @@ jobs:
           echo "::error::install.sh downloads a release's net tarball, so a release needs tarballs: net or both."
           exit 1
         fi
+        if test "$CHROMIUM_DEPENDENCIES_ONLY" = true; then
+          if test "$INPUT_PACKAGES" != chromium || test -n "$release"; then
+            echo "::error::Dependency-only builds require packages=chromium and no release."
+            exit 1
+          fi
+        fi
         if test -z "$INPUT_PACKAGES"; then
           requested=$(python3 tools/recipes.py plan --all)
         elif test -n "$release"; then
@@ -169,7 +180,7 @@ jobs:
         else
           requested=$(python3 tools/recipes.py plan $INPUT_PACKAGES)
         fi
-        if test "$INPUT_REBUILD" = true; then
+        if test "$INPUT_REBUILD" = true || test "$CHROMIUM_DEPENDENCIES_ONLY" = true; then
           matrix=$requested
         else
           matrix=$(printf '%s' "$requested" | python3 tools/recipes.py unbuilt)
@@ -206,7 +217,7 @@ jobs:
     - uses: actions/checkout@v7
     - name: Look for this set's packages from another run
       id: earlier
-      if: inputs.rebuild != true
+      if: inputs.rebuild != true && inputs.chromium_dependencies_only != true
       env:
         ARTIFACT: ${{ matrix.artifact }}
         GH_TOKEN: ${{ github.token }}
@@ -297,6 +308,22 @@ jobs:
       if: steps.earlier.outputs.built != 'true' && matrix.large
       working-directory: termux-packages
       run: ./scripts/free-space.sh
+    - name: Restore completed Chromium dependency packages
+      if: steps.earlier.outputs.built != 'true' && matrix.name == 'chromium' && inputs.chromium_dependencies_only != true
+      env:
+        GH_TOKEN: ${{ github.token }}
+        DEPENDENCY_ARTIFACT: chromium-dependencies-${{ env.TERMUX_PACKAGES_COMMIT }}-${{ matrix.hash }}
+      run: |
+        artifact=$(gh api -X GET "repos/$GITHUB_REPOSITORY/actions/artifacts" -f name="$DEPENDENCY_ARTIFACT" -f per_page=100 \
+          | jq -r --arg branch "$GITHUB_REF_NAME" '.artifacts | map(select(.expired == false and .workflow_run.head_branch == $branch)) | sort_by(.created_at) | last | .id // empty')
+        if test -n "$artifact"; then
+          gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$artifact/zip" > "$RUNNER_TEMP/chromium-dependencies.zip"
+          mkdir -p termux-packages/output
+          unzip -oq "$RUNNER_TEMP/chromium-dependencies.zip" '*.deb' -d termux-packages/output
+        else
+          echo "No pinned dependency artifact; building dependencies normally."
+        fi
+
     - name: Build
       id: build
       if: steps.earlier.outputs.built != 'true'
@@ -304,13 +331,21 @@ jobs:
       env:
         PACKAGES: ${{ matrix.packages }}
         EXACT: ${{ matrix.exact }}
+        CHROMIUM_DEPENDENCIES_ONLY: ${{ inputs.chromium_dependencies_only }}
+        BUILD_SET: ${{ matrix.name }}
       # Termux's repository keeps only each package's newest version, so a dependency held to the pinned
       # builder's version is usually gone and gets compiled instead, Node.js and Electron included.
       # -w downloads the repository's version. See EXACT_DEPENDENCIES in tools/recipes.py.
       run: |
         unbound=-w
         test "$EXACT" != true || unbound=
-        ./scripts/run-docker.sh ./build-package.sh -I -C $unbound -a aarch64 $PACKAGES
+        if test "$CHROMIUM_DEPENDENCIES_ONLY" = true; then
+          PACKAGES=chromium-host-tools
+        fi
+        reuse=false
+        test "$BUILD_SET" != chromium || reuse=true
+        ./scripts/run-docker.sh env TERMUX_PKGS__BUILD__REUSE_BUILT_PACKAGES="$reuse" \
+          ./build-package.sh -I -C $unbound -a aarch64 $PACKAGES
 
     - name: Check native network package artifacts
       if: steps.build.outcome == 'success' && contains(format(' {0} ', matrix.packages), ' gvfs ')
@@ -360,16 +395,32 @@ jobs:
     - uses: actions/upload-artifact@v7
       if: steps.build.outcome == 'success'
       with:
-        name: ${{ matrix.artifact }}
+        name: ${{ inputs.chromium_dependencies_only && format('chromium-dependencies-{0}-{1}', env.TERMUX_PACKAGES_COMMIT, matrix.hash) || matrix.artifact }}
         path: termux-packages/output/*.deb
         if-no-files-found: error
         retention-days: 90
+
+  continue-chromium:
+    needs: [plan, build]
+    if: inputs.chromium_dependencies_only && needs.build.result == 'success'
+    runs-on: ubuntu-26.04
+    permissions:
+      contents: read
+      actions: write
+    steps:
+    - name: Start Chromium with the completed dependency packages
+      env:
+        GH_TOKEN: ${{ github.token }}
+        MIRROR: ${{ inputs.mirror || 'default' }}
+      run: |
+        gh workflow run packages.yml --repo "$GITHUB_REPOSITORY" --ref "$GITHUB_REF_NAME" \
+          -f packages=chromium -f mirror="$MIRROR"
 
   assemble:
     # Skipped unless every set built here succeeded, so a release is never missing a package.
     needs: [plan, build]
     if: >-
-      ${{ !cancelled() && needs.plan.result == 'success'
+      ${{ !inputs.chromium_dependencies_only && !cancelled() && needs.plan.result == 'success'
       && (needs.build.result == 'success' || needs.build.result == 'skipped')
       && (needs.plan.outputs.count != '0' || needs.plan.outputs.release != '' || needs.plan.outputs.offline == 'true') }}
     runs-on: ubuntu-26.04

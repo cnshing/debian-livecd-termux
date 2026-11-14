@@ -69,3 +69,10 @@ command; check their hashes. Host checks: `python3 tests/packaging/test-mali-acc
 | ION surfaces | `packages/android-vaapi/tva_ion_winsys.h` |
 | HEVC reorder count | `packages/android-vaapi/0103-hevc-reorder-count.patch` |
 | Results | [X1S-BROWSER-VERIFICATION.md](../X1S-BROWSER-VERIFICATION.md), [native-acceleration-checks.md](../../browsers/native-acceleration-checks.md) |
+
+## Outcome of the 2026-11-14 attempt (agent decode-chromium)
+
+Nothing changed in code. Step 1 needs the Note10+, which was not attached (`adb devices`
+listed only the x1s). Step 2 is waiting on the H.264 bridge fix ([decode-h264.md](decode-h264.md)).
+Step 3, the soak and seek runs, needs the x1s, and another agent had claimed it in
+`temp/PHONE-STATUS` (a 20-cycle qualification). So all three next steps are still open as written above.

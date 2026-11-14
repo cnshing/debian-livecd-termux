@@ -120,6 +120,36 @@ through Cairo/mmap, then the separately failing GL renderer. Keep udmabuf and
 global launcher defaults unchanged while testing it. The direct EGL control
 above already establishes why Mesa patch 0024 is necessary on this kernel.
 
+### GTK DMA-BUF experiment
+
+`.github/workflows/gtk-dmabuf.yml` builds the pinned Termux GTK 4.24.1
+recipe with `HAVE_DMABUF` header detection restored. UDMABUF remains disabled,
+and the existing X11 EGL workaround remains in place. Debug diagnostics are
+retained for `GDK_DEBUG=dmabuf`. This workflow produces a qualification artifact
+only; it does not add GTK to the normal repository or change launcher defaults.
+Extract its `libgtk-4.so.1` privately and prepend that directory only for Ghostty.
+
+The first build [43557476296](https://github.com/cnshing/debian-livecd-termux/actions/runs/43557476296)
+compiled and packaged successfully, including the DMA-BUF implementation. Its
+post-build check failed because it expected Meson's boolean define to include
+`1`; the corrected workflow accepts the presence-only definition. The phone
+became unreachable during private library transfer, before any test launched.
+Device acceptance is still pending.
+
+GTK's mmap importer advertises and accepts only `DRM_FORMAT_MOD_LINEAR`.
+The earlier EGL oracle reported `DRM_FORMAT_MOD_INVALID`, which must not simply
+be relabelled as linear. `dmabuf-readback.py --spatial` now checks four distinct
+quadrants on each changing frame; `--require-linear` additionally rejects an
+implicit modifier. These new device checks have not run yet.
+
+`check-ghostty-panvk.py --require-dmabuf` requires positive GTK texture-import
+and mmap-download diagnostics at least once per fresh capture, in addition to
+all pixel, GPU identity, normal-exit and isolation checks. It rejects the saved
+CPU-fallback run. `panvk-desktop.py` now records GTK library mappings to prove
+which library the process loaded. A passing Cairo/mmap test would establish
+DMA-BUF transport with a CPU download inside GTK; it would not establish a
+GPU-only presentation path.
+
 ### Package candidate
 
 `mesa-vulkan-icd-panvk-kbase-sync-fd` reuses the shared source-package support

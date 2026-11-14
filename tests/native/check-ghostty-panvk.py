@@ -45,7 +45,7 @@ def check_pixels(folder, capture, stale=False):
     return {'path': path.name, 'phase': capture['phase'], 'bands': bands}
 
 
-def check(folder, software_control=False, reject_cpu_fallback=False):
+def check(folder, software_control=False, reject_cpu_fallback=False, require_dmabuf=False):
     result = json.loads((folder / 'result.json').read_text())
     assert result.get('completed'), result.get('error')
     assert json.loads((folder / 'isolation.json').read_text())['ok'], 'shared state changed'
@@ -70,15 +70,25 @@ def check(folder, software_control=False, reject_cpu_fallback=False):
     log = (folder / 'ghostty.log').read_text(errors='replace')
     cpu_fallback = any(message in log for message in (
         'falling back to CPU presentation', 'asking renderer for CPU presentation'))
-    if reject_cpu_fallback:
+    if reject_cpu_fallback or require_dmabuf:
         assert not cpu_fallback, 'Ghostty reported CPU presentation fallback; DMA-BUF is not accepted'
+    imports = log.count('Creating dmabuf texture, format ')
+    downloads = log.count('Used mmap for downloading ')
+    if require_dmabuf:
+        assert not software_control, 'DMA-BUF acceptance requires the GPU run'
+        assert imports >= len(captures), 'Missing positive GTK DMA-BUF import evidence'
+        assert downloads >= len(captures), 'Missing positive GTK mmap download evidence'
+        assert any('libgtk-4' in p for p in ghostty['libraries']), 'GTK mapping was not audited'
     report = {'cpu_presentation_fallback_reported': cpu_fallback, 'ok': True,
+              'gtk_dmabuf_imports': imports, 'gtk_dmabuf_mmap_downloads': downloads,
+              'dmabuf_mmap_verified': require_dmabuf,
               'software_control': software_control, 'captures': checked,
               'stale_negative_control_rejected': True}
     (folder / 'ghostty-pixel-results.json').write_text(json.dumps(report, indent=2) + '\n')
     print(folder.name, 'PASS', len(checked), 'Ghostty captures;',
           'software control' if software_control else 'PanVK/Mali GPU', '; normal exit;',
-          'CPU presentation fallback' if cpu_fallback else 'presentation path unverified')
+          'GTK DMA-BUF mmap verified' if require_dmabuf else (
+              'CPU presentation fallback' if cpu_fallback else 'presentation path unverified'))
 
 
 if __name__ == '__main__':
@@ -87,5 +97,7 @@ if __name__ == '__main__':
     parser.add_argument('--software-control', action='store_true')
     parser.add_argument('--reject-cpu-fallback', action='store_true',
                         help='Reject a known CPU fallback; absence of the warning alone is not DMA-BUF proof')
+    parser.add_argument('--require-dmabuf', action='store_true',
+                        help='Require positive GTK import/mmap diagnostics for every fresh capture')
     args = parser.parse_args()
-    check(args.folder, args.software_control, args.reject_cpu_fallback)
+    check(args.folder, args.software_control, args.reject_cpu_fallback, args.require_dmabuf)

@@ -163,6 +163,24 @@ EOF
         "${apt[@]}" install "$state/downloads/$stack_file"
     fi
     "$PREFIX/bin/ghostty-panvk-dmabuf" --check
+    # Old full-repository tarballs predate automatic terminal routing. Bring
+    # their APT-owned controller forward too, before runtime.py connects it.
+    if ! dpkg --compare-versions "$(dpkg-query -W -f='${Version}' livecd-desktop)" ge 0.2.0-18; then
+        if test -n "$offline"; then
+            echo 'This offline repository lacks the Mali-aware desktop controller. Use a newer offline tarball.' >&2
+            exit 2
+        fi
+        read -r controller_file controller_sha < <(python - "$repo/packages/ghostty-panvk-dmabuf/release.lock.json" <<'EOF'
+import json, sys
+p = json.load(open(sys.argv[1]))
+print(p['controller_file'], p['controller_sha256'])
+EOF
+        )
+        mkdir -p "$state/downloads"
+        curl --fail --location --retry 3 "$stack_url/$controller_file" -o "$state/downloads/$controller_file"
+        printf '%s  %s\n' "$controller_sha" "$state/downloads/$controller_file" | sha256sum --check --status
+        "${apt[@]}" install "$state/downloads/$controller_file"
+    fi
     echo 'Compatible Mali-G77 detected: Ghostty uses the qualified GTK GL DMA-BUF stack by default.'
 fi
 # Runtime code is owned by livecd-desktop. Setup only connects per-user paths.

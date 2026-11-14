@@ -20,6 +20,11 @@ jobs:
       CONTROLLER_RUN: ${{ inputs.controller_run }}
     steps:
     - uses: actions/checkout@v4
+    - name: Verify installer selection and fallback paths
+      run: |
+        bash -n install.sh packages/ghostty-panvk-dmabuf/build.sh
+        python3 tests/packaging/test-mali-terminal-install.py
+        python3 tests/native/test-terminal-environment.py
     - name: Retrieve the qualified stack and controller
       run: |
         set -euo pipefail
@@ -34,6 +39,12 @@ jobs:
         gh run download "$CONTROLLER_RUN" -n "native-controller-$sha" -D controller
         test "$(dpkg-deb -f controller/livecd-desktop_*.deb Version)" = 0.2.0-18
         cp controller/livecd-desktop_*.deb assets/
+        python3 - <<'PY'
+        import hashlib, json, pathlib
+        p = json.load(open('packages/ghostty-panvk-dmabuf/release.lock.json'))
+        binary = pathlib.Path('assets') / p['controller_file']
+        assert hashlib.sha256(binary.read_bytes()).hexdigest() == p['controller_sha256']
+        PY
         cd assets
         sha256sum *.deb *_sources.tar.gz > SHA256SUMS
     - name: Publish pinned prerequisites without changing the latest full release

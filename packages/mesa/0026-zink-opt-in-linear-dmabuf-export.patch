@@ -5,6 +5,14 @@ exports retain their existing behavior when the option is unset.
 
 --- a/src/gallium/drivers/zink/zink_resource.c
 +++ b/src/gallium/drivers/zink/zink_resource.c
+@@ -47,6 +47,7 @@
+ #include "util/u_memory.h"
+ #include "util/u_upload_mgr.h"
+ #include "util/os_file.h"
++#include "util/os_time.h"
+ #include "frontend/winsys_handle.h"
+ 
+ #if !defined(__APPLE__)
 @@ -2028,8 +2028,10 @@
  
        mod = res->modifiers[0] = DRM_FORMAT_MOD_LINEAR;
@@ -43,7 +51,7 @@ exports retain their existing behavior when the option is unset.
 +      struct pipe_fence_handle *fence = NULL;
 +      screen->copy_context->base.flush(&screen->copy_context->base, &fence, 0);
 +      if (fence) {
-+         ok = screen->base.fence_finish(&screen->base, NULL, fence, PIPE_TIMEOUT_INFINITE);
++         ok = screen->base.fence_finish(&screen->base, NULL, fence, OS_TIMEOUT_INFINITE);
 +         screen->base.fence_reference(&screen->base, &fence, NULL);
 +      }
 +   }

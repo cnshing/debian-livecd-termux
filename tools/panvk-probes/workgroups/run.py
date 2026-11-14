@@ -12,6 +12,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--baseline", type=Path, required=True)
 parser.add_argument("--patched", type=Path, required=True)
 parser.add_argument("--out", type=Path, required=True)
+parser.add_argument("--shader-cache", action="store_true", help="Use a private cache shared by sibling runs")
 args = parser.parse_args()
 args.out.mkdir(exist_ok=False, parents=True)
 here = Path(__file__).resolve().parent
@@ -37,7 +38,8 @@ for variant, driver, enabled in (
                      "MESA_GLSL_VERSION_OVERRIDE", "PANVK_LWG_PRINT"):
             env.pop(name, None)
         env["PANVK_G77_LWG"] = "1" if enabled else "0"
-        env["MESA_SHADER_CACHE_DISABLE"] = "true"
+        env["MESA_SHADER_CACHE_DISABLE"] = "false" if args.shader_cache else "true"
+        env["XDG_CACHE_HOME"] = str(args.out.resolve().parent / "shader-cache")
         command = [str(here / "check"), str(driver), str(here / f"{shape}.spv"),
                    *map(str, dims), mode]
         try:
@@ -56,6 +58,7 @@ for variant, driver, enabled in (
         log = f"{variant}-{shape}.txt"
         (args.out / log).write_text(output)
         result = {"variant": variant, "shape": shape, "mode": mode, "returncode": code,
+                  "shader_cache": args.shader_cache,
                   "driver": str(driver), "sha256": hashlib.sha256(driver.read_bytes()).hexdigest(),
                   "log": log}
         results.append(result)

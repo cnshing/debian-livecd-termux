@@ -4,6 +4,55 @@ State on 2026-11-13, Galaxy S20 (`x1s`, Mali-G77 MC11, architecture 9, kbase job
 For whoever raises the versions the Mali stack reports. Paths under `temp/` are local files
 that Git ignores.
 
+## Progress on the source-package prerequisite
+
+A side-by-side `mesa-vulkan-icd-panvk-kbase-source` recipe now packages the
+unmodified reconstructed driver for both ABIs, with SHA-256 pins to durable
+prerelease assets and installed source provenance. Its glibc binary has the CI
+RUNPATH removed. [PANVK-SOURCE-PACKAGE.md](PANVK-SOURCE-PACKAGE.md) records the
+build, asset identities, isolated patch variants and promotion procedure.
+The normal package and launcher selection still use the upstream release.
+Installed desktop validation (30/30) remains the gate for repinning that package.
+
+## Workgroup follow-up
+
+The opt-in series now includes partial-subgroup masking (`0005`) and cache-mode
+identity (`0006`). The expanded phone probes pass 257-, 511-, 513-, 769-, 1023-
+and 969-invocation shapes, as well as the previous aligned cases. Across runs
+with caching disabled, enabled, and a repeated shared cache, all **2,509,632
+output words** match the CPU oracle. Opt-in and opt-out pipeline cache UUIDs
+are distinct. Nested barriers still return `VK_ERROR_FEATURE_NOT_PRESENT` and
+were never dispatched. This closes two gaps in the experimental subset; the
+advertised default versions remain unchanged.
+
+[PanVK workgroup build 43543966212](https://github.com/cnshing/debian-livecd-termux/actions/runs/43543966212)
+built the tested driver. The new evidence is in the original checkout's
+`temp/panvk-version-bump/evidence/compute-{uncached,cache-cold,cache-warm}/`.
+There are 19 test decisions per run, including the refusal and limit controls.
+
+The same new driver passed a private four-cycle desktop/Ghostty run with caching
+enabled: eight terminal captures and eight GTK captures, both independent
+checkers passing (GTK maximum channel error 0), stale-frame rejection and
+Ghostty exit 0. Zink reports GL 4.6 and GLES 3.2 with no version override.
+Presentation still uses the existing CPU-readback fallback. The phone was left
+with only `X0`, owner 23548 / Shell 23741 and the original managed session tag.
+Evidence: `temp/panvk-version-bump/evidence/desktop-workgroups-4/`.
+
+| Experimental artifact | Identity |
+| --- | --- |
+| Patched Mesa content tree | `54c56ccdd9ea9ca1039c4a85ad1ec22607dc59dd` |
+| Baseline Android SHA-256 | `db0bf89a47a9fd18b28c343493ad10812fdafc8381fdd16fb8d05da915b56ab3` |
+| Patched Android SHA-256 | `1aae164b6acab253f00dd2f0c79a0d83be9724cc98cb8e3f9c7554ad81c8c69b` |
+| Opt-out pipeline cache UUID | `ce9c200ba86279ab111001549054b446` |
+| Opt-in pipeline cache UUID | `ee59d8d25c43904ff9122282699695c6` |
+
+Reproduce compute checks with `workgroups/run.py`, first without `--shader-cache`,
+then twice with it using fresh sibling output directories. That flag selects a
+private cache shared by sibling runs; 35 files were observed in the test cache.
+The default runner still disables the cache. For the presentation check, use
+the new driver with `PANVK_G77_LWG=1 MESA_SHADER_CACHE_DISABLE=false`, the existing
+staged `mesa-102/lib`, `--ghostty-probe` and `--cycles 4`.
+
 ## Where the versions stand
 
 Measured on the phone with the packaged driver (`mesa-vulkan-icd-panvk-kbase` 26.3.1) and
@@ -44,7 +93,7 @@ hardware workgroup, taken from the Mali-G76 work in
 
 | Piece | Where |
 | --- | --- |
-| The three imported patches and our G77 adaptation | `tools/panvk-probes/workgroup-patches/0001` to `0004` |
+| The imported patches, G77 adaptation and follow-up fixes | `tools/panvk-probes/workgroup-patches/0001` to `0006` |
 | CI build of a baseline and a patched driver, with probes | `.github/workflows/panvk-workgroups.yml` |
 | Compute probes checked against a CPU oracle | `tools/panvk-probes/workgroups/` (`run.py`, `check.c`, `check.comp`) |
 | Opt-in Ghostty launcher for the staged driver | `tools/panvk-probes/workgroups/ghostty-gpu.py` |
@@ -60,17 +109,20 @@ oracle in all 448,512 output words.
 
 The pass is a working subset behind an environment variable. To ship it:
 
-1. **Cover what it refuses.** A shader with a barrier inside a loop, or a workgroup size
-   that does not divide into 16-lane subgroups (769 was the test), fails pipeline creation
-   with `VK_ERROR_FEATURE_NOT_PRESENT`. That is honest, but a driver that advertises 1024
-   must run them. Either implement them (nested barriers need the region split to follow
-   control flow) or measure how often real GL programs hit them and decide with the user.
+1. **Cover nested barriers.** A shader with a barrier inside a loop still fails pipeline
+   creation with `VK_ERROR_FEATURE_NOT_PRESENT`. A driver that advertises 1024 must run
+   those valid shaders. Implement the control-flow-aware region split, or measure how often
+   real GL programs hit it and decide with the user. The 769-invocation refusal is now fixed:
+   `0005` pads each hardware group to a subgroup boundary and masks excess lanes inside each
+   cloned region, leaving workgroup barriers unconditional.
 2. **Variable workgroup sizes** (`ARB_compute_variable_group_size`) are not handled.
 3. **Run a conformance subset**, not only our probes: `dEQP-VK.compute.*` and
    `dEQP-GLES31.functional.compute.*` are the relevant groups. None has been run.
-4. **Make it part of the shader cache key.** The experiment disables the shader cache
-   because the opt-in is not in the cache identity. As a default it must be, or the variable
-   must go away.
+4. **Cache identity is now covered.** `0006` hashes the architecture-9 opt-in into the
+   physical device cache digest, uses that digest for both the pipeline UUID and the disk
+   cache timestamp, and the phone tests confirm distinct UUIDs with correct repeated cached
+   output. The older hash-pinned Ghostty experiment launcher still disables caching for its
+   older binary. Continue testing cache reuse when changing the lowering pass.
 5. **Register pressure.** The adaptation halves the hardware thread limit (256 per hardware
    workgroup) to leave room. Nobody has measured what that costs, or whether a shader can
    still exceed it.
@@ -140,14 +192,14 @@ binaries. `.github/workflows/panvk-driver.yml` reconstructs the release's source
 `4a8e9a8c…`) and builds Bionic and glibc drivers in CI; `panvk-workgroups.yml` does the same
 with the workgroup series. What is missing:
 
-- **A recipe that installs a built driver**: either `mesa-vulkan-icd-panvk-kbase` builds the
-  reconstructed tree, or it pins a CI artifact by hash. Both ABIs, because Chrome uses the
-  glibc one. The rebuilt, unmodified driver gave the same probe pictures as the release, but
-  byte equality with the release cannot be shown, so the first source-built package needs
-  the desktop validation again (30 of 30) before anything is added to it.
-- **Separate variants.** The `driver-patches/` pair (X11 sonames, point size) fails GTK
-  swapchain creation and was never bisected. Keep each new patch in its own variant on the
-  unmodified baseline until that is understood, as the workgroup series does.
+- **Qualify and promote the source-built candidate**: the new
+  `mesa-vulkan-icd-panvk-kbase-source` recipe pins both ABIs by hash and installs them beside
+  the release stack. The rebuilt, unmodified driver gave the same probe pictures as the
+  release, but byte equality with the release cannot be shown. Installed desktop validation
+  (30 of 30) is still required before changing the normal package's binary pins.
+- **Separate variants now exist in CI.** The `driver-patches/` pair (X11 sonames, point
+  size) fails GTK swapchain creation and was never bisected. Use `variant=x11` and
+  `variant=point-size` to qualify each independently; keep new patches isolated as well.
 - A source-built driver can link Termux's X11 library names directly, which would retire
   the package's `bionic/x11` link directory.
 
@@ -155,7 +207,7 @@ The SYNC_FD port needs the same step. Do it once, first.
 
 ## Suggested order
 
-1. Source-built package, unmodified, validated against the release.
+1. Qualify the unmodified source-built candidate against the release, then repin the normal package.
 2. OpenGL 4.3: close the workgroup pass's gaps, drop the opt-in.
 3. SYNC_FD ([PANVK-SYNC-FD-HANDOFF.md](PANVK-SYNC-FD-HANDOFF.md)), for Ghostty's
    presentation.

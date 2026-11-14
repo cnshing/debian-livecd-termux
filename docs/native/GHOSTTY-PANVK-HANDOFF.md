@@ -4,6 +4,18 @@ Updated 2026-11-12 after the user resumed GPU rendering work and requested both
 DMA-BUF and CPU-readback presentation, prioritizing DMA-BUF. Device access now
 uses wireless ADB for x1s. Driver promotion remains outside this experiment.
 
+## Follow-up, 2026-11-13
+
+The workgroup series now masks padded partial subgroups and separates shader and
+pipeline cache identities for `PANVK_G77_LWG`. The new driver passed 57 compute
+test decisions (2,509,632 checked output words), including prime-sized shapes,
+and another private Ghostty run: eight terminal captures and eight GTK captures
+with shader caching enabled, both pixel checkers passing and exit 0. Nested
+barriers still fail pipeline creation; default driver selection is unchanged.
+See [PANVK-VERSION-BUMP-HANDOFF.md](PANVK-VERSION-BUMP-HANDOFF.md) for exact new
+hashes, cache UUIDs, build identity, remaining gates and evidence locations.
+The older launcher and results below refer to their original pinned binaries.
+
 ## Current outcome
 
 The Mali-G76 large-workgroup compiler pass **can be adapted to our Mali-G77**.

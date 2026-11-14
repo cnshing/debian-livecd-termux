@@ -7,14 +7,16 @@ wrong length, drops pictures and vaSyncSurface never returns. Each slice NAL
 reaches the driver whole, so read num_ref_idx_active_override_flag from its
 header: a P or B slice without an override uses the defaults, and its active
 counts from the VA slice parameters are the defaults. The PPS is resent when
-they change. Streams where every slice overrides keep the old guess, which
-does not matter to them.
+they change, and the old hold of up to eight pictures for streams with five
+or more references is skipped: it deadlocked clients that wait for the first
+picture (FFmpeg on a five-reference stream). Streams where every slice
+overrides keep the old guess, which does not matter to them.
 
 Also let the launcher set the SPS max_num_reorder_frames through
 TERMUX_VA_H264_REORDER_FRAMES, as 0103 does for HEVC.
 
 --- a/src/gallium/frontends/va/tva_bridge.c	2026-11-14 04:20:50.206333819 -0800
-+++ b/src/gallium/frontends/va/tva_bridge.c	2026-11-14 04:21:12.598443288 -0800
++++ b/src/gallium/frontends/va/tva_bridge.c	2026-11-14 04:41:33.148410253 -0800
 @@ -557,6 +557,8 @@
      bool h264_pps_defaults_valid;
      unsigned h264_pps_l0_default;
@@ -24,7 +26,7 @@ TERMUX_VA_H264_REORDER_FRAMES, as 0103 does for HEVC.
      /* The VA HEVC picture descriptor omits max_sub_layers_minus1.  Keep the
       * largest temporal id observed in the access units so synthesized VPS/SPS
       * parameter sets accept streams which use temporal scalability. */
-@@ -2216,13 +2218,133 @@
+@@ -2216,13 +2218,137 @@
      tva_bw_ue(&w, 0);                    /* max_bits_per_mb_denom */
      tva_bw_ue(&w, 11);                   /* log2_max_mv_length_horizontal */
      tva_bw_ue(&w, 11);                   /* log2_max_mv_length_vertical */
@@ -80,8 +82,9 @@ TERMUX_VA_H264_REORDER_FRAMES, as 0103 does for HEVC.
 +/* VA-API hands over each slice NAL whole, but not the PPS, so it cannot say
 + * whether a slice relied on num_ref_idx_l{0,1}_default_active_minus1.  Read
 + * num_ref_idx_active_override_flag from the last P or B slice header in the
-+ * access unit.  Returns 0 or 1, or -1 when there is no such slice or it
-+ * cannot be read.  A 0 means the slice's active counts are the PPS defaults. */
++ * access unit.  Returns 0 or 1; -2 when every slice is intra, so no default
++ * is used; -1 when no slice header can be read.  A 0 means the slice's active
++ * counts are the PPS defaults. */
 +static int
 +tva_h264_slice_override(const uint8_t *data, size_t len,
 +                        const struct pipe_h264_pps *pps, bool *is_b)
@@ -119,8 +122,11 @@ TERMUX_VA_H264_REORDER_FRAMES, as 0103 does for HEVC.
 +        struct tva_br r = { rbsp, n * 8, 0, false };
 +        tva_br_ue(&r);                                   /* first_mb_in_slice */
 +        unsigned slice_type = tva_br_ue(&r) % 5;
-+        if (slice_type == 2 || slice_type == 4)          /* I, SI */
++        if (slice_type == 2 || slice_type == 4) {        /* I, SI */
++            if (!r.over && result == -1)
++                result = -2;
 +            continue;
++        }
 +        tva_br_ue(&r);                                   /* pic_parameter_set_id */
 +        if (sps->separate_colour_plane_flag)
 +            tva_br_u(&r, 2);                             /* colour_plane_id */
@@ -159,7 +165,7 @@ TERMUX_VA_H264_REORDER_FRAMES, as 0103 does for HEVC.
  /* PPS NALU: nal_ref_idc=3, type=8 */
  static size_t
  tva_build_h264_pps(enum pipe_video_profile profile,
-@@ -3895,6 +4017,24 @@
+@@ -3895,6 +4021,32 @@
              struct pipe_h264_picture_desc *h264 =
                  (struct pipe_h264_picture_desc *)picture;
              if (h264 && h264->pps && h264->pps->sps) {
@@ -167,8 +173,16 @@ TERMUX_VA_H264_REORDER_FRAMES, as 0103 does for HEVC.
 +                 * so its active counts are the true defaults.  Learn them
 +                 * and resend the PPS when they change. */
 +                bool slice_b = false;
-+                if (tva_h264_slice_override(c->acc, c->acc_len, h264->pps,
-+                                            &slice_b) == 0) {
++                int override = tva_h264_slice_override(c->acc, c->acc_len,
++                                                       h264->pps, &slice_b);
++                /* Readable headers make the bootstrap hold below needless:
++                 * a slice that uses the defaults shows them before it is
++                 * sent.  Holding also deadlocks clients that wait for the
++                 * first picture before sending the next (FFmpeg without B
++                 * frames). */
++                if (override != -1)
++                    c->h264_bootstrap_done = true;
++                if (override == 0) {
 +                    c->h264_pps_l0_default = h264->num_ref_idx_l0_active_minus1;
 +                    c->h264_pps_l0_known = true;
 +                    if (slice_b) {
@@ -184,7 +198,7 @@ TERMUX_VA_H264_REORDER_FRAMES, as 0103 does for HEVC.
                  if (!c->h264_bootstrap_done &&
                      c->base.max_references >= 5) {
                      if (h264->num_ref_idx_l0_active_minus1 >=
-@@ -3935,7 +4075,8 @@
+@@ -3935,7 +4087,8 @@
                   * with a two-reference PPS default unchanged while allowing
                   * the five-reference vertical AVC stream to select its
                   * five-entry default before subsequent no-override slices. */

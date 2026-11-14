@@ -1,6 +1,6 @@
 # Handoff: Vulkan 1.4 and OpenGL 4.3 on the packaged PanVK driver
 
-State on 2026-11-13, Galaxy S20 (`x1s`, Mali-G77 MC11, architecture 9, kbase job manager).
+State on 2026-11-14, Galaxy S20 (`x1s`, Mali-G77 MC11, architecture 9, kbase job manager).
 For whoever raises the versions the Mali stack reports. Paths under `temp/` are local files
 that Git ignores.
 
@@ -83,6 +83,25 @@ The Android binary SHA-256 is
 Do not dispatch this prototype until its compile-only control succeeds. Do not
 promote it on the basis of a successful build alone.
 
+After wireless access returned, `71e7a6f` passed compile-only creation and
+statistics capture. Its first nested dispatch completed but failed the CPU
+oracle: **24,633 of 98,304 words were wrong**. Testing stopped there. The NIR
+dump exposed overlapping scratch slices: `nir_lower_shader_calls` retains
+per-call stack sizes larger than the final shader's `scratch_size`. Research
+revision `70baee8` takes the maximum over every continuation marker before
+assigning per-copy slices. It built successfully in
+[run 43563350446](https://github.com/cnshing/debian-livecd-termux/actions/runs/43563350446).
+All four nested compile controls and CPU-checked dispatches now pass. Across
+uncached, cold-cache and warm-cache runs, **66 test decisions** passed and all
+**3,615,840 output words** matched. This includes the original straight-line
+cases, dynamic loops, uniform branches, break/continue and partial-subgroup
+769-invocation execution. The Android SHA-256 is
+`2b57c92c4b0f882580a8f35d879f982e4548706ebca0c1519221f915c1b2f47f`.
+Evidence: `temp/panvk-qualification/evidence/nested-slices/`, with
+`uncached-01/`, `cache-cold-01/`, `cache-warm-01/` and `compile-controls/`.
+The nested scheduler remains opt-in while broader CTS and desktop qualification
+are outstanding.
+
 CTS executables are built in `.github/workflows/panvk-cts.yml`, pinned to
 VK-GL-CTS `vulkan-cts-1.4.7.1` (`0d18b347943e5e843529a05c95220e27fe30c538`).
 The Android API 33 standalone build matches this phone. GLES opens Termux's
@@ -97,16 +116,57 @@ successfully produced both corrected executables. Their SHA-256 identities are:
 | `deqp-vk` | `bbfcfef3c5daac858efc9f310f833df96051ea84fb5be1de8f76addacca36d2b` |
 | `deqp-gles31` | `019cb7fc277ac29f159309fa20f1dfa4f3c10b46985ad2052911123dafee7b89` |
 
-No CTS device result is claimed yet. These targeted command-line runs are qualification
-evidence, not a formal Khronos conformance submission.
+Both executables now run on the phone. These targeted command-line runs are
+qualification evidence, not a formal Khronos conformance submission.
+
+| Device subset | Packaged release | Accepted `0001`–`0006`, opt-in |
+| --- | --- | --- |
+| GLES `info.*` | 6/6 pass | not repeated |
+| GLES `functional.compute.basic.*` | 41/41 pass | 41/41 pass |
+| GLES `functional.compute.shared_var.*` and `indirect_dispatch.*` | 154/154 pass | 154/154 pass |
+
+All **195 GLES compute cases** in those groups passed on each driver, with no
+skips or warnings. The host checked every QPA case/status and each process-map
+sample contains the requested driver. The packaged release SHA-256 is
+`62c2b3f98ca987d5ab50b6f01e2d2c1c5b3ee995fe93666aa5da9415f65c3348`;
+the opt-in driver is the previously accepted `1aae164b…` binary, not the nested
+prototype. Retrieved evidence is in the original checkout's
+`temp/panvk-qualification/evidence/gles-{basic,shared-indirect}-{release,lwg}-01/`
+and `gles-info-fixed-01/`.
+
+The packaged release's Vulkan `api.info.*` run stopped after two passes and one
+failure: `dEQP-VK.api.info.android.no_unknown_extensions` reports
+`Unknown extension: VK_ANDROID_native_buffer`. The Android-specific test expects
+private loader extensions to be hidden; this standalone build uses Termux's
+Khronos loader. Preserve this failure as a platform/loader qualification issue;
+do not edit the CTS test or count the remaining 10,487 cases as passed. Evidence:
+`temp/panvk-qualification/evidence/vk-info-fixed-01/`.
+
+Vulkan compute also found failures in the controls, independent of the nested
+prototype. The release's `compute.pipeline.basic.*` run stopped with 13 passes,
+one unsupported case and one failure: `empty_workgroup_y` returned 0 rather than
+1 after an empty dispatch followed by a 1x1x1 dispatch. A separate maximum-local-
+size run failed on X, first at invocation 32 of 512. The source-built baseline
+`db0bf89a…` also failed that test; the accepted workgroup driver failed at
+invocation 64 of 1024. Each run stopped at that first failure; Y/Z maximum sizes
+were not exercised. QPA evidence is in `vk-basic-release-01/` and
+`vk-max-local-{release,source,lwg}-01/` under the same evidence directory.
+
+Research `0008` adds `PANVK_G77_NO_MERGE=1`, a diagnostic that disables workgroup
+merging consistently in compilation and dispatch and gives it a separate cache
+identity. This tests a hypothesis about the barrier-free failures; it is not
+yet a verified fix. Build:
+[43593759926](https://github.com/cnshing/debian-livecd-termux/actions/runs/43593759926).
+The CTS runner records this mode explicitly with `--unmerged-compute`.
 
 `tools/panvk-probes/cts/run.py` lists the requested cases and executes one at a
 time, recording QPA results, exit status, mapped libraries and binary hashes.
 It stops at the first failure/crash/timeout, enforces a 3 GB available-memory
 floor and a run time limit, and never counts an empty or all-skipped run as a
 pass. Bounded successful chunks can resume only with matching binary identities
-and selection. Five host tests cover parsing, resume, failure stopping, process
-exit failures and all-skipped runs. Use only the X11 dependency directory in
+and selection. Resumed results retain their original QPA/log directory. Six
+host tests cover parsing, resume, failure stopping, process exit failures,
+all-skipped runs and the explicit merge mode. Use only the X11 dependency directory in
 `LD_LIBRARY_PATH`; the Vulkan suite loads Termux's Vulkan **loader**, not the raw
 ICD as a loader. For example, with a freshly extracted CTS artifact on the phone:
 
@@ -147,9 +207,23 @@ matching `run.py --nested` and nested SPIR-V probes for CPU-checked dispatches.
 Capture statistics for identical 128/256/512-invocation shaders with the release,
 patched opt-out and patched opt-in modes, then compare the 769/1024 and nested
 cases. Record registers, spills/fills, scratch and instruction counts exposed
-by the driver. Statistics capture and the success control have built in CI but
-have not yet run on the device. Static counts alone do not measure throughput
-or close the register-pressure qualification gate.
+by the driver. Measured compiler statistics for the straight-line oracle are:
+
+| Shape | Mode | Registers | Instructions | Spills/fills |
+| --- | --- | --- | --- | --- |
+| 128/256/512 | release or patched opt-out | 25 | 424 | 0/0 |
+| 128/256 | patched opt-in | 25 | 424 | 0/0 |
+| 512 | patched opt-in | 26 | 808 | 0/0 |
+| 769 | patched opt-in | 35 | 1,681 | 0/0 |
+| 1024 | patched opt-in | 32 | 1,600 | 0/0 |
+| 1024 nested loop, fixed scratch slices | nested opt-in | 64 | 6,039 | 539/1,090 |
+
+The straight-line comparison uses the accepted `0001`–`0006` driver. The fixed
+nested scheduler reserves 768 bytes of NIR scratch and still spills heavily.
+Evidence: `temp/panvk-qualification/evidence/compiler-stats-01/` and
+`temp/panvk-qualification/nested-slices-compile.log`. These are static compiler
+counts, not GPU throughput measurements; register-pressure performance remains
+an open gate.
 
 ## Desktop qualification still required
 
@@ -187,7 +261,7 @@ Mesa 26.2.6-103:
 
 | | Reported now | Wanted | What decides it |
 | --- | --- | --- | --- |
-| Vulkan | 1.3.363 | 1.4 | one function in the driver; the features are already there |
+| Vulkan | 1.3.363 | 1.4 | declarations pass the audit; CTS behavior has blockers |
 | OpenGL through Zink | 4.2 core, GLSL 4.20 | 4.3 | compute shaders: 1024 invocations per workgroup, the GPU gives 512 |
 | OpenGL ES through Zink | 3.1 | 3.2 comes with it | same |
 
@@ -244,8 +318,9 @@ The pass is a working subset behind an environment variable. To ship it:
    cloned region, leaving workgroup barriers unconditional.
 2. **Variable workgroup sizes** (`ARB_compute_variable_group_size`) now pass the
    five-shape GL probe above; extend coverage with the conformance subset.
-3. **Run a conformance subset**, not only our probes: `dEQP-VK.compute.*` and
-   `dEQP-GLES31.functional.compute.*` are the relevant groups. None has been run.
+3. **Extend the conformance subset**: the 195 GLES compute cases above pass on
+   both the release and opt-in drivers. Vulkan compute, broader coverage and
+   the Android loader information-test failure still need qualification.
 4. **Cache identity is now covered.** `0006` hashes the architecture-9 opt-in into the
    physical device cache digest, uses that digest for both the pipeline UUID and the disk
    cache timestamp, and the phone tests confirm distinct UUIDs with correct repeated cached

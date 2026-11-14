@@ -62,6 +62,8 @@ def main():
     parser.add_argument('--out', type=Path, required=True)
     parser.add_argument('--large-workgroups', action='store_true')
     parser.add_argument('--nested', action='store_true')
+    parser.add_argument('--unmerged-compute', action='store_true',
+                        help='Opt in to the experimental G77 unmerged compute mode')
     parser.add_argument('--case-timeout', type=int, default=45)
     parser.add_argument('--max-seconds', type=int, default=600)
     parser.add_argument('--max-cases', type=int, default=0, help='0 means all selected cases')
@@ -76,7 +78,8 @@ def main():
     executable = cts / ('deqp-vk' if args.suite == 'vk' else 'deqp-gles31')
     identity = {'suite': args.suite, 'cts_sha256': digest(executable),
                 'driver_sha256': digest(driver), 'patterns': args.pattern,
-                'large_workgroups': args.large_workgroups, 'nested': args.nested}
+                'large_workgroups': args.large_workgroups, 'nested': args.nested,
+                'unmerged_compute': args.unmerged_compute}
     args.out = args.out.resolve()
     args.out.mkdir(parents=True, exist_ok=False)
     with (Path(os.environ['TMPDIR']) / 'livecd-panvk-cts.lock').open('a') as lock:
@@ -100,6 +103,7 @@ def run(args, prefix, cts, driver, executable, identity):
                EGL_PLATFORM='surfaceless', GALLIUM_DRIVER='zink', MESA_LOADER_DRIVER_OVERRIDE='zink',
                PANVK_G77_LWG='1' if args.large_workgroups else '0',
                PANVK_G77_NESTED='1' if args.nested else '0', MESA_SHADER_CACHE_DISABLE='false',
+               PANVK_G77_NO_MERGE='1' if args.unmerged_compute else '0',
                XDG_CACHE_HOME=str(args.out / 'cache'), XDG_CONFIG_HOME=str(args.out / 'config'))
     command = [str(executable), '--deqp-archive-dir=' + str(cts / 'data'),
                '--deqp-log-images=disable', '--deqp-log-shader-sources=disable',
@@ -131,11 +135,14 @@ def run(args, prefix, cts, driver, executable, identity):
             report[filename] = metadata.read_text()
     if args.resume_from:
         previous = json.loads((args.resume_from / 'results.json').read_text())
+        previous['identity'].setdefault('unmerged_compute', False)
         if previous['identity'] != identity:
             raise RuntimeError('Resume identities differ')
         if any(r['status'] not in ACCEPTED for r in previous['results']):
             raise RuntimeError('Prior run failed; diagnose it before retrying')
-        report['results'] = previous['results']
+        report['resumed_from'] = str(args.resume_from.resolve())
+        report['results'] = [{**r, 'origin': r.get('origin', str(args.resume_from.resolve()))}
+                             for r in previous['results']]
     finished = {r['case'] for r in report['results']}
     started, ran = time.monotonic(), 0
     def save():
@@ -185,7 +192,7 @@ def run(args, prefix, cts, driver, executable, identity):
                 status = 'ProcessFailure'
         result = {'case': case, 'status': status, 'detail': detail, 'returncode': proc.returncode,
                   'seconds': time.monotonic() - case_started, 'qpa': qpa.name, 'log': log.name,
-                  'libraries': sorted(maps)}
+                  'libraries': sorted(maps), 'origin': str(args.out)}
         report['results'].append(result)
         ran += 1
         save()

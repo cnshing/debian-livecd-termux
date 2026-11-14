@@ -16,4 +16,6 @@ text = build.read_text()
 assert 'TERMUX_PKG_REVISION=' not in text, 'review upstream revision before overriding'
 # Separate artifact identity. Extract privately for testing; do not apt-install.
 text += '\nTERMUX_PKG_REVISION=100\n'
+# Keep GDK_DEBUG=dmabuf diagnostics for positive import/download evidence.
+text += '\nTERMUX_PKG_EXTRA_CONFIGURE_ARGS+=" -Ddebug=true"\n'
 build.write_text(text)

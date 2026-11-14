@@ -27,11 +27,10 @@ already uses hardware where the driver is installed.
   at 06:04 UTC and starts the browser build itself when it succeeds. Do not start a
   duplicate, and **do not change `packages/chromium` while the chain runs**: the dependency
   artifact is named by that recipe's hash, and the browser job would not find it.
-- **Firefox WebRTC is fixed in a private runtime** (`android-firefox-video` 9.0.2-5, below).
-  The failed "colour" check was the frame rate, not the colour matrix.
-- **Firefox WebCodecs from a canvas has the same colour error with Firefox's own software
-  encoder.** It is Firefox's behaviour, not this encoder's (below). Whether that still
-  blocks a default is the user's decision.
+- **Firefox hardware encoding will not be enabled (user's decision, 2026-11-14).** Its two
+  remaining problems are in Firefox itself; see "Firefox: known problems" below. Do not
+  spend more work on it unless Mozilla fixes them or the user changes this decision.
+  Chromium revision 2 is the browser encoding path.
 - **Phone:** released, `temp/PHONE-STATUS` says available. Revision 5 is extracted at
   `~/gpu-x1s/eaccept-ff5b` on the S20, not installed. LAN SSH works through
   `temp/gpu-x1s/encoding-acceptance-20261113/ssh-lan`; the phone was off the network
@@ -42,7 +41,38 @@ already uses hardware where the driver is installed.
 
 **Next:** when the Chromium chain finishes, stage revision 2 privately and run
 constant-bitrate WebCodecs with saved-stream software pixel checks, then H.264 and VP9
-WebRTC. Decide the two Firefox questions under "What to do next".
+WebRTC.
+
+## Firefox: known problems (not pursued)
+
+On 2026-11-14 the user decided to leave Firefox's hardware encoding off and document why.
+`media.use-remote-encoder.video.platform` stays at Firefox's default (off outside
+Nightly), and the launcher sets nothing for encoding. These two problems remain, and both
+are in Firefox's own code, above anything this project ships. Fixing them means patching
+and building Firefox, a job comparable to Chromium's six-hour build, or a fix from Mozilla.
+
+1. **WebCodecs mislabels a canvas's colours.** Firefox converts canvas pixels to YUV with
+   the BT.601 matrix, then gives the page a decoder configuration that says BT.709
+   (`VideoEncoder::EncoderConfigToDecoderConfig` hardcodes it). Its decoder prefers that
+   configuration to the stream's own signalling, so the page decodes with the wrong matrix:
+   maximum channel error 22, 16 of 60 pictures over 16. Firefox's own software VP9 encoder
+   gives exactly the same numbers, so this is not the hardware.
+2. **WebRTC cannot change a hardware encoder's bitrate mid-call.**
+   `FFmpegDataEncoder::ProcessReconfigure` applies a bitrate change only to `libx264` and
+   Android's MediaCodec. For `h264_vaapi` it rejects it, so a call keeps the bitrate its
+   encoder started with until the resolution changes. Congestion control cannot lower it.
+
+Related facts for anyone reopening this:
+
+- This Firefox has no software H.264 encoder (no OpenH264 plugin). Without the hardware
+  encoder it cannot send H.264 at all: an H.264 call connects with zero frames, and
+  WebCodecs reports H.264 unsupported. VP9 calls use its software encoder and work.
+- The HEVC WebCodecs configuration tested is unsupported, and `MediaRecorder` was never run
+  with hardware encoding.
+- The work that does run is kept, and is harmless while the preference is off:
+  `android-firefox-video` 9.0.2-5 (I420 upload, empty-drain fix, frame rate from
+  timestamps) and `tests/video-encode/test-firefox-ffmpeg.py`. The frame-rate problem it
+  fixed (Firefox declaring 450 fps for a 30 fps call) is described below.
 
 ## Firefox: frame rate and colour controls (2026-11-14)
 
@@ -104,8 +134,8 @@ error 2 with the matrix they were converted in. Software H.264 could not be comp
 Firefox reports it unsupported.
 
 Both hardware runs kept 60 units in and 60 packets out with two key frames and no bitrate
-change. Do not loosen the page's check; treat this row as "equal to Firefox's software
-encoder" and decide whether that is the bar.
+change. Do not loosen the page's check. The user decided not to enable Firefox on this
+basis (see "Firefox: known problems").
 
 ## Acceptance in progress (2026-11-13)
 
@@ -370,7 +400,7 @@ has AVC and HEVC only.
 | Chromium, WebCodecs `VideoEncoder` | not run | **crashes the GPU process** (Chromium CHECK) |
 | Google Chrome, WebRTC | not run | cannot connect: no network interfaces under Bionilux |
 | Google Chrome, WebCodecs | not run | same crash as Chromium |
-| Firefox | reported blocklisted (`VIDEO_ENCODING_MISSING`) before the probe fix; not rechecked | installed hardware encode fails. Private revision 5: H.264 WebRTC loopback passes in hardware; WebCodecs H.264/VP9 produce 60/60 with the same canvas colour error as Firefox's software encoder; HEVC config unsupported |
+| Firefox | reported blocklisted (`VIDEO_ENCODING_MISSING`) before the probe fix; not rechecked | **not pursued, off by decision.** Installed hardware encode fails. Private revision 5: H.264 WebRTC loopback passes in hardware; WebCodecs H.264/VP9 produce 60/60 with the same canvas colour error as Firefox's software encoder; HEVC config unsupported |
 | MediaRecorder, any browser | not run | Firefox VP8 software output passes; hardware encode not accepted |
 
 **Browser hardware encoding is off by default everywhere.** No launcher passes
@@ -469,13 +499,8 @@ changing this preload, which is loaded into every desktop process.
    revision; leave prebuilt Chrome and older Chromium builds unchanged. The receipt
    `share/doc/chromium/livecd-vaapi.json` has no revision, and adding a field means another
    six-hour build, so read the installed package's version from dpkg instead.
-2. **Decide Firefox's default, then qualify it.** One preference,
-   `media.use-remote-encoder.video.platform`, turns the hardware encoders on for WebCodecs
-   and WebRTC together. Two things need the user's decision first (details in the 2026-11-14
-   section): the canvas colour error that Firefox's software encoder shares, and WebRTC
-   bitrate changes that Firefox does not apply to these encoders. If it goes ahead: merge
-   revision 5, rerun `MediaRecorder` and the HEVC WebCodecs configuration, measure a call
-   whose available bitrate drops, and require the package revision in the launcher.
+2. **Firefox: nothing.** Its hardware encoding stays off by the user's decision; see
+   "Firefox: known problems".
 3. **Chrome networking** (blocker 3), then rerun the Chrome WebRTC loopback.
 4. **Qualify Mali revision 8 for deployment** (blocker 4), retaining the existing
    native tests. Revision 7 passed 46/46 FFmpeg checks; revision 8 passes native

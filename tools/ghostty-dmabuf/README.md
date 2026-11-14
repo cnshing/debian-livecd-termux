@@ -40,7 +40,7 @@ Use the ordinary desktop terminal entry when this experimental path is unwanted.
 
 Validation established fresh terminal captures and GPU buffer mappings, actual
 GTK `GL_TEXTURE_2D` DMA-BUF imports, no GTK CPU downloads, and clean exit in a
-private Xvfb/SHM session. SHM presentation can copy elsewhere in the pipeline;
+private X11/SHM session. SHM presentation can copy elsewhere in the pipeline;
 this is not a claim of end-to-end zero-copy or general Vulkan/GL conformance.
 Nested workgroup barriers and other devices remain outside this qualification.
 The package uses the original four workgroup patches, not newer standalone

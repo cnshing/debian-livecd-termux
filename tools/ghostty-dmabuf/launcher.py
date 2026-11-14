@@ -65,7 +65,7 @@ def environment(original, root=ROOT, prefix=PREFIX):
         __EGL_VENDOR_LIBRARY_FILENAMES=str(root / 'egl-vendor.json'),
         __GLX_VENDOR_LIBRARY_NAME='mesa', GSK_RENDERER='gl', GDK_BACKEND='x11',
         PANVK_G77_LWG='1', ZINK_LINEAR_DMABUF_EXPORT='1',
-        MESA_SHADER_CACHE_DISABLE='true', LIBGL_KOPPER_DRI2='1',
+        MESA_SHADER_CACHE_DISABLE='true',
         LIVECD_NATIVE_RENDERER='panvk-dmabuf')
     # Ghostty's --env affects terminal children, not Ghostty itself. Restore the
     # caller's environment there so an opt-in terminal does not opt in every app.

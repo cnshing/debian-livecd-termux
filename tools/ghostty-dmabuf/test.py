@@ -36,14 +36,14 @@ class EnvironmentTests(unittest.TestCase):
                 launcher.check_device()
             device_open.assert_not_called()
 
-    def test_private_stack_and_child_restoration(self):
+    def test_private_stack_preserves_caller_environment(self):
         original = {'DISPLAY': ':88', 'DBUS_SESSION_BUS_ADDRESS': 'unix:path=/tmp/bus',
                     'LD_LIBRARY_PATH': str(launcher.PREFIX / 'lib') + ':/private/gnome',
                     'GSK_RENDERER': 'cairo', 'LIBGL_ALWAYS_SOFTWARE': '1',
                     'PANVK_G77_NESTED': '1', 'ZINK_DEBUG': 'validation',
                     'MESA_SHADER_CACHE_DISABLE': 'false', 'HOME': '/home/test'}
         before = original.copy()
-        env, args = launcher.environment(original, Path('/private/stack'))
+        env = launcher.environment(original, Path('/private/stack'))
         self.assertEqual(original, before)
         self.assertEqual(env['DISPLAY'], ':88')
         self.assertEqual(env['DBUS_SESSION_BUS_ADDRESS'], original['DBUS_SESSION_BUS_ADDRESS'])
@@ -56,14 +56,7 @@ class EnvironmentTests(unittest.TestCase):
         self.assertEqual(env['__EGL_VENDOR_LIBRARY_FILENAMES'], '/private/stack/egl-vendor.json')
         self.assertNotIn('LIBGL_ALWAYS_SOFTWARE', env)
         self.assertNotIn('PANVK_G77_NESTED', env)
-        child = env.copy()
-        for arg in args:
-            key, value = arg.removeprefix('--env=').split('=', 1)
-            if value:
-                child[key] = value
-            else:
-                child.pop(key, None)
-        self.assertEqual(child, original)
+
 
     def test_changed_library_rejected(self):
         with tempfile.TemporaryDirectory() as folder:

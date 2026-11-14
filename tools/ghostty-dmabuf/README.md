@@ -13,7 +13,7 @@ Actions run: the binary package and its complete corresponding source bundle.
 Check their `SHA256SUMS`, copy the `.deb` to Termux, then:
 
 ```sh
-apt install ./ghostty-panvk-dmabuf_1.0-1_aarch64.deb
+apt install ./ghostty-panvk-dmabuf_1.0-2_aarch64.deb
 ghostty-panvk-dmabuf --check
 # In the environment of an existing X11 desktop (DISPLAY, XAUTHORITY, D-Bus):
 ghostty-panvk-dmabuf
@@ -29,12 +29,17 @@ the Mesa wait fallback remains necessary even with Vulkan semaphore support.
 Shader caching stays disabled because this exact four-patch workgroup driver
 predates the cache identity fix. Avoid `--gtk-single-instance` options; the
 launcher owns instance separation. Other Ghostty arguments, including `-e`,
-are forwarded normally. Explicit `--env` options override the launcher's child
-environment restoration.
+are forwarded normally.
 
-Terminal children receive the caller's original graphics environment. Ghostty
-itself uses the private stack; subprocesses that Ghostty launches outside the
-terminal child path (for example URL helpers) can still inherit that stack.
+**Opt-in scope includes this terminal and its descendants.** Shells, applications
+and URL helpers launched from it inherit the experimental graphics environment.
+Ghostty 1.4's `--env=KEY=` removes a configured override, but cannot unset a
+variable inherited from Ghostty itself; this launcher does not use it as an
+isolation mechanism. Use an ordinary terminal to launch applications with the
+normal graphics environment. The caller and other desktop processes keep their
+original environment.
+This follows Ghostty 1.4's [environment map parser](https://github.com/ghostty-org/ghostty/blob/v1.4.0/src/config/RepeatableStringMap.zig)
+and [child environment overrides](https://github.com/ghostty-org/ghostty/blob/v1.4.0/src/termio/Exec.zig).
 The launcher joins an existing X11 session; it does not start or modify one.
 Use the ordinary desktop terminal entry when this experimental path is unwanted.
 
@@ -54,7 +59,7 @@ read token, run from this repository:
 ```sh
 python3 tools/ghostty-dmabuf/fetch.py work
 python3 tools/ghostty-dmabuf/package.py work/inputs dist --sources work/sources
-python3 tools/ghostty-dmabuf/test.py --deb dist/ghostty-panvk-dmabuf_1.0-1_aarch64.deb
+python3 tools/ghostty-dmabuf/test.py --deb dist/ghostty-panvk-dmabuf_1.0-2_aarch64.deb
 ```
 
 `lock.json` pins original runs, exact `.deb` hashes, runtime hashes, source trees

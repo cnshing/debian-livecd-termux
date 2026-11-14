@@ -1,5 +1,9 @@
 # Handoff: hardware video encoding
 
+> **Start with the per-feature pages in [handoff/](handoff/README.md)** (encoding and decoding,
+> one page each for Chromium, Chrome, Firefox and native programs). This page is the longer
+> record they were drawn from.
+
 State on 2026-11-13, for whoever takes encoding next. It covers both phones: the Note10+
 (Snapdragon 855, Adreno 640, Android 11), where native encoding was built, and the Galaxy S20
 (`x1s`, Exynos 990, Mali-G77, Android 13), where the browsers were tested. Decoding is not

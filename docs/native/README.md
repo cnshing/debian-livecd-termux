@@ -317,7 +317,8 @@ The experimental point-size driver variant is excluded because it failed GTK
 presentation. The 30-minute soak remains pending. See
 [PanVK desktop integration](PANVK-DESKTOP.md) for validation and remaining limits, and
 [Mali GPU and hardware video](MALI-GPU-STATUS.md) for the state of the desktop, Ghostty and
-each browser on Mali in one place.
+each browser on Mali in one place. The [video handoffs](handoff/README.md) give one page per
+feature, such as Firefox encoding or Chrome decoding, with what is left on each phone.
 
 ## Native renderer recovery
 

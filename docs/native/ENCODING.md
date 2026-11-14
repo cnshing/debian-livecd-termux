@@ -143,8 +143,10 @@ All changes are generic: none is specific to a program.
   preloads.
 - **Session** ([`desktop.py`](../../src/native/desktop.py), [`setup.py`](../../prebuilt/native-video/setup.py)).
   `setup.py --native-encode on` records the choice. The next session adds the preload,
-  after the start-up probe, and points libva at the stack's drivers. It hides
-  decoders unless `native_decode` is set, and starts the daemon if none listens.
+  after the start-up probe, and points libva at the stack's drivers. It offers
+  the decoders too, unless `native_decode` is `false`, and starts the daemon if none listens.
+  Unlike the launcher, it does not hide H.264 or AV1 decoding
+  ([handoff](handoff/decode-native.md)).
 
 ## What programs need
 

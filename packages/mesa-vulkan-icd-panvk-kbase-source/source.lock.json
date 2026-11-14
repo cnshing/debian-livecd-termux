@@ -1,0 +1,17 @@
+{
+  "format": 1,
+  "variant": "baseline",
+  "release": "https://github.com/cnshing/debian-livecd-termux/releases/download/panvk-source-26.3.1-1",
+  "build_run": "https://github.com/cnshing/debian-livecd-termux/actions/runs/43542985775",
+  "build_commit": "0d6f75fced40202149e2159c0d8c5861d3cee0cd",
+  "zenith_commit": "cf70e02b918e1864cbcd746a7fefa57b96c673ce",
+  "mesa_base": "5a07217f034b3e50d8c7c7794f97a2df1742613b",
+  "mesa_tree": "4a8e9a8cbb34b9fb91a9ad2040319aceb075b973",
+  "patch_level": "p0175",
+  "driver_patches": [],
+  "glibc_postprocess": "patchelf --remove-rpath",
+  "source_archive": "prepared-source.tar.zst",
+  "source_sha256": "d39f83ae0ddfacf3e27ab5eb9fe71392b8138830fa0c1982604e4c593d14f995",
+  "bionic_sha256": "12ba6df57a135a3bb0e288b8237d97260decef2301a69085a80e04fb8a4694f5",
+  "glibc_sha256": "7431920fad95c5d7e86dcd2b3d90456392035bbcf31e2c9ac08d03ce8fd34450"
+}

@@ -334,6 +334,10 @@ jobs:
       if: steps.build.outcome == 'success' && contains(format(' {0} ', matrix.packages), ' android-vaapi-glibc ')
       run: python3 tests/packaging/check-glibc-video-artifact.py termux-packages/output
 
+    - name: Check source-built PanVK ABIs and pinned provenance
+      if: steps.build.outcome == 'success' && contains(format(' {0} ', matrix.packages), ' mesa-vulkan-icd-panvk-kbase-source ')
+      run: python3 tests/packaging/check-panvk-artifact.py termux-packages/output
+
     # Saved only after a successful build. An entry can never be replaced, so one saved by a job that
     # failed early would hold only what it restored, and later runs would keep restoring that.
     - name: Make the caches readable

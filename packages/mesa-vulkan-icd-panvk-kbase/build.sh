@@ -14,6 +14,9 @@ TERMUX_PKG_DEPENDS="libx11, libxcb, libxshmfence"
 TERMUX_PKG_NO_STRIP=true
 TERMUX_PKG_NO_ELF_CLEANER=true
 TERMUX_PKG_UNDEF_SYMBOLS_FILES="all"
+_PANVK_SUPPORT_DIR=$(dirname "$(realpath "${BASH_SOURCE[0]}")")
+_PANVK_INSTALL_NAME=panvk-kbase
+_PANVK_ICD_API_VERSION=1.4.363
 _RELEASE=https://github.com/zenithblue-oss/panvk-kbase-android/releases/download/panvk-kbase-v$TERMUX_PKG_VERSION
 _BIONIC_SHA256=62c2b3f98ca987d5ab50b6f01e2d2c1c5b3ee995fe93666aa5da9415f65c3348
 _GLIBC_SHA256=063bcf0cacd6605458f01530e7fc4f4de43cda7d7a995d9518e1a6e38f5d0db6
@@ -40,18 +43,18 @@ termux_step_post_get_source() {
 		printf '\n===== %s =====\n' "$package" >> COPYRIGHTS
 		cat "deb-$package"/usr/share/doc/*/copyright >> COPYRIGHTS
 	done < <(python3 -c 'import json, sys; [print(i["package"], i["url"], i["sha256"], i.get("snapshot", i["url"])) for i in json.load(open(sys.argv[1]))]' \
-		"$TERMUX_PKG_BUILDER_DIR/libraries.lock.json")
+		"$_PANVK_SUPPORT_DIR/libraries.lock.json")
 }
 
 termux_step_make() {
 	# A glibc shared object built without a C library; see the file's comment.
 	$CC --target=aarch64-linux-gnu -fuse-ld=lld -nostdlib -ffreestanding -shared -fPIC -O2 \
 		-Wall -Wextra -Werror -Wl,-soname,libSPIRV-Tools.so \
-		"$TERMUX_PKG_BUILDER_DIR/spirv-tools-stub.c" -o libSPIRV-Tools.so
+		"$_PANVK_SUPPORT_DIR/spirv-tools-stub.c" -o libSPIRV-Tools.so
 }
 
 termux_step_make_install() {
-	local root="$TERMUX_PREFIX/lib/panvk-kbase" abi name
+	local root="$TERMUX_PREFIX/lib/$_PANVK_INSTALL_NAME" abi name
 	install -Dm644 bionic.so "$root/bionic/libvulkan_panfrost.so"
 	install -Dm644 glibc.so "$root/glibc/libvulkan_panfrost.so"
 	install -d "$root/bionic/x11" "$root/glibc/lib"
@@ -66,8 +69,11 @@ termux_step_make_install() {
 	for name in libc.so libc.so.6 libdl.so libm.so libstdc++.so.6; do
 		test ! -e "$root/glibc/lib/$name" || termux_error_exit "Forbidden library in the glibc stack: $name"
 	done
+	if test -n "${_PANVK_SOURCE_LOCK:-}"; then
+		install -Dm644 "$_PANVK_SOURCE_LOCK" "$TERMUX_PREFIX/share/doc/$TERMUX_PKG_NAME/SOURCE.json"
+	fi
 	for abi in bionic glibc; do
-		printf '{"file_format_version": "1.0.1", "ICD": {"library_path": "%s", "api_version": "1.4.363"}}\n' \
-			"$root/$abi/libvulkan_panfrost.so" > "$root/$abi/panfrost_icd.json"
+		printf '{"file_format_version": "1.0.1", "ICD": {"library_path": "%s", "api_version": "%s"}}\n' \
+			"$root/$abi/libvulkan_panfrost.so" "$_PANVK_ICD_API_VERSION" > "$root/$abi/panfrost_icd.json"
 	done
 }

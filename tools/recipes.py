@@ -50,7 +50,8 @@ HOST_PACKAGES = {'lsp-plugins-lv2': ['libcairo2-dev', 'libsndfile1-dev'],
                  'android-vaapi-glibc': ['bison', 'flex', 'python3-mako', 'python3-yaml', 'python3-packaging']}
 # Both ABIs use the same pinned VA bridge patches and ION winsys. Staging retains
 # all sibling recipes; include shared source inputs in the glibc artifact's cache key.
-RECIPE_INPUTS = {'android-vaapi-glibc': {'android-vaapi'}}
+RECIPE_INPUTS = {'android-vaapi-glibc': {'android-vaapi'},
+                 'mesa-vulkan-icd-panvk-kbase-source': {'mesa-vulkan-icd-panvk-kbase'}}
 # CI reuses a set's packages while everything it is built from stays the same: its recipes, the builder
 # revision and the settings above. Bump this after changing how CI builds packages in some other way,
 # so that every set is built again.

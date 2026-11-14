@@ -180,6 +180,13 @@ def native_encode(env, preload):
     env['LIBVA_DRIVERS_PATH'] = str(drivers)
     if acceleration_settings().get('native_decode') is False:
         env['TERMUX_VA_DECODE'] = '0'
+    try:
+        sys.path.insert(0, str(BASE))
+        from acceleration import decode_safeguards
+        from graphics import mali_usable
+        decode_safeguards(env, acceleration_settings(), mali_usable())
+    except ImportError as error:
+        print('Hardware decoding safeguards are unavailable: ' + str(error), file=sys.stderr)
 
 
 def start_video_daemon(env):

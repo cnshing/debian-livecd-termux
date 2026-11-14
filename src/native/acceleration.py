@@ -179,19 +179,26 @@ def video_environment(env, selected, abi, config):
         # CPU surfaces do not disable MediaCodec hardware codec execution.
         # The KGSL/dma-buf import settings are specific to the Adreno stack.
         env['TERMUX_VA_GPU_BACKEND'] = 'sw'
-        # Exynos's HEVC decoder holds back as many pictures as the rebuilt SPS declares:
-        # more than Firefox submits before waiting for the first, and any at all fails
-        # Chromium's wait for each picture. Declaring none returns each picture as it is
-        # decoded. See X1S-FIREFOX-VIDEO.md.
-        env['TERMUX_VA_HEVC_REORDER_PICS'] = '0'
     else:
         env.update(TERMUX_VA_GPU_BACKEND='kgsl', TERMUX_VA_X11_DRI3='1',
                    TERMUX_VA_CONTIGUOUS_DMABUF='1')
     if manifest.get('ion_fallback') == 'preload':
         env.setdefault('LIVECD_TVA_ION_FALLBACK', '1')
+    decode_safeguards(env, config, mali)
+    ensure_daemon(env)
+
+
+def decode_safeguards(env, config, mali):
+    """Codec limits every VA-API program needs, whether started by the launcher or
+    from the desktop session (desktop.native_encode)."""
+    if mali:
+        # Exynos's HEVC decoder holds back as many pictures as the rebuilt SPS declares:
+        # more than Firefox submits before waiting for the first, and any at all fails
+        # Chromium's wait for each picture. Declaring none returns each picture as it is
+        # decoded. See X1S-FIREFOX-VIDEO.md.
+        env['TERMUX_VA_HEVC_REORDER_PICS'] = '0'
     for codec in config.get('disabled_va_codecs', ['h264', 'av1']):
         env.setdefault('TERMUX_VA_DISABLE_' + codec.upper(), '1')
-    ensure_daemon(env)
 
 
 def firefox_preferences(profile, gpu, video):

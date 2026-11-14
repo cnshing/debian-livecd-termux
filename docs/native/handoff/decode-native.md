@@ -35,6 +35,17 @@ These come from reading the code; none has been run on a phone.
    `/dev/dri`: `android-vaapi` revision 5 presents only the Snapdragon GPU. Revisions 7 and 8
    present `/dev/mali0` but are not released ([encode-native.md](encode-native.md)).
 
+## Outcome (2026-11-14, decode-native)
+
+Gap 1 is fixed in code on `fix/decode-native`: `decode_safeguards()` in
+`src/native/acceleration.py` sets the codec list (`disabled_va_codecs`, default H.264 and AV1)
+and, on Mali, `TERMUX_VA_HEVC_REORDER_PICS=0`. Both `video_environment` and the session's
+`native_encode()` call it. `tests/packaging/test-session-decode.py` covers it, and it fails
+without the fix. Not yet run on a phone (the S20 was claimed by another agent); the check is to
+log in to the desktop, open a terminal and run `env | grep TERMUX_VA_`, then decode an HEVC
+clip with `-hwaccel vaapi` against `-f framemd5`. Gaps 2 and 3 belong to encode-native. Next
+steps 2 and 3 below are still open.
+
 ## Next steps
 
 These serve the parity criterion; [s20-codec-parity.md](s20-codec-parity.md) adds VP8, MPEG-4,

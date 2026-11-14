@@ -1,0 +1,42 @@
+name: Ghostty opt-in DMA-BUF package
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  package:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+    - uses: actions/checkout@v4
+    - name: Check launcher environment isolation
+      run: python3 tools/ghostty-dmabuf/test.py
+    - name: Fetch the exact qualified binaries and corresponding sources
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: python3 tools/ghostty-dmabuf/fetch.py work
+    - name: Assemble and verify the private opt-in package
+      run: |
+        python3 tools/ghostty-dmabuf/package.py work/inputs dist --sources work/sources
+        python3 tools/ghostty-dmabuf/test.py --deb dist/ghostty-panvk-dmabuf_1.0-1_aarch64.deb
+        cp work/*_sources.tar.xz dist/
+        cd dist
+        sha256sum *.deb *_sources.tar.xz > SHA256SUMS
+    - uses: actions/upload-artifact@v4
+      with:
+        name: ghostty-panvk-dmabuf-aarch64
+        path: |
+          dist/*.deb
+          dist/SHA256SUMS
+        retention-days: 90
+    - uses: actions/upload-artifact@v4
+      with:
+        name: ghostty-panvk-dmabuf-sources
+        path: |
+          dist/*_sources.tar.xz
+          dist/SHA256SUMS
+        retention-days: 90

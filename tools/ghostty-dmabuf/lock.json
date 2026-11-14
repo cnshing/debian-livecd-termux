@@ -1,0 +1,50 @@
+{
+  "package": "ghostty-panvk-dmabuf",
+  "version": "1.0-1",
+  "source_date_epoch": 1794635223,
+  "repository": "cnshing/debian-livecd-termux",
+  "target": "Galaxy S20 x1s, Mali-G77, kbase JM 11.35, Android 13, Linux 4.19.87, Termux aarch64",
+  "driver": {
+    "run": 43544398129,
+    "artifact": "panvk-sync-fd-android-aarch64-workgroups",
+    "file": "libvulkan_panfrost.so",
+    "sha256": "4df8da7f3d387d0c1c36970cb95a348d6b35e8bb0742ab290767280a5bdde718",
+    "revision": "593463866afe1b85868a21872dee0622216172f8",
+    "tree": "0978323390ae641ba0a79405ba2cb4414153ff4a"
+  },
+  "mesa": {
+    "run": 43560757547,
+    "artifact": "debs-mesa-dfb0a486c20f387e",
+    "file": "mesa_26.2.6-106_aarch64.deb",
+    "sha256": "2c3ae0ddb804e9e63c070b2e767715d58b08a4e0238c5c3251bfb2e4a6cbfda3",
+    "revision": "9ead3bd020faf7069d5d3ef6a8f58f8d82b99a73",
+    "library_sha256": "57b41861251f9fcd3126869b2344b03734d1a29fbc9cc4762e0aa8b1a61b199a"
+  },
+  "gtk": {
+    "run": 43563316546,
+    "artifact": "gtk4-dmabuf-aarch64-x11-egl",
+    "file": "gtk4_4.24.1-102_aarch64.deb",
+    "sha256": "8b3ccbaed92ba1898b11a71c70b953a5da1ff1083fd5c89ef0759c2233aaeff7",
+    "revision": "8fb9a9d10dfe57306c983f18310af3b1509c0fda",
+    "library_sha256": "527b6269083b27e007fd78c40f62a571a25c7c31f890a1d3efd20258bdce57b3"
+  },
+  "upstream_sources": [
+    {
+      "file": "panvk-prepared-source.tar.zst",
+      "url": "https://github.com/cnshing/debian-livecd-termux/releases/download/panvk-sync-fd-26.3.1-1/prepared-source.tar.zst",
+      "sha256": "36af384255709374da9c983d418e60c1a830307daa5135ca335a09c2c953b3a0"
+    },
+    {
+      "file": "mesa-26.2.6.tar.xz",
+      "url": "https://archive.mesa3d.org/mesa-26.2.6.tar.xz",
+      "sha256": "b9436b3e1a8be76fbd4823dc884f90596ab7c6ac5e1867a305e66ffccfb31a92"
+    },
+    {
+      "file": "gtk-4.24.1.tar.xz",
+      "url": "https://download.gnome.org/sources/gtk/4.24/gtk-4.24.1.tar.xz",
+      "sha256": "e98abe720e16129c8c0f50761dee0a2e9ae2478055e31018f6cf977fcf6513e9"
+    }
+  ],
+  "termux_revision": "538685c906074926fd19650e38c6dad91379eb0f",
+  "zenith_revision": "cf70e02b918e1864cbcd746a7fefa57b96c673ce"
+}

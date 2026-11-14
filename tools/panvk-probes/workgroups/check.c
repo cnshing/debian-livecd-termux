@@ -173,6 +173,20 @@ int main(int argc, char **argv)
       unsigned mine = i * 3 + g * 17 + 1, neighbour = (n - 1 - i) * 3 + g * 17 + 1;
       uint32_t expected[16] = {i, lx, ly, lz, (g % 3) * x + lx, (g / 3) * y + ly,
          lz, x, y, z, g, neighbour, n * (n - 1) / 2, mine, 15, mine ^ neighbour};
+      if (!strncmp(argv[6], "run-nested", 10)) {
+         unsigned loops = 3 + g / 3;
+         unsigned rotations = loops, delta = loops * (loops + 1) / 2;
+         if (strstr(argv[6], "control")) {
+            rotations--;
+            delta -= 2;
+         } else if (strstr(argv[6], "-if")) {
+            rotations = (g % 3) % 2 == 0 ? 1 : 0;
+            delta = rotations ? 13 : 29;
+         }
+         unsigned shared_value = ((i + rotations) % n) * 3 + g * 17 + 1 + delta;
+         unsigned private_value = mine + (i & 3) * 11 + delta;
+         expected[15] = shared_value ^ private_value;
+      }
       for (unsigned w = 0; w < 16; w++) {
          uint32_t got = map[((size_t)g * n + i) * 16 + w];
          if (got != expected[w]) {

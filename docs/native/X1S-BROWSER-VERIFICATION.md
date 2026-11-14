@@ -16,14 +16,15 @@ independently of the desktop renderer.
 | WebCodecs hardware encoding | GPU-process crash with the encoder feature enabled | same |
 | WebRTC H.264 / VP9 hardware loopback | works with the encoder feature enabled | no network interfaces / ICE candidates under Bionilux |
 
-The GPU rendering rows ran through the installed launchers. The playback rows
-ran on 2026-11-13 through the launcher code now on `main`, with the CI-built
-packages extracted privately and selected as the launcher's stack root: nothing
-was installed. The phone still has android-vaapi revision 2 and the previous
-android-vaapi-glibc. Installing the packages and repeating playback through the
-installed `chromium-browser` and `google-chrome` remains to be done. Stop the
-desktop before replacing android-vaapi: every desktop process preloads one of
-its libraries. The encoding rows are from the earlier private test launchers.
+The rendering and playback rows hold through the installed `chromium-browser`
+and `google-chrome`: on 2026-11-13 the packages were installed on the phone
+(android-vaapi 5, android-vaapi-glibc 1, mesa 26.2.6-103, livecd-desktop
+0.2.0-17) and each playback case was run through the installed wrapper on a
+private display, after the same cases had passed from private extractions.
+[MALI-GPU-STATUS.md](MALI-GPU-STATUS.md#verification) has both sets of numbers.
+Stop the desktop before replacing android-vaapi: every desktop process preloads
+one of its libraries. The encoding rows are from the earlier private test
+launchers.
 
 ### Decode surfaces and completion
 

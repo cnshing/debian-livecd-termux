@@ -129,8 +129,9 @@ Fixed while merging:
 
 In order of value. None of it needs a different driver.
 
-1. **Install on the S20 and rerun through the installed launchers.** See
-   [Verification](#verification) for what ran on private extractions and what did not.
+1. **Chrome's VP9 frame comparison.** Hardware decode works, but one of four compositor
+   comparisons misses the SSIM threshold by 0.0013, the same through the installed launcher
+   ([X1S-BROWSER-VERIFICATION.md](X1S-BROWSER-VERIFICATION.md)).
 2. **H.264 decoding**, off on every phone and every browser: the bridge rebuilds the PPS with a
    guessed reference count ([X1S-FIREFOX-VIDEO.md](X1S-FIREFOX-VIDEO.md), item 2).
 3. **Browser encoding.** WebRTC works in Chromium behind a feature flag; WebCodecs aborts the
@@ -149,28 +150,57 @@ In order of value. None of it needs a different driver.
 
 ## Verification
 
-Run on the S20 on 2026-11-12 and 13, on private displays with private codec daemons. **Nothing
-was installed on the phone and its running desktop was not touched**: the CI-built packages were
-extracted privately, and the launcher code on `main` was pointed at them as its stack root.
+Two rounds on the S20, both on private displays with private codec daemons.
+
+### Installed, 2026-11-13
+
+The five packages built from `main` (run 43414277233) were installed through the phone's local
+APT repository with the desktop stopped, and the desktop was started again: `mesa` 26.2.6-103,
+`android-vaapi` 27.0.0~devel20261029-5, `android-vaapi-glibc` 27.0.0~devel20261025-1,
+`android-firefox-video` 9.0.2-2, `livecd-desktop` 0.2.0-17. `apt` upgraded those five and
+nothing else.
+
+| Check, through what is installed | Result |
+| --- | --- |
+| `livecd validate` on the restarted desktop (Zink on PanVK) | 30 of 30, twice |
+| Chromium VP9, `chromium-browser` | pass: `VaapiVideoDecoder`, 196 frames out of the hardware decoder, 4 of 4 frame comparisons |
+| Chromium HEVC, `chromium-browser` | pass: 199 frames out of `OMX.Exynos.hevc.dec`, 4 of 4 |
+| Chrome VP9, `google-chrome` | hardware decode works (196 frames out), **fails acceptance**: 3 of 4; the windowed compositor capture scores SSIM 0.8987 against 0.90 |
+| Chrome HEVC, `google-chrome` | pass: 198 frames out of the hardware decoder, 4 of 4 |
+| Firefox VP9, `tests/browsers/test-acceleration.py firefox` | pass: WebRender, VA-API, 65 frames out of the hardware decoder, PSNR 48.0 dB, SSIM 0.971, Firefox's GPU processes on PanVK |
+| Firefox HEVC, same test | pass: 69 frames out of the hardware decoder, PSNR 48.1 dB, SSIM 0.971 |
+
+This was the maintained Firefox test's first run on Mali. The first start after the install
+reported the resources integration unavailable, because `android-procfs-setup` timed out waiting
+for Shizuku; run by hand it took under a second, and a second start reported it staged. That
+package was not changed.
+
+The phone's copy of the video fixtures held 5 of each clip's 48 reference frames, and the
+Firefox test compares whichever frame it captures. The missing frames were regenerated on the PC
+with the recorded FFmpeg command; all 48 match the manifest's hashes.
+
+### Before installing, 2026-11-12 and 13
+
+The same packages extracted privately, with the launcher code on `main` pointed at them as its
+stack root.
 
 | Check | Result |
 | --- | --- |
 | GNOME Shell and GTK on Zink over PanVK with Mesa 26.2.6-103 | pass: 4 captures over 2 resize and fullscreen cycles, maximum channel error 0, stale-frame control rejected; Shell and GTK map this Mesa and the PanVK driver; Nautilus and Settings inspected |
-| Chromium VP9 | pass: `VaapiVideoDecoder`, 200 frames out of the hardware decoder, 4 of 4 frame comparisons |
-| Chromium HEVC | pass: `VaapiVideoDecoder`, 198 frames out of `OMX.Exynos.hevc.dec`, 4 of 4. Control without the reorder variable: `vaEndPicture failed`, software fallback |
-| Chrome VP9, `android-vaapi-glibc` 1 | hardware decode works (192 frames out), **fails acceptance**: 3 of 4 comparisons; the windowed compositor capture scores SSIM 0.8987 against 0.90, as the earlier research build did |
-| Chrome HEVC, `android-vaapi-glibc` 1 | pass: `VaapiVideoDecoder`, 190 frames out of the hardware decoder, 4 of 4 |
-| Firefox HEVC on Zink over PanVK | pass: VA-API init, 370 frames out of the hardware decoder, frames 12 and 36 correct at the browser and compositor layers, 466 WebGL frames beside it with none wrong, Firefox alive at the end |
-| Firefox VP9 | not rerun. The Mesa and `android-vaapi` libraries CI built from `main`'s recipes are byte-identical to the ones the earlier pass used ([X1S-FIREFOX-VIDEO.md](X1S-FIREFOX-VIDEO.md)) |
-| Shared state | every run's before and after comparison of the live desktop, X server and codec daemon passed |
+| Chromium VP9 | pass: 200 frames out of the hardware decoder, 4 of 4 |
+| Chromium HEVC | pass: 198 frames out, 4 of 4. Control without the reorder variable: `vaEndPicture failed`, software fallback |
+| Chrome VP9 | hardware decode works (192 frames out), fails acceptance on the same comparison: SSIM 0.8987 |
+| Chrome HEVC | pass: 190 frames out, 4 of 4 |
+| Firefox HEVC on Zink over PanVK, with a concurrent WebGL canvas | pass: 370 frames out of the hardware decoder, frames 12 and 36 correct at the browser and compositor layers, 466 WebGL frames with none wrong |
 
-The frame comparisons are numbered frames 12 and 36, each at the browser and the compositor
-layer, with the unchanged thresholds (PSNR ≥ 28 dB, SSIM ≥ 0.90). Captures were opened and
-looked at, not only scored. Each browser run was two fullscreen cycles: enough to show the path
-works, not a soak.
+In both rounds every run's before and after comparison of the live desktop, X server and codec
+daemon passed. The Chromium and Chrome comparisons are numbered frames 12 and 36, each at the
+browser and the compositor layer, with the unchanged thresholds (PSNR ≥ 28 dB, SSIM ≥ 0.90).
+Captures were opened and looked at, not only scored. Each browser run was two fullscreen
+cycles: enough to show the path works, not a soak.
 
-Not run: anything through the installed launchers (needs the packages installed and the desktop
-restarted), Ghostty, encoding, H.264, and the Note10+ (Adreno).
+Not run: Ghostty, encoding, H.264, a long soak, and the Note10+ (Adreno).
 
-CI: Mesa in run 43372935426; `android-vaapi`, `android-vaapi-glibc` and `android-firefox-video`
-in run 43412205134. Raw results: local `temp/gpu-x1s/unify/`.
+Raw results: local `temp/gpu-x1s/unify/` and `temp/gpu-x1s/unify-install/results/`. On the
+phone, the previous repository index and package list are in
+`~/gpu-x1s/unify/backup-20261113/`.

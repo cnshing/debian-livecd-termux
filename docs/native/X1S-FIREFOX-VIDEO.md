@@ -83,14 +83,16 @@ CLIP=chart-hevc.mp4 ... bash ~/gpu-x1s/panvk-run.sh LABEL \
   RACE_VA_STACK=$HOME/gpu-x1s/vaapi-5 TERMUX_VA_HEVC_REORDER_PICS=0   # HEVC
 ```
 
-`ffv1`, `mesa-103`, `vaapi-patched4` and `vaapi-5` are private extractions of the CI packages;
-nothing is installed on the phone yet. In such an extraction, point the links in
+`ffv1`, `mesa-103`, `vaapi-patched4` and `vaapi-5` are private extractions of the CI packages,
+from before the packages were installed on 2026-11-13. In such an extraction, point the links in
 `lib/va-client` at `$PREFIX/lib`, or Firefox's probe reports `libva-drm.so.2 is missing` and
 every codec silently decodes in software. `~/gpu-x1s/hevc-latency.py OUTDIR DAEMON CLIP` (local
 copy `temp/gpu-x1s/hevc-latency.py`) decodes a clip with FFmpeg through the driver, without a
-browser, and compares every frame with software decoding. Once the packages are installed, the maintained
-`tests/browsers/test-acceleration.py firefox` should exercise the installed launcher; it has not
-been run on Mali. It accepts the selected GPU's matching library and device pair (PanVK with Mali,
+browser, and compares every frame with software decoding. With the packages installed, the maintained
+`tests/browsers/test-acceleration.py firefox` exercises the installed launcher. It passed on the
+S20 for VP9 and HEVC on 2026-11-13 ([MALI-GPU-STATUS.md](MALI-GPU-STATUS.md#verification)). It
+needs all 48 reference frames of a fixture, because it compares whichever frame it captures.
+It accepts the selected GPU's matching library and device pair (PanVK with Mali,
 or Turnip with KGSL) instead of requiring Turnip on every phone, and its result keeps the last
 playback state and the VA-API init, frame and software-codec evidence even when playback fails.
 It checks browser pixels; the private harness above still supplies the compositor captures and
@@ -108,9 +110,8 @@ python3 tests/browsers/test-video-tools.py AccelerationEvidence -v
 
 Firefox on Mali now decodes HEVC in hardware (above). Not done:
 
-- **The launcher path is untested on the phone.** The harness set the variable by hand; the
-  launcher line and its host test (`tests/packaging/test-firefox-video.py`) are new. The final CI
-  driver (run 43362735995) is byte-identical to the one tested.
+- The launcher path is tested: the installed launcher sets the variable, and Firefox, Chromium
+  and Chrome decode the HEVC fixture in hardware through it.
 - **Chromium on Mali** had the same failure and is fixed the same way: with the variable, set by
   the launcher's shared Mali settings, it decodes the HEVC fixture on `VaapiVideoDecoder`
   ([X1S-BROWSER-VERIFICATION.md](X1S-BROWSER-VERIFICATION.md)).
@@ -158,8 +159,8 @@ Firefox on Mali now decodes HEVC in hardware (above). Not done:
 
 ### 4. Smaller items
 
-- Nothing here is installed on the S20; install the three packages and rerun through the real
-  launcher (`livecd-native` Firefox entry), not the harness.
+- The packages are installed on the S20 and the maintained test passes through the installed
+  launcher. A Firefox started from the desktop's own menu entry has not been watched.
 - Another PanVK port for kbase, [JimVulkan/mali-panvk](https://github.com/JimVulkan/mali-panvk)
   (Mesa 27, lists the S20's G77 as tested), advertises `VK_KHR_external_semaphore_fd` and dma-buf
   import and imports Android hardware buffers. Not tried here. If it creates SYNC_FD semaphores,

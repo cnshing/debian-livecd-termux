@@ -2,6 +2,11 @@ name: PanVK SYNC_FD experiment
 
 on:
   workflow_dispatch:
+    inputs:
+      workgroups:
+        description: Combine with the opt-in G77 workgroup experiment for private Ghostty tests
+        type: boolean
+        default: false
   push:
     branches: [main]
     paths:
@@ -9,7 +14,7 @@ on:
     - tools/panvk-probes/prepare-driver.sh
     - tools/panvk-probes/driver-deps.sh
     - tools/panvk-probes/build-driver.sh
-    - tools/panvk-probes/sync-fd-patches/**
+    - tools/panvk-probes/sync-fd-patches/*.patch
 
 permissions:
   contents: read
@@ -76,14 +81,23 @@ jobs:
         python3 -m venv --system-site-packages .venv
         .venv/bin/pip install 'meson>=1.7,<2'
         echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
+    - name: Select independent patch series
+      run: |
+        mkdir -p selected-patches
+        cp tools/panvk-probes/sync-fd-patches/*.patch selected-patches/
+        if [ '${{ inputs.workgroups }}' = true ]; then
+          for patch in tools/panvk-probes/workgroup-patches/*.patch; do
+            cp "$patch" "selected-patches/workgroups-$(basename "$patch")"
+          done
+        fi
     - name: Build ICD in CI
       env:
-        PANVK_DRIVER_PATCH_DIR: ${{ github.workspace }}/tools/panvk-probes/sync-fd-patches
+        PANVK_DRIVER_PATCH_DIR: ${{ github.workspace }}/selected-patches
       run: bash tools/panvk-probes/build-driver.sh '${{ matrix.kind }}' zenith out
     - uses: actions/upload-artifact@v4
       if: always()
       with:
-        name: panvk-sync-fd-${{ matrix.kind }}-aarch64
+        name: panvk-sync-fd-${{ matrix.kind }}-aarch64${{ inputs.workgroups && '-workgroups' || '' }}
         path: |
           out/
           zenith/build/**/*.log

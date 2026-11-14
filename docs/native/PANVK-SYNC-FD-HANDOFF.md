@@ -128,6 +128,9 @@ and the existing X11 EGL workaround remains in place. Debug diagnostics are
 retained for `GDK_DEBUG=dmabuf`. This workflow produces a qualification artifact
 only; it does not add GTK to the normal repository or change launcher defaults.
 Extract its `libgtk-4.so.1` privately and prepend that directory only for Ghostty.
+The checked-in `tools/panvk-probes/ghostty-gtk-dmabuf.py` launcher does this
+when copied beside `gtk-dmabuf/lib/` and passed as `--ghostty-launcher` to the
+desktop probe. `PANVK_GTK_LIB_DIR` can select another private directory.
 
 The first build [43557476296](https://github.com/cnshing/debian-livecd-termux/actions/runs/43557476296)
 compiled and packaged successfully, including the DMA-BUF implementation. Its

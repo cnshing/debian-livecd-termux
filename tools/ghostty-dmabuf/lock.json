@@ -1,6 +1,6 @@
 {
   "package": "ghostty-panvk-dmabuf",
-  "version": "1.0-1",
+  "version": "1.0-2",
   "source_date_epoch": 1794635223,
   "repository": "cnshing/debian-livecd-termux",
   "target": "Galaxy S20 x1s, Mali-G77, kbase JM 11.35, Android 13, Linux 4.19.87, Termux aarch64",

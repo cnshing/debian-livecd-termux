@@ -69,11 +69,7 @@ def environment(original, root=ROOT, prefix=PREFIX):
         PANVK_G77_LWG='1', ZINK_LINEAR_DMABUF_EXPORT='1',
         MESA_SHADER_CACHE_DISABLE='true',
         LIVECD_NATIVE_RENDERER='panvk-dmabuf')
-    # Ghostty's --env affects terminal children, not Ghostty itself. Restore the
-    # caller's environment there so an opt-in terminal does not opt in every app.
-    changed = sorted(k for k in env.keys() | original.keys() if env.get(k) != original.get(k))
-    child_args = ['--env=' + k + '=' + original.get(k, '') for k in changed]
-    return env, child_args
+    return env
 
 
 def main():
@@ -85,14 +81,14 @@ def main():
             return
         if not os.environ.get('DISPLAY'):
             raise RuntimeError('Start an X11 desktop first and supply its DISPLAY/XAUTHORITY environment')
-        env, child_args = environment(os.environ)
+        env = environment(os.environ)
         binary = str(PREFIX / 'bin/ghostty')
         # Prepend options so -e and everything after it retain normal semantics.
         # Do not pass --gtk-single-instance=true: it can reuse a stock instance.
         options = sys.argv[1:sys.argv.index('-e') if '-e' in sys.argv else len(sys.argv)]
         if any(a.startswith('--gtk-single-instance') and a != '--gtk-single-instance=false' for a in options):
             raise RuntimeError('The opt-in launcher owns --gtk-single-instance=false')
-        os.execve(binary, [binary, '--gtk-single-instance=false', *child_args, *sys.argv[1:]], env)
+        os.execve(binary, [binary, '--gtk-single-instance=false', *sys.argv[1:]], env)
     except (OSError, RuntimeError, ValueError, KeyError) as error:
         print('ghostty-panvk-dmabuf: ' + str(error), file=sys.stderr)
         sys.exit(1)

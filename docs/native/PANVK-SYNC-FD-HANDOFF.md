@@ -340,8 +340,9 @@ corresponding source bundle with pinned recipes, patches and build instructions.
 
 The dedicated command uses private GTK/Mesa/ICD paths, requires the tested
 x1s/kernel/JM ABI, disables shader caching, forces the tested LINEAR export
-allocation and starts a separate Ghostty instance. It restores the caller's
-graphics environment for terminal children. There are no maintainer scripts,
+allocation and starts a separate Ghostty instance. Its graphics environment
+applies to that terminal and its descendants; use an ordinary terminal for the
+normal environment. There are no maintainer scripts,
 global ICD files, alternatives or changes to the managed desktop and terminal
 defaults. See [installation and source instructions](../../tools/ghostty-dmabuf/README.md).
 CI and extracted-package device results are recorded below when complete.

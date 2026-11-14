@@ -261,6 +261,24 @@ streams) and less in a few (`alphaToOne`, `shaderDeviceClock`, dual-source attac
 
 ### The work
 
+The repeatable declaration audit is `tools/panvk-probes/audit-vulkan14.py`:
+
+```sh
+python3 tools/panvk-probes/audit-vulkan14.py <single-device-vulkaninfo.txt> --out <audit.json>
+```
+
+Against the saved packaged-driver dump it passes **77/77 checks** covering the
+additional 1.4 features, limits, subgroup flags and the host-copy streaming path.
+Four host tests check hexadecimal limits, arrays, missing conditional features
+and conflicting multi-device input. The requirements come from Khronos'
+[feature requirements](https://docs.vulkan.org/spec/latest/chapters/features.html#features-requirements)
+and [1.4 requirements](https://docs.vulkan.org/features/latest/features/proposals/VK_VERSION_1_4.html).
+It checks declarations added by 1.4; it does not requalify inherited Vulkan
+requirements or prove their behavior. Its report always records
+`conformance_proven: false`. Local report:
+`temp/panvk-qualification/vulkan14-audit.json`. In particular, a true
+`largePoints` flag cannot clear the known point-rendering defect.
+
 1. **Change `get_api_version()`** in the packaged driver's source to return 1.4 for
    architecture 9 on kbase, as a patch in `tools/panvk-probes/driver-patches/`.
 2. **Check it against the specification, not against another driver.** The list above is

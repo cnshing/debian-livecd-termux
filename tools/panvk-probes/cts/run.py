@@ -64,6 +64,8 @@ def main():
     parser.add_argument('--nested', action='store_true')
     parser.add_argument('--unmerged-compute', action='store_true',
                         help='Opt in to the experimental G77 unmerged compute mode')
+    parser.add_argument('--uncached-host-memory', action='store_true',
+                        help='Disable the optional write-back host-memory type for diagnosis')
     parser.add_argument('--case-timeout', type=int, default=45)
     parser.add_argument('--max-seconds', type=int, default=600)
     parser.add_argument('--max-cases', type=int, default=0, help='0 means all selected cases')
@@ -79,7 +81,8 @@ def main():
     identity = {'suite': args.suite, 'cts_sha256': digest(executable),
                 'driver_sha256': digest(driver), 'patterns': args.pattern,
                 'large_workgroups': args.large_workgroups, 'nested': args.nested,
-                'unmerged_compute': args.unmerged_compute}
+                'unmerged_compute': args.unmerged_compute,
+                'uncached_host_memory': args.uncached_host_memory}
     args.out = args.out.resolve()
     args.out.mkdir(parents=True, exist_ok=False)
     with (Path(os.environ['TMPDIR']) / 'livecd-panvk-cts.lock').open('a') as lock:
@@ -96,8 +99,10 @@ def run(args, prefix, cts, driver, executable, identity):
                  'MESA_GL_VERSION_OVERRIDE', 'MESA_GLSL_VERSION_OVERRIDE', 'BIONILUX_LIBRARY_PATH',
                  'MESA_SHADER_CACHE_DIR', '__EGL_VENDOR_LIBRARY_FILENAMES',
                  'LIBGL_ALWAYS_SOFTWARE', 'LIBGL_ALWAYS_INDIRECT', 'ZINK_DEBUG',
-                 'MESA_VK_DEVICE_SELECT', 'DRI_PRIME', 'PANVK_KBASE_DRI3'):
+                 'MESA_VK_DEVICE_SELECT', 'DRI_PRIME', 'PANVK_KBASE_DRI3', 'PANVK_DEBUG'):
         env.pop(name, None)
+    if args.uncached_host_memory:
+        env['PANVK_DEBUG'] = 'no_wb_mmap'
     env.update(LD_LIBRARY_PATH=str(prefix / 'lib/panvk-kbase/bionic/x11'),
                VK_DRIVER_FILES=str(icd), VK_ICD_FILENAMES=str(icd),
                EGL_PLATFORM='surfaceless', GALLIUM_DRIVER='zink', MESA_LOADER_DRIVER_OVERRIDE='zink',
@@ -136,6 +141,7 @@ def run(args, prefix, cts, driver, executable, identity):
     if args.resume_from:
         previous = json.loads((args.resume_from / 'results.json').read_text())
         previous['identity'].setdefault('unmerged_compute', False)
+        previous['identity'].setdefault('uncached_host_memory', False)
         if previous['identity'] != identity:
             raise RuntimeError('Resume identities differ')
         if any(r['status'] not in ACCEPTED for r in previous['results']):

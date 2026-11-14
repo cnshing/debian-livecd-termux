@@ -19,6 +19,7 @@ from pathlib import Path
 import sys
 args = dict(arg[2:].split('=', 1) for arg in sys.argv[1:])
 assert os.environ.get('PANVK_G77_NO_MERGE') == os.environ.get('FAKE_EXPECT_NO_MERGE', '0')
+assert os.environ.get('PANVK_DEBUG', '') == os.environ.get('FAKE_EXPECT_DEBUG', '')
 if args.get('deqp-runmode') == 'txt-caselist':
     Path(args['deqp-caselist-export-file']).write_text(
         'GROUP: dEQP-VK.compute\\nTEST: dEQP-VK.compute.a\\nTEST: dEQP-VK.compute.b\\n')
@@ -94,6 +95,13 @@ class Results(unittest.TestCase):
                                        env={'FAKE_EXPECT_NO_MERGE': '1'})
             self.assertEqual(code, 0)
             self.assertTrue(report['identity']['unmerged_compute'])
+
+    def test_uncached_host_mode_is_explicit(self):
+        with tempfile.TemporaryDirectory() as directory:
+            code, report = self.invoke(Path(directory), 'uncached', ['--uncached-host-memory'],
+                                       env={'FAKE_EXPECT_DEBUG': 'no_wb_mmap'})
+            self.assertEqual(code, 0)
+            self.assertTrue(report['identity']['uncached_host_memory'])
 
 
 if __name__ == '__main__':

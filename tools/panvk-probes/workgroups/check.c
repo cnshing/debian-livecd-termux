@@ -17,19 +17,23 @@ int main(int argc, char **argv)
    if (argc != 7) { fprintf(stderr, "check ICD SPV X Y Z run|compile|reject|skip\n"); return 2; }
    if (strcmp(argv[6], "run") && strcmp(argv[6], "compile") &&
        strcmp(argv[6], "reject") && strcmp(argv[6], "skip") &&
+       strcmp(argv[6], "run-cts-max") && strcmp(argv[6], "compile-cts-max") &&
        strcmp(argv[6], "run-nested") && strcmp(argv[6], "run-nested-if") &&
        strcmp(argv[6], "run-nested-control") && strcmp(argv[6], "run-nested-prime")) return 2;
    const int capture_stats = getenv("PANVK_PROBE_STATS") && !strcmp(getenv("PANVK_PROBE_STATS"), "1");
+   const int cts_max = !strcmp(argv[6], "run-cts-max") || !strcmp(argv[6], "compile-cts-max");
    unsigned x = strtoul(argv[3], NULL, 10), y = strtoul(argv[4], NULL, 10);
    unsigned z = strtoul(argv[5], NULL, 10), n = x * y * z;
    if (!x || !y || !z || n > 1024) return 2;
    void *lib = dlopen(argv[1], RTLD_NOW | RTLD_LOCAL);
    if (!lib) { fprintf(stderr, "%s\n", dlerror()); return 1; }
    PFN_vkGetInstanceProcAddr gipa = (PFN_vkGetInstanceProcAddr)dlsym(lib, "vk_icdGetInstanceProcAddr");
+   if (!gipa) gipa = (PFN_vkGetInstanceProcAddr)dlsym(lib, "vkGetInstanceProcAddr");
    if (!gipa) return 1;
    VkInstance instance = VK_NULL_HANDLE;
    INST(vkCreateInstance);
-   VkApplicationInfo ai = {.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO, .apiVersion = VK_API_VERSION_1_1};
+   VkApplicationInfo ai = {.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO,
+      .apiVersion = cts_max ? VK_API_VERSION_1_3 : VK_API_VERSION_1_1};
    VkInstanceCreateInfo ici = {.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO, .pApplicationInfo = &ai};
    CHECK(vkCreateInstance(&ici, NULL, &instance));
    INST(vkEnumeratePhysicalDevices); INST(vkGetPhysicalDeviceProperties);
@@ -75,10 +79,20 @@ int main(int argc, char **argv)
       .queueFamilyIndex = family, .queueCount = 1, .pQueuePriorities = &priority};
    VkDeviceCreateInfo di = {.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
       .queueCreateInfoCount = 1, .pQueueCreateInfos = &qi, .pEnabledFeatures = &features};
+   VkPhysicalDeviceMaintenance4Features maintenance4 = {
+      .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_4_FEATURES};
+   if (cts_max) {
+      INST(vkGetPhysicalDeviceFeatures2);
+      VkPhysicalDeviceFeatures2 available = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2,
+         .pNext = &maintenance4};
+      vkGetPhysicalDeviceFeatures2(physical, &available);
+      if (!maintenance4.maintenance4) return 1;
+      di.pNext = &maintenance4;
+   }
    const char *stats_extension = VK_KHR_PIPELINE_EXECUTABLE_PROPERTIES_EXTENSION_NAME;
    VkPhysicalDevicePipelineExecutablePropertiesFeaturesKHR stats_feature = {
       .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PIPELINE_EXECUTABLE_PROPERTIES_FEATURES_KHR,
-      .pipelineExecutableInfo = VK_TRUE};
+      .pNext = cts_max ? &maintenance4 : NULL, .pipelineExecutableInfo = VK_TRUE};
    if (capture_stats) {
       INST(vkGetPhysicalDeviceFeatures2);
       VkPhysicalDeviceFeatures2 available = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2,
@@ -102,6 +116,7 @@ int main(int argc, char **argv)
    DEV(vkEndCommandBuffer); DEV(vkCmdBindPipeline); DEV(vkCmdBindDescriptorSets);
    DEV(vkCmdDispatch); DEV(vkCmdPipelineBarrier); DEV(vkGetDeviceQueue);
    DEV(vkCreateFence); DEV(vkQueueSubmit); DEV(vkWaitForFences);
+   DEV(vkFlushMappedMemoryRanges); DEV(vkInvalidateMappedMemoryRanges);
    FILE *file = fopen(argv[2], "rb");
    if (!file || fseek(file, 0, SEEK_END)) return 1;
    long bytes = ftell(file);
@@ -127,6 +142,11 @@ int main(int argc, char **argv)
       .flags = capture_stats ? VK_PIPELINE_CREATE_CAPTURE_STATISTICS_BIT_KHR : 0,
       .stage = {.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
          .stage = VK_SHADER_STAGE_COMPUTE_BIT, .module = module, .pName = "main"}, .layout = layout};
+   uint32_t local_size[] = {x, y, z};
+   VkSpecializationMapEntry entries[] = {{0, 0, 4}, {1, 4, 4}, {2, 8, 4}};
+   VkSpecializationInfo specialization = {.mapEntryCount = 3, .pMapEntries = entries,
+      .dataSize = sizeof(local_size), .pData = local_size};
+   if (cts_max) pi.stage.pSpecializationInfo = &specialization;
    VkPipeline pipeline;
    VkResult result = vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &pi, NULL, &pipeline);
    if (!strcmp(argv[6], "reject")) {
@@ -169,8 +189,10 @@ int main(int argc, char **argv)
          free(stats);
       }
    }
-   if (!strcmp(argv[6], "compile")) { puts("PASS: pipeline creation; no dispatch"); return 0; }
-   const size_t words = (size_t)n * 6 * 16;
+   if (!strcmp(argv[6], "compile") || !strcmp(argv[6], "compile-cts-max")) {
+      puts("PASS: pipeline creation; no dispatch"); return 0;
+   }
+   const size_t words = cts_max ? n : (size_t)n * 6 * 16;
    VkBufferCreateInfo bi = {.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
       .size = words * 4, .usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT};
    VkBuffer buffer;
@@ -191,7 +213,10 @@ int main(int argc, char **argv)
    CHECK(vkBindBufferMemory(device, buffer, allocation, 0));
    uint32_t *map;
    CHECK(vkMapMemory(device, allocation, 0, VK_WHOLE_SIZE, 0, (void **)&map));
-   memset(map, 0xee, words * 4);
+   memset(map, cts_max ? 0 : 0xee, words * 4);
+   VkMappedMemoryRange mapped_range = {.sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE,
+      .memory = allocation, .size = VK_WHOLE_SIZE};
+   if (cts_max) CHECK(vkFlushMappedMemoryRanges(device, 1, &mapped_range));
    VkDescriptorPoolSize ps = {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1};
    VkDescriptorPoolCreateInfo dpi = {.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
       .maxSets = 1, .poolSizeCount = 1, .pPoolSizes = &ps};
@@ -215,13 +240,26 @@ int main(int argc, char **argv)
    CHECK(vkAllocateCommandBuffers(device, &cai, &cb));
    VkCommandBufferBeginInfo begin = {.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
    CHECK(vkBeginCommandBuffer(cb, &begin));
+   VkBufferMemoryBarrier buffer_barrier = {.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,
+      .srcAccessMask = VK_ACCESS_HOST_WRITE_BIT, .dstAccessMask = VK_ACCESS_SHADER_WRITE_BIT,
+      .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED, .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+      .buffer = buffer, .size = VK_WHOLE_SIZE};
+   if (cts_max) vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_HOST_BIT,
+      VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0, NULL, 1, &buffer_barrier, 0, NULL);
    vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline);
    vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_COMPUTE, layout, 0, 1, &set, 0, NULL);
-   vkCmdDispatch(cb, 3, 2, 1);
+   vkCmdDispatch(cb, cts_max ? 1 : 3, cts_max ? 1 : 2, 1);
    VkMemoryBarrier barrier = {.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER,
       .srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT, .dstAccessMask = VK_ACCESS_HOST_READ_BIT};
-   vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_HOST_BIT,
-      0, 1, &barrier, 0, NULL, 0, NULL);
+   if (cts_max) {
+      buffer_barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+      buffer_barrier.dstAccessMask = VK_ACCESS_HOST_READ_BIT;
+      vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_HOST_BIT,
+         0, 0, NULL, 1, &buffer_barrier, 0, NULL);
+   } else {
+      vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_HOST_BIT,
+         0, 1, &barrier, 0, NULL, 0, NULL);
+   }
    CHECK(vkEndCommandBuffer(cb));
    VkQueue queue;
    vkGetDeviceQueue(device, family, 0, &queue);
@@ -231,6 +269,16 @@ int main(int argc, char **argv)
    VkSubmitInfo submit = {.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO, .commandBufferCount = 1, .pCommandBuffers = &cb};
    CHECK(vkQueueSubmit(queue, 1, &submit, fence));
    CHECK(vkWaitForFences(device, 1, &fence, VK_TRUE, 5000000000ull));
+   if (cts_max) {
+      CHECK(vkInvalidateMappedMemoryRanges(device, 1, &mapped_range));
+      size_t wrong = 0;
+      for (unsigned i = 0; i < n; i++) if (map[i] != 1) {
+         if (wrong < 12) printf("mismatch i=%u got=%u expected=1\n", i, map[i]);
+         wrong++;
+      }
+      printf("%s: %zu words checked, %zu wrong\n", wrong ? "FAIL" : "PASS", words, wrong);
+      return wrong ? 1 : 0;
+   }
    size_t wrong = 0;
    for (unsigned g = 0; g < 6; g++) for (unsigned i = 0; i < n; i++) {
       unsigned lx = i % x, ly = (i / x) % y, lz = i / (x * y);

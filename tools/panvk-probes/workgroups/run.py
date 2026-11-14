@@ -4,6 +4,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 from pathlib import Path
 import subprocess
 
@@ -15,6 +16,7 @@ args = parser.parse_args()
 args.out.mkdir(exist_ok=False, parents=True)
 here = Path(__file__).resolve().parent
 results = []
+cache_uuids = {}
 for variant, driver, enabled in (
     ("baseline", args.baseline, False),
     ("patched-off", args.patched, False),
@@ -45,6 +47,12 @@ for variant, driver, enabled in (
         except subprocess.TimeoutExpired as error:
             output = str(error.stdout or b"") + "\nTIMEOUT"
             code = 124
+        uuid = re.search(r"pipelineCacheUUID=([0-9a-f]{32})", output)
+        if not uuid:
+            raise SystemExit("Missing pipeline cache identity")
+        previous = cache_uuids.setdefault(variant, uuid[1])
+        if previous != uuid[1]:
+            raise SystemExit("Cache identity changed between identical driver modes")
         log = f"{variant}-{shape}.txt"
         (args.out / log).write_text(output)
         result = {"variant": variant, "shape": shape, "mode": mode, "returncode": code,
@@ -55,4 +63,7 @@ for variant, driver, enabled in (
         print(f"{variant} {shape} {mode}: {code}\n{output}", flush=True)
         if code:
             raise SystemExit("Stopped at the first failed case; inspect the driver/compiler logs.")
-print("PASS: all controls, output oracles and rejection cases passed")
+if cache_uuids['patched-off'] == cache_uuids['patched-on']:
+    raise SystemExit("Opt-in and opt-out must not share a pipeline cache UUID")
+(args.out / 'cache-uuids.json').write_text(json.dumps(cache_uuids, indent=2) + "\n")
+print("PASS: all controls, output oracles, rejection cases and cache identities passed")

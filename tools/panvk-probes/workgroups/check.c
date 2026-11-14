@@ -36,6 +36,9 @@ int main(int argc, char **argv)
    if (count != 1) return 1;
    VkPhysicalDeviceProperties props;
    vkGetPhysicalDeviceProperties(physical, &props);
+   printf("pipelineCacheUUID=");
+   for (unsigned i = 0; i < VK_UUID_SIZE; i++) printf("%02x", props.pipelineCacheUUID[i]);
+   putchar('\n');
    printf("device=%s maxInvocations=%u shape=%ux%ux%u mode=%s\n", props.deviceName,
           props.limits.maxComputeWorkGroupInvocations, x, y, z, argv[6]);
    if (props.deviceType == VK_PHYSICAL_DEVICE_TYPE_CPU || !strstr(props.deviceName, "Mali")) return 1;

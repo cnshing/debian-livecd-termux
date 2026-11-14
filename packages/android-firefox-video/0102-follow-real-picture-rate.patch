@@ -1,0 +1,175 @@
+From: LiveCD Termux maintainers
+Subject: [PATCH] Follow the real picture rate of CPU input
+
+VA-API carries no timestamps, so the driver spends the bitrate divided by the
+declared frame rate on each picture. Firefox declares the highest rate a stream
+may reach: its WebRTC sender passes the H.264 level's macroblock rate divided
+by the picture size, 450 fps at 320x180, 211 at 480x270 and 117 at 640x360,
+for a 30 fps capture. The hardware then spent a fifteenth of the bitrate, the
+picture degraded, and the sender stayed at 320x180. WebCodecs may declare no
+rate at all, which became the microsecond time base.
+
+For CPU input only, give the driver an ordinary rate (the declared one up to
+60 fps, otherwise 30) and measure the interval between pictures from their
+timestamps. When it differs from the nominal rate by more than a tenth, scale
+the rate-control bitrate so each picture still gets bitrate * interval, and
+send the changed rate control with the next picture instead of waiting for a
+key frame. libwebrtc compensates Android's MediaCodec encoders the same way.
+Callers that provide VAAPI frames keep the upstream behaviour.
+
+--- a/libavcodec/vaapi_encode.h
++++ b/libavcodec/vaapi_encode.h
+@@ -153,6 +153,16 @@
+     // which do not create an AVHWFramesContext themselves.
+     int cpu_upload;
+ 
++    // CPU input carries real timestamps, and the frame rate its caller
++    // declares may only be an upper bound. The driver is given an ordinary
++    // rate; its bitrate then follows the measured interval between pictures.
++    AVRational      cpu_nominal_rate;  // frame rate given to the driver
++    int64_t         cpu_base_bits;     // rc_params.bits_per_second at that rate
++    int64_t         cpu_last_pts;      // microseconds
++    int64_t         cpu_interval;      // smoothed picture interval, microseconds
++    int             cpu_intervals;     // intervals measured so far, up to 8
++    int             cpu_rate_changed;  // send rate control with the next picture
++
+     // Use low power encoding mode.
+     int             low_power;
+ 
+--- a/libavcodec/vaapi_encode.c
++++ b/libavcodec/vaapi_encode.c
+@@ -25,6 +25,7 @@
+ #include "libavutil/common.h"
+ #include "libavutil/internal.h"
+ #include "libavutil/log.h"
++#include "libavutil/mathematics.h"
+ #include "libavutil/mem.h"
+ #include "libavutil/pixdesc.h"
+ 
+@@ -346,8 +347,12 @@
+             goto fail;
+     }
+ 
+-    if (base_pic->type == FF_HW_PICTURE_TYPE_IDR) {
++    if (base_pic->type == FF_HW_PICTURE_TYPE_IDR || ctx->cpu_rate_changed) {
+         for (i = 0; i < ctx->nb_global_params; i++) {
++            // Between key frames only a changed bitrate is sent again.
++            if (base_pic->type != FF_HW_PICTURE_TYPE_IDR &&
++                ctx->global_params_type[i] != VAEncMiscParameterTypeRateControl)
++                continue;
+             err = vaapi_encode_make_misc_param_buffer(avctx, pic,
+                                                       ctx->global_params_type[i],
+                                                       ctx->global_params[i],
+@@ -355,6 +360,7 @@
+             if (err < 0)
+                 goto fail;
+         }
++        ctx->cpu_rate_changed = 0;
+     }
+ 
+     if (ctx->codec->init_picture_params) {
+@@ -2141,6 +2147,69 @@
+  * GTK encoder submits I420, without a VA device or upload filter. Keep its
+  * libavcodec interface while using the same VA surfaces as ordinary VA clients.
+  * Callers which already provide VAAPI frames retain the upstream path. */
++/* Keep the bitrate right when pictures do not arrive at the nominal rate.
++ * VA-API has no timestamps: the driver spends bits_per_second divided by the
++ * frame rate on each picture. Firefox sends real timestamps in microseconds
++ * with a rate that may be far from the truth, so a picture arriving every
++ * `interval` is given bits_per_second * interval by scaling the bitrate, as
++ * libwebrtc does for Android's MediaCodec encoders. */
++static void vaapi_encode_cpu_rate_update(AVCodecContext *avctx, const AVFrame *frame)
++{
++    VAAPIEncodeContext *ctx = avctx->priv_data;
++    int64_t pts, delta, bits, current = ctx->rc_params.bits_per_second;
++
++    if (ctx->cpu_base_bits <= 0 || frame->pts == AV_NOPTS_VALUE ||
++        avctx->time_base.num <= 0 || avctx->time_base.den <= 0)
++        return;
++    pts = av_rescale_q(frame->pts, avctx->time_base, AV_TIME_BASE_Q);
++    delta = ctx->cpu_last_pts == AV_NOPTS_VALUE ? 0 : pts - ctx->cpu_last_pts;
++    ctx->cpu_last_pts = pts;
++    /* A pause or a jump in the timestamps is not a frame rate. */
++    if (delta <= 0 || delta > 2 * AV_TIME_BASE)
++        return;
++    if (ctx->cpu_intervals < 8) {
++        ctx->cpu_interval = (ctx->cpu_interval * ctx->cpu_intervals + delta) /
++                            (ctx->cpu_intervals + 1);
++        /* The first intervals after a start are often irregular. */
++        if (++ctx->cpu_intervals < 4)
++            return;
++    } else {
++        ctx->cpu_interval += (delta - ctx->cpu_interval) / 8;
++    }
++    bits = av_rescale(ctx->cpu_base_bits,
++                      ctx->cpu_interval * ctx->cpu_nominal_rate.num,
++                      (int64_t)AV_TIME_BASE * ctx->cpu_nominal_rate.den);
++    bits = av_clip64(bits, FFMAX(ctx->cpu_base_bits / 8, 1),
++                     FFMIN(ctx->cpu_base_bits * 8, UINT32_MAX));
++    /* Ordinary jitter must not reach the encoder as a stream of changes. */
++    if (FFABS(bits - current) * 10 <= current)
++        return;
++
++    av_log(avctx, AV_LOG_VERBOSE, "VAAPI: pictures arrive every %"PRId64" us, "
++           "not at %d/%d fps; rate control bitrate %"PRId64" -> %"PRId64".\n",
++           ctx->cpu_interval, ctx->cpu_nominal_rate.num,
++           ctx->cpu_nominal_rate.den, current, bits);
++    ctx->rc_params.bits_per_second = bits;
++    ctx->va_bit_rate = bits;
++    /* The sequence parameters sent with the next key frame carry it too. */
++    if (ctx->codec_sequence_params) {
++        switch (avctx->codec_id) {
++        case AV_CODEC_ID_H264:
++            ((VAEncSequenceParameterBufferH264 *)ctx->codec_sequence_params)->bits_per_second = bits;
++            break;
++        case AV_CODEC_ID_HEVC:
++            ((VAEncSequenceParameterBufferHEVC *)ctx->codec_sequence_params)->bits_per_second = bits;
++            break;
++        case AV_CODEC_ID_VP9:
++            ((VAEncSequenceParameterBufferVP9 *)ctx->codec_sequence_params)->bits_per_second = bits;
++            break;
++        default:
++            break;
++        }
++    }
++    ctx->cpu_rate_changed = 1;
++}
++
+ static int vaapi_encode_prepare_cpu_input(AVCodecContext *avctx, AVFrame *frame)
+ {
+     VAAPIEncodeContext *ctx = avctx->priv_data;
+@@ -2153,6 +2222,7 @@
+     if (frame->format != AV_PIX_FMT_YUV420P ||
+         frame->width != avctx->width || frame->height != avctx->height)
+         return AVERROR(EINVAL);
++    vaapi_encode_cpu_rate_update(avctx, frame);
+ 
+     nv12 = av_frame_alloc();
+     hardware = av_frame_alloc();
+@@ -2232,6 +2302,17 @@
+     avctx->hw_frames_ctx = frames;
+     /* CPU submission is the low-latency path; the bridge does not encode B frames. */
+     avctx->max_b_frames = 0;
++    /* A real-time caller declares the highest rate it may reach, not the rate
++     * it sends. Firefox's WebRTC passes the H.264 level's macroblock rate
++     * divided by the picture size, 450 fps at 320x180, and WebCodecs may pass
++     * nothing, which would become the microsecond time base. The driver
++     * divides the bitrate by this rate, so give it an ordinary one; the
++     * timestamps correct it from the first pictures on. */
++    if (avctx->framerate.num <= 0 || avctx->framerate.den <= 0 ||
++        av_cmp_q(avctx->framerate, (AVRational){ 60, 1 }) > 0)
++        avctx->framerate = (AVRational){ 30, 1 };
++    ctx->cpu_nominal_rate = avctx->framerate;
++    ctx->cpu_last_pts = AV_NOPTS_VALUE;
+     ctx->cpu_upload = 1;
+     av_log(avctx, AV_LOG_VERBOSE, "VAAPI: uploading I420 input through NV12 surfaces\n");
+     return 0;
+@@ -2308,6 +2389,8 @@
+     err = vaapi_encode_init_rate_control(avctx);
+     if (err < 0)
+         goto fail;
++    if (ctx->cpu_upload && ctx->va_rc_mode != VA_RC_CQP)
++        ctx->cpu_base_bits = ctx->rc_params.bits_per_second;
+ 
+     err = vaapi_encode_init_gop_structure(avctx);
+     if (err < 0)

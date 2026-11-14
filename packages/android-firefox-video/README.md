@@ -51,7 +51,23 @@ last picture. It also requires android-vaapi revision 8, whose DRM shim resolves
 libdrm loaded with local visibility by Firefox. Neither change enables Firefox's
 remote platform encoder preference.
 
+Revision 5 makes the bitrate follow the pictures' timestamps
+(`0102-follow-real-picture-rate.patch`). VA-API has no timestamps: the driver spends
+the bitrate divided by the declared frame rate on each picture. Firefox's WebRTC
+sender declares the H.264 level's limit instead of the capture rate, 450 fps at
+320x180, so the hardware spent a fraction of the bitrate and the call stayed at
+320x180. The CPU-input path now gives the driver the declared rate up to 60 fps,
+otherwise 30, measures the interval between pictures, and scales the rate-control
+bitrate when the two differ by more than a tenth. On revision 4 the Galaxy S20
+produced 1.0 of 2.0 Mb/s for "450 declared, 30 sent" and for "30 declared, 15 sent".
+
+Firefox applies a WebRTC bitrate change on the fly only to `libx264` and Android's
+MediaCodec (`FFmpegDataEncoder::ProcessReconfigure`). For these encoders it rejects
+the change, so a hardware stream keeps the bitrate it was created with until the
+resolution changes. This runtime cannot change that.
+
 On the phone, `tests/video-encode/test-firefox-ffmpeg.py --library-dir PATH` checks
-local library loading and an empty drain for all three encoders. Use the session
-VA environment and a private daemon. Browser acceptance must additionally check
+local library loading and an empty drain for all three encoders, then the bitrate
+of four streams whose declared and real rates differ. Use the session VA
+environment and a private daemon. Browser acceptance must additionally check
 flush, frame count, and software-decoded pixels.

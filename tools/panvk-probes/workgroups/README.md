@@ -53,7 +53,7 @@ a pipeline without dispatch; preflight a new lowering before running it.
 shared memory or subgroup operations. A passing barrier-based probe alone does
 not cover this path.
 
-`cts-max-{1.1,1.3}.spv` reduces the CTS maximum-local-size test to one specialized
+`cts-max-{1.0,1.1,1.3}.spv` reduces the CTS maximum-local-size test to one specialized
 workgroup, scalar stores, buffer barriers and explicit mapped-memory cache
 operations. Its CPU oracle requires every word to equal 1:
 
@@ -68,6 +68,11 @@ PANVK_PROBE_ROBUST=0 workgroups/check /private/driver.so \
 features for this fixture. `PANVK_PROBE_COPY_READBACK=1` copies the mapped
 output through `memcpy` before checking, matching the CTS readback operation.
 The executable logs the selected memory type and allocation size.
+
+The Vulkan 1.0 fixture retains the legacy `Uniform`/`BufferBlock` SSBO
+encoding used by CTS; newer targets use `StorageBuffer`. Compare the saved
+shader from `--trace-loader` too, rather than assuming the reduced shader has
+identical SPIR-V.
 
 The check executable can load either a raw ICD or a Vulkan loader. For a loader,
 set `VK_DRIVER_FILES` to a private ICD JSON selecting the intended driver.

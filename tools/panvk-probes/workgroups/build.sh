@@ -27,7 +27,7 @@ for x in 256 512 769 1024; do
     "$here/bare.comp" -o "$out/bare-$x.spv"
   spirv-val --target-env vulkan1.1 "$out/bare-$x.spv"
 done
-for version in 1.1 1.3; do
+for version in 1.0 1.1 1.3; do
   glslangValidator -V --target-env "vulkan$version" "$here/cts-max.comp" \
     -o "$out/cts-max-$version.spv"
   spirv-val --target-env "vulkan$version" "$out/cts-max-$version.spv"

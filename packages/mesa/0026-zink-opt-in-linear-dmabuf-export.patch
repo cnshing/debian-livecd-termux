@@ -5,6 +5,17 @@ exports retain their existing behavior when the option is unset.
 
 --- a/src/gallium/drivers/zink/zink_resource.c
 +++ b/src/gallium/drivers/zink/zink_resource.c
+@@ -2028,8 +2028,10 @@
+ 
+       mod = res->modifiers[0] = DRM_FORMAT_MOD_LINEAR;
+    }
++   bool old_linear = res->linear;
+    struct zink_resource_object *new_obj = resource_object_create(screen, &res->base.b, NULL, &res->linear, res->modifiers, res->modifiers_count, NULL, NULL);
+    if (!new_obj) {
++      res->linear = old_linear;
+       debug_printf("new backing resource alloc failed!\n");
+       res->base.b.bind &= ~bind;
+       return false;
 @@ -2063,6 +2063,37 @@
     return true;
  }

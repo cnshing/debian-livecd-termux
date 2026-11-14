@@ -158,7 +158,18 @@ its modifier was otherwise INVALID. The existing Vulkan subresource offset and
 row pitch are retained. Unknown/optimal layouts keep their existing modifier.
 This follows the [Vulkan linear-tiling definition](https://docs.vulkan.org/refpages/latest/refpages/source/VkImageTiling.html)
 and [DRM linear-layout contract](https://www.kernel.org/doc/html/latest/userspace-api/dma-buf-alloc-exchange.html).
-Runtime qualification of revision 105 is pending its CI build.
+[Mesa 105 CI 43558925571](https://github.com/cnshing/debian-livecd-termux/actions/runs/43558925571)
+passes, but its strict device oracle still rejects the implicit modifier.
+The queried resource is not recorded as Vulkan linear; reporting metadata alone
+is therefore insufficient.
+
+Revision 106 additionally provides opt-in `ZINK_LINEAR_DMABUF_EXPORT=1` through
+`0026-zink-opt-in-linear-dmabuf-export.patch`. It reuses Zink's backing-image
+rebind/copy path before export metadata queries, requests DMA-BUF backing
+(which uses a linear image or an explicit modifier), and waits for the copy.
+Unsupported conversions fail instead of inventing a modifier. The private
+Ghostty launcher enables this option; normal launcher defaults do not.
+Runtime qualification is pending CI 43559993100.
 
 `check-ghostty-panvk.py --require-dmabuf` requires positive GTK texture-import
 and mmap-download diagnostics at least once per fresh capture, in addition to

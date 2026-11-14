@@ -1,0 +1,15 @@
+--- a/libavcodec/mediacodecdec_common.c
++++ b/libavcodec/mediacodecdec_common.c
+@@ -647,6 +647,12 @@
+     if (color_transfer)
+         avctx->color_trc = ff_AMediaFormatColorTransfer_to_AVColorTransfer(color_transfer);
+ 
++    /* VP8 always uses the BT.601 matrix (RFC 6386 section 9.2), as FFmpeg's own
++     * decoder reports. Exynos's decoder on the Galaxy S20 reports the container's
++     * BT.709 instead, which shifts colours after conversion to RGB. */
++    if (avctx->codec_id == AV_CODEC_ID_VP8)
++        avctx->colorspace = AVCOL_SPC_BT470BG;
++
+     av_log(avctx, AV_LOG_INFO,
+         "Output crop parameters top=%d bottom=%d left=%d right=%d, "
+         "resulting dimensions width=%d height=%d\n",

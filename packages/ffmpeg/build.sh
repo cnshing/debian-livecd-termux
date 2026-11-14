@@ -6,7 +6,7 @@ TERMUX_PKG_MAINTAINER="@termux"
 TERMUX_PKG_VERSION="9.0.2"
 # Termux's ffmpeg with VA-API and V4L2 capture (the desktop's /dev/videoN cameras), so mpv, Firefox, the ffmpeg command and OBS can decode and encode
 # through android-vaapi. A revision of its own: at Termux's 9.0.2-1, APT would keep Termux's build.
-TERMUX_PKG_REVISION=100
+TERMUX_PKG_REVISION=101
 # ffmpeg.org resets GitHub's build machines' downloads, so take the same release tag from GitHub.
 TERMUX_PKG_SRCURL="https://codeload.github.com/FFmpeg/FFmpeg/tar.gz/refs/tags/n${TERMUX_PKG_VERSION}"
 TERMUX_PKG_SHA256=6e374ed621e48faa40639307dff48ba6fe574a509977956d2cce9669b7cc27e9

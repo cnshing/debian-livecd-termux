@@ -9,6 +9,11 @@ import re
 from video_oracle import compare, contact_sheet, frame_number, rgb, sha256
 
 
+def colour_tags(log):
+    found = re.search(r'color_range:(\S+) color_space:(\S+)', log)
+    return list(found.groups()) if found else None
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('fixtures', type=Path)
@@ -25,7 +30,7 @@ def main():
         folder.mkdir()
         command = ['ffmpeg', '-hide_banner', '-loglevel', 'verbose', '-c:v', fixture['codec'] + '_mediacodec',
                    '-ndk_codec', '1', '-i', str(args.fixtures / name), '-an', '-fps_mode', 'passthrough',
-                   '-pix_fmt', 'rgb24', '-threads', '1', '-start_number', '0', str(folder / '%03d.png')]
+                   '-vf', 'showinfo', '-pix_fmt', 'rgb24', '-threads', '1', '-start_number', '0', str(folder / '%03d.png')]
         result = {'name': name, 'command': command, 'samples': [], 'ok': False}
         report['cases'].append(result)
         if sha256(args.fixtures / name) != fixture['sha256']:
@@ -40,6 +45,14 @@ def main():
         result['android_codec'] = codec_name[1] if codec_name else None
         result['hardware_codec'] = bool(codec_name and not any(
             name in codec_name[1].lower() for name in ('omx.google.', 'c2.android.')))
+        # The colour tags must match FFmpeg's software decoder, or RGB conversion
+        # shifts colours (Exynos VP8 reported BT.709 instead of VP8's BT.601).
+        result['colour'], result['software_colour'] = (colour_tags(log_text), colour_tags(subprocess.run(
+            ['ffmpeg', '-hide_banner', '-i', str(args.fixtures / name), '-frames:v', '1',
+             '-vf', 'showinfo', '-f', 'null', '-'], capture_output=True, text=True, timeout=120).stderr))
+        if result['colour'] != result['software_colour']:
+            result['error'] = 'Colour matrix or range differs from the software decoder'
+            continue
         if process.returncode or len(frames) != fixture['frames']:
             result['error'] = 'Decode failed or frame count differs'
             continue

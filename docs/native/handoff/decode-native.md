@@ -74,3 +74,19 @@ These serve the parity criterion; [s20-codec-parity.md](s20-codec-parity.md) add
 | Launcher profiles (mpv flags, VA environment) | `src/native/acceleration.py` |
 | mpv on Mali | `src/native/mali.py` |
 | Adreno results | [native-acceleration-checks.md](../../browsers/native-acceleration-checks.md) |
+
+## VP8 colours through MediaCodec (2026-11-14, decode-native)
+
+codec-parity found VP8 decoded by MediaCodec on the S20 about 30 dB from libvpx after RGB
+conversion, although the YUV is bit-exact. The cause is the colour matrix, not the range: every
+frame is tagged `tv` either way, but FFmpeg's MediaCodec frames carry `bt709` where FFmpeg's own
+VP8 decoder says `bt470bg` (VP8 is always BT.601). Retagging the hardware frame with
+`setparams=colorspace=bt470bg` gives identical RGB to the software decode (PSNR inf, contact
+sheet checked by eye). VP9, HEVC and MPEG-4 have the same range and matrix as software (only the
+transfer tag differs, which does not affect RGB conversion).
+
+Fix: `packages/ffmpeg/libavcodec-mediacodecdec_common.c.patch` forces BT.601 for VP8 (revision
+101). `tests/browsers/test-native-mediacodec.py` now fails a case whose MediaCodec range or
+matrix differs from the software decoder; it fails on the S20's current FFmpeg. The patched
+build has not yet been installed on a phone, and the S20 runs Termux's 9.0.2-1 (gap 2), so the
+fix reaches it only once this project's FFmpeg is installed there.

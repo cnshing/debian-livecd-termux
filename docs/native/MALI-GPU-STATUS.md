@@ -77,7 +77,9 @@ So it is not a replacement today:
   0023 into no-ops. They are 30 lines or fewer each and are needed for as long as the packaged
   driver is.
 
-Worth revisiting if it gains an X11 surface or dma-buf export, or for its hardware-buffer import:
+Its sync-file mechanism can be ported into the packaged driver instead
+([PANVK-SYNC-FD-HANDOFF.md](PANVK-SYNC-FD-HANDOFF.md)). The driver as a whole is worth
+revisiting if it gains an X11 surface or dma-buf export, or for its hardware-buffer import:
 that could let decoded frames reach the GPU without the copy the software surfaces make today.
 Two things to know before trying it again: from v1.6.0 it names the device `PanVK-G77`, not
 `Mali-G77`, and both Zenith's probes and Firefox's probe patch (`android-firefox-video/stage.py`)
@@ -137,7 +139,10 @@ In order of value. None of it needs a different driver.
    encoder is untested. [VIDEO-ENCODING-HANDOFF.md](VIDEO-ENCODING-HANDOFF.md) has the causes
    and the order to take them in.
 4. **Ghostty on the GPU by default.** Needs the large-workgroup pass qualified beyond the tested
-   shapes and packaged ([GHOSTTY-PANVK-HANDOFF.md](GHOSTTY-PANVK-HANDOFF.md)).
+   shapes and packaged ([GHOSTTY-PANVK-HANDOFF.md](GHOSTTY-PANVK-HANDOFF.md)). The work is laid
+   out in [PANVK-VERSION-BUMP-HANDOFF.md](PANVK-VERSION-BUMP-HANDOFF.md) (OpenGL 4.3, and
+   Vulkan 1.4) and [PANVK-SYNC-FD-HANDOFF.md](PANVK-SYNC-FD-HANDOFF.md) (sync-file semaphores,
+   for presenting its frame as a DMA-BUF).
 5. **mpv on the shared driver**, replacing its VirGL route.
 6. The 30-minute desktop soak, and an Adreno regression run of the Firefox and Chromium tests
    with these packages on the Note10+.

@@ -298,12 +298,13 @@ def check_patches(name):
     if (PACKAGES / name / 'upstream.json').is_file() and not patches:
         print(f'ok   {name}: recipe override; pinned upstream patches checked when staging')
         return True
-    if name == 'chromium' and not patches:
-        # This recipe changes build options, inheriting assets and platform
+    if name == 'chromium':
+        # This recipe inherits assets and platform
         # patches from the pinned termux-packages checkout. Its post-get-source
         # step requires that checkout and host-tools; the package builder runs
         # the version guard and verifies the source archive there.
-        print('ok   chromium: no local source patches; upstream preparation runs in the package builder')
+        print(f'deferred chromium: {len(patches)} local source patch(es); '
+              'upstream preparation and patch application run in the package builder')
         return True
     with tempfile.TemporaryDirectory() as temporary:
         source = Path(temporary) / 'src'

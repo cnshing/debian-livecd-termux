@@ -345,7 +345,48 @@ applies to that terminal and its descendants; use an ordinary terminal for the
 normal environment. There are no maintainer scripts,
 global ICD files, alternatives or changes to the managed desktop and terminal
 defaults. See [installation and source instructions](../../tools/ghostty-dmabuf/README.md).
-CI and extracted-package device results are recorded below when complete.
+
+[Package CI 43596695017](https://github.com/cnshing/debian-livecd-termux/actions/runs/43596695017)
+provides `ghostty-panvk-dmabuf-aarch64` and
+`ghostty-panvk-dmabuf-sources`. Use **1.0-2**; the earlier 1.0-1 artifact was
+diagnostic and incorrectly claimed it could unset inherited child variables.
+Ghostty's `--env=KEY=` only removes a configured override. The final launcher
+preserves normal command handling and documents inheritance instead.
+
+- `ghostty-panvk-dmabuf_1.0-2_aarch64.deb` (about 8 MB), SHA-256
+  `dcefab5047d84a82a33337591adee9a88f8b0d42185369533051b897233d7631`.
+- `ghostty-panvk-dmabuf_1.0-2_sources.tar.gz` (about 2 GB, complete upstream
+  archives and recipe repositories), SHA-256
+  `92d3a06d279cde2a01f4d3f7ee380deed2e60fdaa2556848e865fec4905923af`.
+
+Both artifacts include `SHA256SUMS`. The package installs only its dedicated
+command, private libraries and documentation; package boundaries, original
+runtime hashes, link targets and tamper rejection are checked in CI. The x1s
+preflight (`--check`) and package install dry run pass. The package is extracted
+privately for acceptance; no global installation is required to test it.
+
+**Final extracted-package qualification passes on x1s (2026-11-14).** The
+unmodified CI `.deb` was extracted under
+`~/gpu-x1s/sync-fd-port/packaged-ci-43596695017/root/`. Its dedicated command
+was passed directly to `panvk-desktop.py --ghostty-launcher`, with the packaged
+driver and Mesa directories, `--mode shm --cycles 2 --ghostty-probe
+--ghostty-gsk gl`, `PANVK_G77_LWG=1` and shader caching disabled.
+
+- `check-panvk-desktop.py`: four captures, maximum channel error 0, stale
+  negative control rejected.
+- `check-ghostty-panvk.py --require-dmabuf-gl`: four fresh Ghostty captures,
+  51 texture creations and 50 GL imports, no mmap or CPU downloads, no Ghostty
+  CPU fallback, PanVK/Mali mappings and normal exit. The final fullscreen
+  capture was also visually inspected.
+- Isolation passes: `X0` and managed-desktop status identical before/after,
+  no remaining owned processes or cleaned orphan PIDs. Installed GTK/Mesa hashes
+  and Ghostty/GTK/Mesa package versions match the pre-test records.
+
+Host evidence: `temp/sync-fd/evidence/ghostty-opt-in-1.0-2-clean/`; phone:
+`packaged-ci-43596695017/acceptance-02/`. The first 1.0-2 run rendered correctly
+but failed isolation because another test owner stopped its H.264 daemon during
+the run. The clean repeat above passed without relaxing the isolation checker.
+The normal installed desktop/default-driver promotion gates remain pending.
 
 ## Original job
 

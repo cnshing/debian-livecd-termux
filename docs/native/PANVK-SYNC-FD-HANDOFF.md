@@ -4,6 +4,48 @@ State on 2026-11-13, Galaxy S20 (`x1s`, Mali-G77, kbase job manager uAPI 11.35, 
 For whoever ports sync-file support into the driver we package. Paths under `temp/` are local
 files that Git ignores.
 
+## Port in progress (2026-11-13)
+
+The package still uses the upstream release. The independent port is
+`tools/panvk-probes/sync-fd-patches/0001-jm-sync-file.patch`, built for Bionic
+and arm64 glibc by `panvk-sync-fd.yml` directly on the reconstructed p0175
+baseline. It excludes the two patches that regressed GTK presentation.
+[Driver build 43543360366](https://github.com/cnshing/debian-livecd-termux/actions/runs/43543360366)
+and [Mesa build 43543486396](https://github.com/cnshing/debian-livecd-termux/actions/runs/43543486396)
+are the first qualification builds; runtime results belong here when available.
+
+The stronger probe is implemented. CI
+[43543662112](https://github.com/cnshing/debian-livecd-termux/actions/runs/43543662112)
+built it for both ABIs. Against JimVulkan v1.6.0 on x1s:
+
+- 300 real GPU buffer fills passed, checking all 1,024 words after exporting
+  and polling a SYNC_FD, then importing and consuming its signalled payload.
+  292 exports returned real FDs; the others returned the permitted `-1`.
+- The process FD count was 11 after the first iteration and 11 after the last.
+- Export after completion and import of `-1` passed.
+- A kernel software-event fixture held a real sync file unsignalled. Import
+  returned without hanging, a Vulkan CPU wait returned `VK_TIMEOUT`, and the
+  imported semaphore's re-exported payload timed out in `poll` at 100 ms.
+  Releasing the fixture's event signalled the file cleanly. No GPU job is
+  blocked by this fixture. Its exact uAPI/layout restrictions are in the
+  [series README](../../tools/panvk-probes/sync-fd-patches/README.md).
+- The packaged driver remains the negative control: exercise mode returns 77
+  for unsupported SYNC_FD, which is a skip rather than an acceptance pass.
+
+The additional Zink wait is implemented as
+`packages/mesa/0024-zink-wait-for-unattached-dmabuf-fences.patch`, Mesa revision
+104. It fixes the attach helper's boolean result, accepts an already-signalled
+`-1` without an ioctl, and waits on the submitted batch's Vulkan timeline if
+any plane cannot attach its fence. It does so before notifying flush
+completion, covering the normal synchronous export flush. The unsupported
+EXPORT_SYNC_FILE ioctl no longer asserts. Patches 0021–0023 remain.
+
+**Neither the driver port nor Ghostty DMA-BUF presentation is accepted yet.**
+The desktop, browsers, kernel-ioctl fallback and stale-frame controls must pass
+with the built binaries before package promotion. The separate large-workgroup
+and GTK renderer limitations below still apply. All phone runs so far used
+private files with no changes to the managed desktop.
+
 ## The job
 
 The packaged driver (`mesa-vulkan-icd-panvk-kbase`, Zenith's port, release 26.3.1) cannot

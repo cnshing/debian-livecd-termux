@@ -1,0 +1,47 @@
+From: LiveCD Termux maintainers
+Subject: [PATCH] Resolve already-loaded local libdrm symbols in the browser shim
+
+The render-node preload reports a real DRM identity, so these descriptors pass
+through to libdrm instead of the shim's KGSL/Mali special case. Firefox loads
+libdrm as a local VA dependency. RTLD_NEXT can miss it, causing the shim to
+return ENOSYS and vaGetDisplayDRM to fail. Keep RTLD_NEXT first, then resolve
+from the already-loaded Android libdrm handle without promoting its symbols.
+
+--- a/src/termux-va/tva_drm_shim_wayland.c
++++ b/src/termux-va/tva_drm_shim_wayland.c
+@@ -73,13 +73,34 @@
+    return is_mali_fd(fd) ? "mali" : "kgsl";
+ }
+ 
++/* Firefox loads its VA/FFmpeg dependencies with RTLD_LOCAL. Their libdrm
++ * symbols may therefore be absent from RTLD_NEXT even while libva calls this
++ * global shim. Look up the already-loaded Android library by handle; do not
++ * load a second copy or change the browser's symbol visibility. The caller's
++ * dependency keeps the library alive after this temporary handle is closed. */
++static void *
++lookup_drm_symbol(const char *name)
++{
++   void *symbol = dlsym(RTLD_NEXT, name);
++#ifdef __ANDROID__
++   if (!symbol) {
++      void *library = dlopen("libdrm.so", RTLD_NOW | RTLD_NOLOAD);
++      if (library) {
++         symbol = dlsym(library, name);
++         dlclose(library);
++      }
++   }
++#endif
++   return symbol;
++}
++
+ static void
+ init_real(void)
+ {
+ #define LOAD(name) \
+    do { \
+       if (!real_##name) \
+-         real_##name = dlsym(RTLD_NEXT, #name); \
++         real_##name = lookup_drm_symbol(#name); \
+    } while (0)
+    LOAD(drmGetVersion);
+    LOAD(drmFreeVersion);

@@ -4,7 +4,7 @@ TERMUX_PKG_LICENSE="MIT"
 TERMUX_PKG_LICENSE_FILE="docs/license.rst"
 TERMUX_PKG_MAINTAINER="@cnshing"
 TERMUX_PKG_VERSION="27.0.0~devel20261029"
-TERMUX_PKG_REVISION=5
+TERMUX_PKG_REVISION=6
 TERMUX_PKG_SRCURL=https://codeload.github.com/lfdevs/mesa-for-android-container/tar.gz/eb3e7fd4f009cab04b1482aad4843c0bde28a786
 TERMUX_PKG_SHA256=123af0b3b2f7c83273a51f28367a64054201d524cbfa52f99ba76696e619927a
 TERMUX_PKG_AUTO_UPDATE=false
@@ -81,18 +81,26 @@ termux_step_make_install() {
 	ln -sf termuxva_drv_video.so "$private/dri/kgsl_drv_video.so"
 	ln -sf ../android-vaapi/dri/termuxva_drv_video.so "$TERMUX_PREFIX/lib/dri/kgsl_drv_video.so"
 	ln -sf ../android-vaapi/dri/termuxva_drv_video.so "$TERMUX_PREFIX/lib/dri/termuxva_drv_video.so"
-	# Presents the GPU's KGSL device as /dev/dri/renderD128, with the sysfs view libdrm reads.
+	# Presents KGSL or Mali as /dev/dri/renderD128, with the sysfs view libdrm reads.
 	$CC --target=aarch64-linux-android29 -O2 -Wall -shared -fPIC -U_FORTIFY_SOURCE \
 		-o "$private/libandroid-vaapi-render-node.so" "$TERMUX_PKG_BUILDER_DIR/render-node.c"
-	local node uevent='DRIVER=kgsl-3d0\nOF_NAME=qcom,kgsl-3d0\nOF_FULLNAME=/soc/qcom,kgsl-3d0@2c00000\nOF_COMPATIBLE_0=qcom,kgsl-3d0\nOF_COMPATIBLE_N=1\nMODALIAS=of:Nqcom,kgsl-3d0T(null)Cqcom,kgsl-3d0\n'
-	for node in class/drm/renderD128 dev/char/226:128; do
-		node="$private/render-node-sys/$node"
-		install -d "$node/device/drm/renderD128"
-		printf '226:128\n' > "$node/dev"
-		printf 'MAJOR=226\nMINOR=128\nDEVNAME=dri/renderD128\nDEVTYPE=drm_minor\n' > "$node/uevent"
-		printf "$uevent" > "$node/device/uevent"
-		ln -sfn /sys/bus/platform "$node/device/subsystem"
-		printf '226:128\n' > "$node/device/drm/renderD128/dev"
+	local node variant sysroot uevent
+	for variant in kgsl mali; do
+		sysroot="$private/render-node-sys"
+		uevent='DRIVER=kgsl-3d0\nOF_NAME=qcom,kgsl-3d0\nOF_FULLNAME=/soc/qcom,kgsl-3d0@2c00000\nOF_COMPATIBLE_0=qcom,kgsl-3d0\nOF_COMPATIBLE_N=1\nMODALIAS=of:Nqcom,kgsl-3d0T(null)Cqcom,kgsl-3d0\n'
+		if [ "$variant" = mali ]; then
+			sysroot+="/mali"
+			uevent='DRIVER=mali\nOF_NAME=mali\nOF_FULLNAME=/soc/mali\nOF_COMPATIBLE_0=arm,mali\nOF_COMPATIBLE_N=1\nMODALIAS=of:NmaliT(null)Carm,mali\n'
+		fi
+		for node in class/drm/renderD128 dev/char/226:128; do
+			node="$sysroot/$node"
+			install -d "$node/device/drm/renderD128"
+			printf '226:128\n' > "$node/dev"
+			printf 'MAJOR=226\nMINOR=128\nDEVNAME=dri/renderD128\nDEVTYPE=drm_minor\n' > "$node/uevent"
+			printf "$uevent" > "$node/device/uevent"
+			ln -sfn /sys/bus/platform "$node/device/subsystem"
+			printf '226:128\n' > "$node/device/drm/renderD128/dev"
+		done
 	done
 	cat > "$private/manifest.json" <<-JSON
 		{"format": 1, "abi": "bionic", "libraries": ["lib/va-client"], "driver_directory": "dri",

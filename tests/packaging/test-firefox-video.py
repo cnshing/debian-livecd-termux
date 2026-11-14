@@ -173,5 +173,28 @@ class FirefoxVideo(unittest.TestCase):
                 self.assertEqual(env.get('TERMUX_VA_SYNC_END_PICTURE'), expected)
 
 
+    def test_encode_preference_is_opt_in_on_mali_with_an_encoding_runtime(self):
+        manifest = self.runtime / 'manifest.json'
+        data = json.loads(manifest.read_text())
+        cases = (({}, True, True, False),                        # default: off
+                 ({'firefox_encode': True}, False, True, False),  # runtime without encoders
+                 ({'firefox_encode': True}, True, False, False),  # Adreno: not qualified
+                 ({'firefox_encode': True}, True, True, True))
+        for config, encoders, mali, expected in cases:
+            with self.subTest(config=config, encoders=encoders, mali=mali):
+                data.pop('encoding', None)
+                if encoders:
+                    data['encoding'] = {'input': 'i420', 'codecs': ['h264', 'hevc', 'vp9']}
+                manifest.write_text(json.dumps(data))
+                with mock.patch.object(acceleration, 'settings', return_value=config), \
+                        mock.patch.object(acceleration, 'mali_usable', return_value=mali), \
+                        mock.patch.object(Path, 'home', return_value=Path(self.temporary.name)):
+                    acceleration.command_line('firefox', [str(self.prefix / 'bin/firefox')], 'bionic', True, True)
+                text = (Path(self.temporary.name) / '.config/livecd-native/firefox/user.js').read_text()
+                self.assertEqual('media.use-remote-encoder.video.platform' in text, expected)
+                # Turning it off again removes it from the managed block.
+                if expected:
+                    self.assertIn('user_pref("media.use-remote-encoder.video.platform", true);', text)
+
 if __name__ == '__main__':
     unittest.main()

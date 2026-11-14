@@ -1,0 +1,6 @@
+{
+  "revision": "538685c906074926fd19650e38c6dad91379eb0f",
+  "path": "x11-packages/firefox/build.sh",
+  "sha256": "2b7d0e7aea66789df3337d33b30f5bec2bbf60f48fddd7cc2c69d35a17b9971c",
+  "note": "Retain the pinned upstream recipe directory, including all patches and mozconfig.cfg, when staging this override. Ours adds 1101 and 1102."
+}

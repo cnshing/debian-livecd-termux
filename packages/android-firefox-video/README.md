@@ -30,3 +30,44 @@ Artifact validation: `python3 tests/packaging/check-browser-video-artifacts.py O
 Device qualification uses the private-display Firefox runner in
 `tests/browsers/test-acceleration.py`, including decoder logs, GPU evidence and
 numbered-frame pixel checks.
+
+Revision 3 also builds `h264_vaapi`, `hevc_vaapi`, and `vp9_vaapi`. Firefox's GTK
+encoder submits I420 frames without creating a VA frame pool. The private
+`0100-cpu-input-vaapi-encoders.patch` creates that pool, converts I420 to NV12,
+and uploads each frame before the usual VA encoder submission. It preserves
+timestamps, key-frame requests and colour properties; existing VA-frame clients
+keep their original path. The CPU-input path uses 8-bit frames and no B frames.
+
+This is awaiting device acceptance. The package records its CPU-input encoder
+capability in the runtime manifest, but does not change Firefox's remote platform
+encoder preference. Enable that preference only in private acceptance profiles
+until daemon frame counts, software decoding and pixel checks pass. A `HWENC`
+graphics-probe listing alone does not prove that Firefox can encode.
+
+Revision 4 fixes an empty-encoder drain crash in FFmpeg's shared hardware encoder
+base. Firefox recreates the encoder after a drain, then drains that fresh encoder
+to confirm there is no more output. Timestamp adjustment must skip the missing
+last picture. It also requires android-vaapi revision 8, whose DRM shim resolves
+libdrm loaded with local visibility by Firefox. Neither change enables Firefox's
+remote platform encoder preference.
+
+Revision 5 makes the bitrate follow the pictures' timestamps
+(`0102-follow-real-picture-rate.patch`). VA-API has no timestamps: the driver spends
+the bitrate divided by the declared frame rate on each picture. Firefox's WebRTC
+sender declares the H.264 level's limit instead of the capture rate, 450 fps at
+320x180, so the hardware spent a fraction of the bitrate and the call stayed at
+320x180. The CPU-input path now gives the driver the declared rate up to 60 fps,
+otherwise 30, measures the interval between pictures, and scales the rate-control
+bitrate when the two differ by more than a tenth. On revision 4 the Galaxy S20
+produced 1.0 of 2.0 Mb/s for "450 declared, 30 sent" and for "30 declared, 15 sent".
+
+Firefox applies a WebRTC bitrate change on the fly only to `libx264` and Android's
+MediaCodec (`FFmpegDataEncoder::ProcessReconfigure`). For these encoders it rejects
+the change, so a hardware stream keeps the bitrate it was created with until the
+resolution changes. This runtime cannot change that.
+
+On the phone, `tests/video-encode/test-firefox-ffmpeg.py --library-dir PATH` checks
+local library loading and an empty drain for all three encoders, then the bitrate
+of four streams whose declared and real rates differ. Use the session VA
+environment and a private daemon. Browser acceptance must additionally check
+flush, frame count, and software-decoded pixels.

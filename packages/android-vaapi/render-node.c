@@ -1,18 +1,20 @@
-// Preload that presents the phone's KGSL GPU as the DRM render node
+// Preload that presents the phone's KGSL or Mali GPU as the DRM render node
 // /dev/dri/renderD128, so VA-API, GBM and DRM programs find it where Linux
 // keeps it, with no per-program device setting. Build in native Termux:
 //   clang -O2 -Wall -shared -fPIC -U_FORTIFY_SOURCE -o libandroid-vaapi-render-node.so render-node.c
 //
 // The phone's own /dev/dri nodes belong to the display controller and SELinux
 // denies them to apps, so programs that scan /dev/dri find nothing usable.
-// When /dev/kgsl-3d0 can be opened, this library:
+// When /dev/kgsl-3d0 or /dev/mali0 can be opened, this library:
 //   - lists only renderD128 in /dev/dri, and hides card0;
 //   - reports renderD128 as character device 226:128 to stat, fstat, statx
 //     and access, before and after it is opened;
-//   - opens /dev/kgsl-3d0 for it, so GPU calls reach the real device;
+//   - opens that GPU device for it;
 //   - answers DRM_IOCTL_VERSION with "kgsl", the driver name Termux:VA's Mesa
 //     loads for KGSL and libva maps to kgsl_drv_video.so, and the DRM
-//     capability queries GBM makes; other ioctls go to KGSL;
+//     capability queries GBM makes. Mali reports "termuxva" for libva's
+//     existing driver alias; its VA driver uses CPU surfaces and MediaCodec.
+//     Other ioctls go to the underlying device;
 //   - serves /sys/class/drm and /sys/dev/char/226:* from the folder
 //     "render-node-sys" beside this library ($ANDROID_VAAPI_RENDER_NODE_SYS), which
 //     describes a platform device as libdrm's drmGetDevice2 expects.
@@ -50,6 +52,7 @@
 #define NODE "/dev/dri/renderD128"
 #define DRI "/dev/dri"
 #define KGSL "/dev/kgsl-3d0"
+#define MALI "/dev/mali0"
 
 // From the kernel's drm.h, which Termux does not install.
 struct drm_version {
@@ -131,11 +134,17 @@ static long pass_syscall(long n, const long *a) {
     return r;
 }
 
-// Whether KGSL can be opened; checked each time, because it costs one
-// access() and only runs for paths that name this device.
+// Only inspect the GPU for paths naming the emulated device. Prefer the
+// established KGSL route when both nodes are present.
+static const char *gpu_device(void) {
+    if (REAL(faccessat)(AT_FDCWD, KGSL, R_OK | W_OK, 0) == 0) return KGSL;
+    if (REAL(faccessat)(AT_FDCWD, MALI, R_OK | W_OK, 0) == 0) return MALI;
+    return NULL;
+}
+
 static bool available(void) {
     int saved = errno;
-    bool ok = REAL(faccessat)(AT_FDCWD, KGSL, R_OK | W_OK, 0) == 0;
+    bool ok = gpu_device() != NULL;
     errno = saved;
     return ok;
 }
@@ -172,7 +181,8 @@ static void sys_dir(char *buf) {
         strlcpy(buf, info.dli_fname, PATH_MAX);
         char *slash = strrchr(buf, '/');
         if (slash) slash[1] = 0;
-        strlcat(buf, "render-node-sys", PATH_MAX);
+        const char *gpu = gpu_device();
+        strlcat(buf, gpu && !strcmp(gpu, MALI) ? "render-node-sys/mali" : "render-node-sys", PATH_MAX);
     } else {
         buf[0] = 0;
     }
@@ -181,6 +191,15 @@ static void sys_dir(char *buf) {
 // /sys/class/drm, and /sys/dev/char entries for major 226, come from the folder.
 static const char *redirect(const char *path, char *buf) {
     static const char *const roots[] = {"/sys/class/drm", "/sys/dev/char/226:"};
+    // Some Mali phones have no /dev/dri directory at all. Use the private
+    // sysfs directory as the backing directory; readdir still presents only
+    // the emulated render node below.
+    if (same(path, DRI) && available()) {
+        sys_dir(buf);
+        if (!buf[0]) return path;
+        strlcat(buf, "/class/drm", PATH_MAX);
+        return buf;
+    }
     if (!path || strncmp(path, "/sys/", 5)) return path;
     for (size_t i = 0; i < sizeof roots / sizeof *roots; i++) {
         size_t len = strlen(roots[i]);
@@ -195,7 +214,9 @@ static const char *redirect(const char *path, char *buf) {
 }
 
 static int fake_stat(struct stat *st) {
-    if (REAL(fstatat)(AT_FDCWD, KGSL, st, 0) < 0) return -1;
+    const char *gpu = gpu_device();
+    if (!gpu) { errno = ENOENT; return -1; }
+    if (REAL(fstatat)(AT_FDCWD, gpu, st, 0) < 0) return -1;
     st->st_mode = S_IFCHR | 0666;
     st->st_rdev = makedev(DRM_MAJOR, RENDER_MINOR);
     st->st_ino = 0x44524d80;
@@ -225,7 +246,11 @@ static int fake_statx(struct statx *stx) {
 
 static int do_openat(int dirfd, const char *path, int flags, mode_t mode) {
     char buf[PATH_MAX];
-    if (is_node(path) && !(flags & O_PATH)) return track(REAL(openat)(AT_FDCWD, KGSL, flags, mode), true);
+    if (is_node(path) && !(flags & O_PATH)) {
+        const char *gpu = gpu_device();
+        if (!gpu) { errno = ENOENT; return -1; }
+        return track(REAL(openat)(AT_FDCWD, gpu, flags, mode), true);
+    }
     if (is_hidden(path)) {
         errno = ENOENT;
         return -1;
@@ -306,11 +331,13 @@ EXPORT int fcntl(int fd, int cmd, ...) {
 static int node_ioctl(int fd, unsigned long request, void *arg) {
     if (request == DRM_IOCTL_VERSION) {
         struct drm_version *v = arg;
-        static const char name[] = "kgsl";
+        const char *gpu = gpu_device();
+        const char *name = gpu && !strcmp(gpu, MALI) ? "termuxva" : "kgsl";
+        size_t len = strlen(name);
         size_t room = v->name_len;
         v->version_major = 1, v->version_minor = 0, v->version_patchlevel = 0;
-        v->name_len = sizeof name - 1, v->date_len = 0, v->desc_len = 0;
-        if (v->name && room) memcpy(v->name, name, room < sizeof name - 1 ? room : sizeof name - 1);
+        v->name_len = len, v->date_len = 0, v->desc_len = 0;
+        if (v->name && room) memcpy(v->name, name, room < len ? room : len);
         return 0;
     }
     if (request == DRM_IOCTL_GET_CAP) {

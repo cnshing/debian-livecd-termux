@@ -1,0 +1,80 @@
+<!-- Device diagnostic: prefer-hardware is a request, not proof. Confirm hardware
+     sessions in daemon logs and inspect errors, flush, all 60 pictures and colours. -->
+<!doctype html><title>encode probe</title><body><h1>WebCodecs hardware encoding colour probe</h1>
+<p>Use <code>?codec=avc1.42001f&amp;input=canvas</code> or
+<code>?codec=vp09.00.10.08&amp;input=bt709</code>. Each run encodes 60 frames at
+640×360, 30 fps and 2 Mb/s constant bitrate, then requests software decode.
+BT.709 input is a diagnostic control; canvas input must pass before enabling defaults.
+Serve on localhost or HTTPS. The launcher must select a private hardware encoder session.
+Optional <code>save=1</code> posts encoded chunks to a server's <code>/chunks</code> endpoint.</p>
+<pre>Running…</pre><script>
+const W = 640, H = 360, N = 60;
+const params = new URLSearchParams(location.search);
+const input = params.get('input') || 'canvas';
+if (!['canvas', 'bt709'].includes(input)) throw new Error('input must be canvas or bt709');
+const color = i => [(i * 37) % 256, (i * 91 + 40) % 256, (i * 53 + 90) % 256];
+async function frames() {
+  const c = new OffscreenCanvas(W, H), g = c.getContext('2d'), list = [];
+  for (let i = 0; i < N; i++) {
+    const [r, gg, b] = color(i); g.fillStyle = `rgb(${r},${gg},${b})`; g.fillRect(0, 0, W, H);
+    list.push(new VideoFrame(c, {timestamp: i * 33333, duration: 33333}));
+  }
+  return list;
+}
+async function bt709Frames() {
+  const list = [], clip = x => Math.min(255, Math.max(0, Math.round(x)));
+  for (let i = 0; i < N; i++) {
+    const [r,g,b] = color(i), y = 0.2126*r + 0.7152*g + 0.0722*b;
+    const data = new Uint8Array(W*H*3/2);
+    data.fill(clip(16 + y*219/255), 0, W*H);
+    data.fill(clip(128 + (b-y)*224/(255*1.8556)), W*H, W*H*5/4);
+    data.fill(clip(128 + (r-y)*224/(255*1.5748)), W*H*5/4);
+    list.push(new VideoFrame(data, {format:'I420', codedWidth:W, codedHeight:H,
+      timestamp:i*33333, duration:33333,
+      colorSpace:{matrix:'bt709', primaries:'bt709', transfer:'bt709', fullRange:false}}));
+  }
+  return list;
+}
+async function roundtrip(codec, accel) {
+  const config = {codec, width: W, height: H, bitrate: 2000000, framerate: 30, hardwareAcceleration: accel, bitrateMode: 'constant'};
+  if (codec.startsWith('avc1')) config.avc = {format: 'annexb'};
+  if (codec.startsWith('hvc1')) config.hevc = {format: 'annexb'};
+  const support = await VideoEncoder.isConfigSupported(config);
+  const result = {codec, accel, input, supported: support.supported};
+  if (!support.supported) return result;
+  const chunks = []; let meta = null, error = null;
+  const enc = new VideoEncoder({output: (c, m) => { const d = new Uint8Array(c.byteLength); c.copyTo(d);
+      chunks.push({type: c.type, timestamp: c.timestamp, data: d}); if (m && m.decoderConfig) meta = m.decoderConfig; },
+    error: e => error = String(e)});
+  enc.configure(config);
+  const t0 = performance.now();
+  for (const [i, f] of (await (input === 'bt709' ? bt709Frames() : frames())).entries()) { enc.encode(f, {keyFrame: i % 30 == 0}); f.close(); }
+  try { await enc.flush(); } catch (e) { result.flush_error = String(e); }
+  try { enc.close(); } catch (e) {}
+  if (params.get('save') === '1') await fetch('/chunks', {method:'POST', body:JSON.stringify({codec, chunks:chunks.map(c => ({type:c.type,timestamp:c.timestamp,data:btoa(String.fromCharCode(...c.data))})), meta})});
+  Object.assign(result, {decoderConfig: meta, chunks: chunks.length, bytes: chunks.reduce((s, c) => s + c.data.length, 0),
+    keys: chunks.filter(c => c.type == 'key').length, encode_ms: Math.round(performance.now() - t0), error});
+  if (!chunks.length) return result;
+  const errors = []; let decoded = 0;
+  const canvas = new OffscreenCanvas(W, H), g = canvas.getContext('2d', {willReadFrequently: true});
+  const dec = new VideoDecoder({output: f => { g.drawImage(f, 0, 0); const p = g.getImageData(W / 2, H / 2, 1, 1).data;
+      const i = Math.round(f.timestamp / 33333), want = color(i);
+      errors.push(Math.max(...want.map((v, k) => Math.abs(v - p[k])))); decoded++; f.close(); },
+    error: e => result.decode_error = String(e)});
+  const dconf = Object.assign({}, meta || {codec}, {hardwareAcceleration: 'prefer-software'});
+  dec.configure(dconf);
+  for (const c of chunks) dec.decode(new EncodedVideoChunk({type: c.type, timestamp: c.timestamp, data: c.data}));
+  await dec.flush(); dec.close();
+  Object.assign(result, {decoded, max_color_error: Math.max(...errors), frames_over_16: errors.filter(e => e > 16).length});
+  return result;
+}
+(async () => {
+  const results = [];
+  for (const codec of [(new URLSearchParams(location.search)).get('codec') || 'avc1.42001f'])
+    for (const accel of ['prefer-hardware']) {
+      try { results.push(await roundtrip(codec, accel)); } catch (e) { results.push({codec, accel, exception: String(e)}); }
+    }
+  window.RESULT = results;
+  document.querySelector('pre').textContent = JSON.stringify(results, null, 2);
+})();
+</script>

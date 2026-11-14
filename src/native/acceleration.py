@@ -194,7 +194,7 @@ def video_environment(env, selected, abi, config):
     ensure_daemon(env)
 
 
-def firefox_preferences(profile, gpu, video):
+def firefox_preferences(profile, gpu, video, encode=False):
     # Preserve user.js outside our marked block. Only the managed desktop
     # profile is edited; caller-supplied profiles retain their own preferences.
     profile.mkdir(parents=True, exist_ok=True)
@@ -208,6 +208,10 @@ def firefox_preferences(profile, gpu, video):
                   'media.ffmpeg.vaapi.enabled': video,
                   'media.hardware-video-decoding.force-enabled': video,
                   'widget.dmabuf.force-enabled': video}
+        if encode:
+            # One preference gates WebCodecs and WebRTC hardware encoding. Opt-in only
+            # (firefox_encode in acceleration.json): see docs/native/handoff/encode-firefox.md.
+            values['media.use-remote-encoder.video.platform'] = True
         block = '\n'.join(f'user_pref({json.dumps(key)}, {json.dumps(value)});' for key, value in values.items())
         temporary = path.with_name('user.js.livecd-next')
         temporary.write_text(previous.rstrip() + '\n' + start + '\n' + block + '\n' + end + '\n')
@@ -248,6 +252,18 @@ def firefox_video_runtime():
     return None, reason
 
 
+def firefox_encode_ready():
+    """Whether the user opted in and the installed runtime carries the encoders."""
+    if settings().get('firefox_encode') is not True:
+        return False
+    runtime, _ = firefox_video_runtime()
+    try:
+        encoding = json.loads((runtime[0] / 'manifest.json').read_text()).get('encoding') if runtime else None
+    except (OSError, ValueError):
+        return False
+    return isinstance(encoding, dict) and encoding.get('input') == 'i420' and 'h264' in encoding.get('codecs', ())
+
+
 def video_device():
     # Chromium opens this node for its VA-API display; android-vaapi serves either.
     return '/dev/mali0' if not os.path.exists('/dev/kgsl-3d0') and mali_usable() else '/dev/kgsl-3d0'
@@ -272,7 +288,7 @@ def command_line(profile, command, abi, video, gpu, mali=False):
             flags.append('--user-data-dir=' + str(Path.home() / '.config/livecd-native' / name))
     elif profile == 'firefox' and not any(arg in ('--profile', '-profile', '-P') or arg.startswith('--profile=') for arg in command[1:]):
         owned = Path.home() / '.config/livecd-native/firefox'
-        firefox_preferences(owned, gpu, video)
+        firefox_preferences(owned, gpu, video, encode=bool(video) and mali_usable() and firefox_encode_ready())
         flags = ['--profile', str(owned)]
     elif profile == 'mpv':
         flags = (['--vo=gpu-next', '--gpu-api=opengl', '--gpu-context=x11egl', '--opengl-es=yes']

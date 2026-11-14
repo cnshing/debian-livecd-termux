@@ -58,7 +58,9 @@ expect pass test "$with_decode" = "vah264dec vah264enc vah265dec vah265enc "
 expect pass test "$without_decode" = "vah264enc vah265enc "
 
 echo; echo "=== GL is unchanged: Mesa's renderer on a private Xvfb"
-Xvfb :87 -nolisten tcp >"$out/xvfb.log" 2>&1 </dev/null &
+# Keep the private server alive between clients; its automatic reset can
+# crash after the first GLX connection closes.
+Xvfb :87 -noreset -nolisten tcp >"$out/xvfb.log" 2>&1 </dev/null &
 xvfb=$!
 for _ in $(seq 50); do [ -S "$PREFIX/tmp/.X11-unix/X87" ] && break; sleep 0.1; done
 DISPLAY=:87 same glxinfo sh -c 'glxinfo -B | grep -E "OpenGL (renderer|version|vendor)"'
@@ -69,7 +71,11 @@ same eglinfo-surfaceless sh -c 'eglinfo -B -p surfaceless 2>&1 | grep -E "OpenGL
 echo; echo "=== ordinary programs under the preload"
 expect pass with_preload bash -c 'ls -l /dev/dri && cat /sys/class/drm/renderD128/dev'
 expect pass with_preload python -c 'import json, sqlite3, ssl, subprocess; print(subprocess.run(["uname", "-m"], capture_output=True, text=True).stdout.strip())'
-expect pass with_preload sh -c 'clang --version | head -1'
+if command -v clang >/dev/null; then
+    expect pass with_preload sh -c 'clang --version | head -1'
+else
+    echo 'SKIP compiler smoke check: clang is not installed'
+fi
 bench='import os, time
 t = time.perf_counter()
 for _ in range(100000):

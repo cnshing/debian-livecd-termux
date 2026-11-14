@@ -1,0 +1,14 @@
+--- a/dom/media/webcodecs/VideoEncoder.cpp
++++ b/dom/media/webcodecs/VideoEncoder.cpp
+@@ -606,7 +606,10 @@
+   // Colorspace is mandatory when outputing a decoder config after encode
+   RootedDictionary<VideoColorSpaceInit> colorSpace(aCx);
+   colorSpace.mFullRange.SetValue(false);
+-  colorSpace.mMatrix.SetValue(VideoMatrixCoefficients::Bt709);
++  // The encoder's input is converted to I420 with libyuv's BT.601 (SMPTE
++  // 170M) matrix, so label it with that matrix. A BT.709 label made decoders
++  // that honour the configuration shift every colour.
++  colorSpace.mMatrix.SetValue(VideoMatrixCoefficients::Smpte170m);
+   colorSpace.mPrimaries.SetValue(VideoColorPrimaries::Bt709);
+   colorSpace.mTransfer.SetValue(VideoTransferCharacteristics::Bt709);
+   aDestConfig.mColorSpace.Construct(std::move(colorSpace));

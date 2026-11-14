@@ -2,6 +2,7 @@
 """Verify both ABIs and provenance in the side-by-side source-built PanVK package."""
 import hashlib
 import json
+import re
 from pathlib import Path
 import subprocess
 import sys
@@ -25,8 +26,14 @@ def check_tree(root, expected):
         if 'AArch64' not in header or 'ELF64' not in header or 'DYN' not in header:
             raise RuntimeError('Not an ARM64 shared object: ' + abi)
         dynamic = subprocess.check_output(['readelf', '-d', str(driver)], text=True)
-        if '(RUNPATH)' in dynamic or '(RPATH)' in dynamic:
-            raise RuntimeError('Driver contains a build or runtime search path: ' + abi)
+        search_paths = re.findall(r'Library (?:runpath|rpath): \[(.*?)\]', dynamic)
+        # The Android build retains this relative linker-stub path. Preserve
+        # baseline bytes, but reject every absolute CI path or other override.
+        allowed = ['$ORIGIN/../../android_stub'] if abi == 'bionic' else []
+        if search_paths and search_paths != allowed:
+            raise RuntimeError('Unexpected driver runtime search path: ' + abi)
+        if (root / PREFIX / 'lib/android_stub').exists():
+            raise RuntimeError('Link-time Android stubs must not be packaged')
         libc = '[libc.so]' if abi == 'bionic' else '[libc.so.6]'
         if libc not in dynamic:
             raise RuntimeError('Wrong libc ABI: ' + abi)
@@ -52,7 +59,7 @@ def check(directory):
     with tempfile.TemporaryDirectory() as temporary:
         subprocess.run(['dpkg-deb', '-x', str(packages[0]), temporary], check=True)
         check_tree(Path(temporary), json.loads(LOCK.read_text()))
-    print('PASS: pinned source provenance, ARM64 Bionic/glibc drivers, private ICD paths, no CI RUNPATH')
+    print('PASS: pinned source provenance, ARM64 Bionic/glibc drivers, private ICD paths, no absolute CI RUNPATH')
 
 
 if __name__ == '__main__':

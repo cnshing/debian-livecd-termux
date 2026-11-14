@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Check one-plane EGL-exported RGBA dma-buf colors without GTK or glFinish."""
+import argparse
 import ctypes as C
 import fcntl
 import struct
@@ -8,6 +9,12 @@ import os
 
 
 def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--spatial', action='store_true',
+                        help='Check four distinct quadrants as well as changing frames')
+    parser.add_argument('--require-linear', action='store_true',
+                        help='Reject implicit modifiers, matching GTK mmap import requirements')
+    args = parser.parse_args()
     egl = C.CDLL('libEGL.so')
     egl.eglGetProcAddress.argtypes = [C.c_char_p]
     egl.eglGetProcAddress.restype = C.c_void_p
@@ -58,16 +65,29 @@ def main():
     export = proc('eglExportDMABUFImageMESA', uint, ptr, ptr, ints, ints, ints)
     clear_color = proc('glClearColor', None, C.c_float, C.c_float, C.c_float, C.c_float)
     clear = proc('glClear', None, uint)
+    scissor = proc('glScissor', None, integer, integer, integer, integer)
+    enable = proc('glEnable', None, uint)
     for frame in range(30):
         rgb = ((frame * 37) % 256, (frame * 79) % 256, (frame * 113) % 256)
-        clear_color(*(x / 255 for x in rgb), 1)
-        clear(0x4000)
+        quadrants = [rgb]
+        if args.spatial:
+            quadrants = [tuple((value + 53 * q) % 256 for value in rgb) for q in range(4)]
+            enable(0x0c11)  # GL_SCISSOR_TEST
+            for q, color in enumerate(quadrants):
+                scissor((q % 2) * (width // 2), (q // 2) * (height // 2), width // 2, height // 2)
+                clear_color(*(x / 255 for x in color), 1)
+                clear(0x4000)
+        else:
+            clear_color(*(x / 255 for x in rgb), 1)
+            clear(0x4000)
         image = create(display, context, 0x30b1, texture.value, image_attrs)
         check(image)
         fourcc, planes, modifier = integer(), integer(), C.c_uint64()
         check(query(display, image, C.byref(fourcc), C.byref(planes), C.byref(modifier)))
         if planes.value != 1 or modifier.value not in (0, 0x00ffffffffffffff):
             raise RuntimeError(f'expected one linear or implicit plane, got {planes.value} modifier={modifier.value:x}')
+        if args.require_linear and modifier.value != 0:
+            raise RuntimeError('GTK mmap requires an explicit LINEAR modifier')
         if frame == 0: print(f'fourcc={fourcc.value:x} modifier={modifier.value:x}', flush=True)
         fd, stride, offset = integer(-1), integer(), integer()
         check(export(display, image, C.byref(fd), C.byref(stride), C.byref(offset)))
@@ -76,16 +96,21 @@ def main():
         try:
             fcntl.ioctl(fd.value, 0x40086200, struct.pack("Q", 1))
             with mmap.mmap(fd.value, offset.value + stride.value * height, flags=mmap.MAP_SHARED, prot=mmap.PROT_READ) as data:
-                if fourcc.value == 0x34325241:
-                    pixel = bytes((*reversed(rgb), 255))
-                elif fourcc.value == 0x34324241:
-                    pixel = bytes((*rgb, 255))
-                else:
+                def pixel(color):
+                    if fourcc.value == 0x34325241:
+                        return bytes((*reversed(color), 255))
+                    if fourcc.value == 0x34324241:
+                        return bytes((*color, 255))
                     raise RuntimeError(f'unsupported fourcc={fourcc.value:x}')
                 for y in range(height):
+                    if args.spatial:
+                        q = 2 * (y >= height // 2)
+                        expected = pixel(quadrants[q]) * (width // 2) + pixel(quadrants[q + 1]) * (width // 2)
+                    else:
+                        expected = pixel(rgb) * width
                     row = data[offset.value + y * stride.value:offset.value + y * stride.value + width * 4]
-                    if row != pixel * width:
-                        raise RuntimeError(f'stale/incorrect dma-buf frame={frame} row={y} expected={pixel.hex()}')
+                    if row != expected:
+                        raise RuntimeError(f'stale/incorrect dma-buf frame={frame} row={y} spatial={args.spatial}')
         finally:
             fcntl.ioctl(fd.value, 0x40086200, struct.pack("Q", 5))
             os.close(fd.value)
@@ -95,7 +120,7 @@ def main():
     check(proc('eglMakeCurrent', uint, ptr, ptr, ptr, ptr)(display, None, None, None))
     check(proc('eglDestroyContext', uint, ptr, ptr)(display, context))
     check(proc('eglTerminate', uint, ptr)(display))
-    print('PASS 30 exported dma-buf frames; all 7,864,320 pixels exact; no glFinish/glReadPixels', flush=True)
+    print(f'PASS 30 exported dma-buf frames; all 7,864,320 pixels exact; spatial={args.spatial}; no glFinish/glReadPixels', flush=True)
 
 
 if __name__ == '__main__':

@@ -1,22 +1,23 @@
 name: PanVK qualification CTS executables
 on:
   workflow_dispatch:
-  push:
-    branches: [main]
-    paths:
-    - .github/workflows/panvk-cts.yml
-    - tools/panvk-probes/cts/build.sh
+    inputs:
+      target:
+        description: CTS executable to build
+        type: choice
+        options: [both, deqp-vk, deqp-gles31]
+        default: both
 permissions:
   contents: read
-concurrency:
-  group: panvk-cts-${{ github.ref }}
-  cancel-in-progress: true
 jobs:
   cts:
     strategy:
       fail-fast: false
       matrix:
-        target: [deqp-vk, deqp-gles31]
+        target: ${{ fromJSON(inputs.target == 'deqp-vk' && '["deqp-vk"]' || inputs.target == 'deqp-gles31' && '["deqp-gles31"]' || '["deqp-vk", "deqp-gles31"]') }}
+    concurrency:
+      group: panvk-cts-${{ github.ref }}-${{ matrix.target }}
+      cancel-in-progress: false
     runs-on: ubuntu-24.04
     timeout-minutes: 120
     steps:

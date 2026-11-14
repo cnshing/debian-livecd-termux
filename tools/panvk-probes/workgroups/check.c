@@ -14,7 +14,10 @@
 int main(int argc, char **argv)
 {
    setvbuf(stdout, NULL, _IONBF, 0);
-   if (argc != 7) { fprintf(stderr, "check ICD SPV X Y Z run|reject|skip\n"); return 2; }
+   if (argc != 7) { fprintf(stderr, "check ICD SPV X Y Z run|compile|reject|skip\n"); return 2; }
+   if (strcmp(argv[6], "run") && strcmp(argv[6], "compile") &&
+       strcmp(argv[6], "reject") && strcmp(argv[6], "skip")) return 2;
+   const int capture_stats = getenv("PANVK_PROBE_STATS") && !strcmp(getenv("PANVK_PROBE_STATS"), "1");
    unsigned x = strtoul(argv[3], NULL, 10), y = strtoul(argv[4], NULL, 10);
    unsigned z = strtoul(argv[5], NULL, 10), n = x * y * z;
    if (!x || !y || !z || n > 1024) return 2;
@@ -64,6 +67,22 @@ int main(int argc, char **argv)
       .queueFamilyIndex = family, .queueCount = 1, .pQueuePriorities = &priority};
    VkDeviceCreateInfo di = {.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
       .queueCreateInfoCount = 1, .pQueueCreateInfos = &qi, .pEnabledFeatures = &features};
+   const char *stats_extension = VK_KHR_PIPELINE_EXECUTABLE_PROPERTIES_EXTENSION_NAME;
+   VkPhysicalDevicePipelineExecutablePropertiesFeaturesKHR stats_feature = {
+      .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PIPELINE_EXECUTABLE_PROPERTIES_FEATURES_KHR,
+      .pipelineExecutableInfo = VK_TRUE};
+   if (capture_stats) {
+      INST(vkGetPhysicalDeviceFeatures2);
+      VkPhysicalDeviceFeatures2 available = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2,
+         .pNext = &stats_feature};
+      vkGetPhysicalDeviceFeatures2(physical, &available);
+      if (!stats_feature.pipelineExecutableInfo) {
+         puts("FAIL: pipeline executable statistics unavailable"); return 1;
+      }
+      di.pNext = &stats_feature;
+      di.enabledExtensionCount = 1;
+      di.ppEnabledExtensionNames = &stats_extension;
+   }
    VkDevice device;
    CHECK(vkCreateDevice(physical, &di, NULL, &device));
    PFN_vkGetDeviceProcAddr gdpa = vkGetDeviceProcAddr;
@@ -97,6 +116,7 @@ int main(int argc, char **argv)
    VkPipelineLayout layout;
    CHECK(vkCreatePipelineLayout(device, &pli, NULL, &layout));
    VkComputePipelineCreateInfo pi = {.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO,
+      .flags = capture_stats ? VK_PIPELINE_CREATE_CAPTURE_STATISTICS_BIT_KHR : 0,
       .stage = {.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
          .stage = VK_SHADER_STAGE_COMPUTE_BIT, .module = module, .pName = "main"}, .layout = layout};
    VkPipeline pipeline;
@@ -106,6 +126,42 @@ int main(int argc, char **argv)
       return result == VK_ERROR_FEATURE_NOT_PRESENT ? 0 : 1;
    }
    CHECK(result);
+   if (capture_stats) {
+      DEV(vkGetPipelineExecutablePropertiesKHR); DEV(vkGetPipelineExecutableStatisticsKHR);
+      if (!vkGetPipelineExecutablePropertiesKHR || !vkGetPipelineExecutableStatisticsKHR) return 1;
+      VkPipelineInfoKHR info = {.sType = VK_STRUCTURE_TYPE_PIPELINE_INFO_KHR, .pipeline = pipeline};
+      uint32_t executables = 0;
+      CHECK(vkGetPipelineExecutablePropertiesKHR(device, &info, &executables, NULL));
+      if (!executables) return 1;
+      for (uint32_t e = 0; e < executables; e++) {
+         VkPipelineExecutableInfoKHR ei = {.sType = VK_STRUCTURE_TYPE_PIPELINE_EXECUTABLE_INFO_KHR,
+            .pipeline = pipeline, .executableIndex = e};
+         uint32_t total = 0;
+         CHECK(vkGetPipelineExecutableStatisticsKHR(device, &ei, &total, NULL));
+         VkPipelineExecutableStatisticKHR *stats = calloc(total, sizeof(*stats));
+         if (!total || !stats) return 1;
+         for (uint32_t s = 0; s < total; s++)
+            stats[s].sType = VK_STRUCTURE_TYPE_PIPELINE_EXECUTABLE_STATISTIC_KHR;
+         CHECK(vkGetPipelineExecutableStatisticsKHR(device, &ei, &total, stats));
+         for (uint32_t s = 0; s < total; s++) {
+            printf("STAT executable=%u name=%s value=", e, stats[s].name);
+            switch (stats[s].format) {
+            case VK_PIPELINE_EXECUTABLE_STATISTIC_FORMAT_BOOL32_KHR:
+               printf("%u", stats[s].value.b32); break;
+            case VK_PIPELINE_EXECUTABLE_STATISTIC_FORMAT_INT64_KHR:
+               printf("%lld", (long long)stats[s].value.i64); break;
+            case VK_PIPELINE_EXECUTABLE_STATISTIC_FORMAT_UINT64_KHR:
+               printf("%llu", (unsigned long long)stats[s].value.u64); break;
+            case VK_PIPELINE_EXECUTABLE_STATISTIC_FORMAT_FLOAT64_KHR:
+               printf("%.9g", stats[s].value.f64); break;
+            default: free(stats); return 1;
+            }
+            putchar('\n');
+         }
+         free(stats);
+      }
+   }
+   if (!strcmp(argv[6], "compile")) { puts("PASS: pipeline creation; no dispatch"); return 0; }
    const size_t words = (size_t)n * 6 * 16;
    VkBufferCreateInfo bi = {.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
       .size = words * 4, .usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT};

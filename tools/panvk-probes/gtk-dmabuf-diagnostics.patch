@@ -1,0 +1,26 @@
+Private qualification diagnostics: Ghostty replaces GDK_DEBUG before GTK init,
+so retain two positive path markers independently of that environment variable.
+No change to import acceptance, layout checks or synchronization.
+
+--- a/gdk/gdkdmabuftexture.c
++++ b/gdk/gdkdmabuftexture.c
+@@ -271,7 +271,7 @@
+   GDK_TEXTURE (self)->format = format;
+   self->dmabuf = dmabuf;
+ 
+-  GDK_DISPLAY_DEBUG (display, DMABUF,
++  g_message (
+                      "Creating dmabuf texture, format %.4s:%#" G_GINT64_MODIFIER "x, %s%u planes, memory format %s",
+                      (char *) &dmabuf.fourcc, dmabuf.modifier,
+                      gdk_dmabuf_texture_builder_get_premultiplied (builder) ? " premultiplied, " : "",
+--- a/gdk/gdkdmabuf.c
++++ b/gdk/gdkdmabuf.c
+@@ -190,7 +190,7 @@
+       retval = TRUE;
+     }
+ 
+-  GDK_DISPLAY_DEBUG (gdk_dmabuf_texture_get_display (GDK_DMABUF_TEXTURE (texture)), DMABUF,
++  g_message (
+                      "Used mmap for downloading %dx%d dmabuf (format %.4s:%#" G_GINT64_MODIFIER "x)",
+                      gdk_texture_get_width (texture), gdk_texture_get_height (texture),
+                      (char *)&dmabuf->fourcc, dmabuf->modifier);

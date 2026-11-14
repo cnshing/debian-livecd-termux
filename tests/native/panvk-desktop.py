@@ -91,7 +91,7 @@ def audit(pid):
             pass
     return {'pid': pid, 'libraries': sorted({s.split()[-1] for s in maps.splitlines()
             if any(k in s for k in ('panfrost', 'gallium', 'EGL', 'GLES', 'mutter-cogl',
-                                   'angle', 'libX11', 'libxcb', 'libxshmfence'))}),
+                                   'angle', 'libgtk-4', 'libX11', 'libxcb', 'libxshmfence'))}),
             'devices': devices, 'fd_count': len(list((proc / 'fd').iterdir())),
             'status': (proc / 'status').read_text()}
 

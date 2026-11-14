@@ -1,0 +1,82 @@
+Opt-in ZINK_LINEAR_DMABUF_EXPORT converts backing storage before export metadata
+queries, rather than labelling an optimal/unknown layout LINEAR. Reuse the
+existing resource rebind/copy path and wait for that copy to finish. Normal
+exports retain their existing behavior when the option is unset.
+
+--- a/src/gallium/drivers/zink/zink_resource.c
++++ b/src/gallium/drivers/zink/zink_resource.c
+@@ -47,6 +47,7 @@
+ #include "util/u_memory.h"
+ #include "util/u_upload_mgr.h"
+ #include "util/os_file.h"
++#include "util/os_time.h"
+ #include "frontend/winsys_handle.h"
+ 
+ #if !defined(__APPLE__)
+@@ -2028,8 +2028,10 @@
+ 
+       mod = res->modifiers[0] = DRM_FORMAT_MOD_LINEAR;
+    }
++   bool old_linear = res->linear;
+    struct zink_resource_object *new_obj = resource_object_create(screen, &res->base.b, NULL, &res->linear, res->modifiers, res->modifiers_count, NULL, NULL);
+    if (!new_obj) {
++      res->linear = old_linear;
+       debug_printf("new backing resource alloc failed!\n");
+       res->base.b.bind &= ~bind;
+       return false;
+@@ -2063,6 +2063,37 @@
+    return true;
+ }
+ 
++/* Opt-in for CPU dma-buf consumers that cannot interpret an implicit layout.
++ * Convert the actual backing image before querying its export metadata. */
++static bool
++prepare_linear_dmabuf_export(struct zink_screen *screen, struct zink_resource *res)
++{
++   if (!debug_get_bool_option("ZINK_LINEAR_DMABUF_EXPORT", false) ||
++       res->obj->is_buffer ||
++       (res->obj->exportable_dmabuf &&
++        (res->linear || res->obj->modifier != DRM_FORMAT_MOD_INVALID)))
++      return true;
++
++   if (res->base.b.bind & ZINK_BIND_DMABUF)
++      return false;
++
++   assert(!zink_resource_usage_is_unflushed(res));
++   zink_screen_lock_context(screen);
++   bool ok = add_resource_bind(screen->copy_context, res, ZINK_BIND_DMABUF);
++   if (ok) {
++      if (res->all_binds)
++         p_atomic_inc(&screen->image_rebind_counter);
++      struct pipe_fence_handle *fence = NULL;
++      screen->copy_context->base.flush(&screen->copy_context->base, &fence, 0);
++      if (fence) {
++         ok = screen->base.fence_finish(&screen->base, NULL, fence, OS_TIMEOUT_INFINITE);
++         screen->base.fence_reference(&screen->base, &fence, NULL);
++      }
++   }
++   zink_screen_unlock_context(screen);
++   return ok && (res->linear || res->obj->modifier != DRM_FORMAT_MOD_INVALID);
++}
++
+ static bool
+ zink_resource_is_aux_plane(struct pipe_resource *pres)
+ {
+@@ -2087,6 +2118,8 @@
+ 
+    struct zink_screen *screen = zink_screen(pscreen);
+    struct zink_resource *res = zink_resource(pres);
++   if (!prepare_linear_dmabuf_export(screen, res))
++      return false;
+    struct zink_resource_object *obj = res->obj;
+    struct winsys_handle whandle;
+    VkImageAspectFlags aspect;
+@@ -2234,6 +2267,8 @@
+ 
+       struct zink_resource *res = zink_resource(tex);
+       struct zink_screen *screen = zink_screen(pscreen);
++      if (!prepare_linear_dmabuf_export(screen, res))
++         return false;
+       struct zink_resource_object *obj = res->obj;
+ 
+ #if !defined(_WIN32)

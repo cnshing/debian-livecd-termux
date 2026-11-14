@@ -1,0 +1,20 @@
+Report an explicit LINEAR modifier for Vulkan linear images. Drivers without
+EXT_image_drm_format_modifier leave obj->modifier INVALID even when Zink
+created the image with VK_IMAGE_TILING_LINEAR. Consumers such as GTK's mmap
+importer correctly reject that implicit layout. Only promote images whose
+actual Vulkan tiling is known to be LINEAR; never infer layout from the FD.
+
+--- a/src/gallium/drivers/zink/zink_resource.c
++++ b/src/gallium/drivers/zink/zink_resource.c
+@@ -2154,7 +2154,10 @@
+    }
+ 
+    case PIPE_RESOURCE_PARAM_MODIFIER: {
+-      *value = obj->modifier;
++      /* Vulkan linear tiling has an explicit row-major dma-buf layout even
++       * without EXT_image_drm_format_modifier. Keep unknown layouts implicit. */
++      *value = obj->modifier == DRM_FORMAT_MOD_INVALID && res->linear ?
++               DRM_FORMAT_MOD_LINEAR : obj->modifier;
+       break;
+    }
+ 

@@ -120,6 +120,65 @@ through Cairo/mmap, then the separately failing GL renderer. Keep udmabuf and
 global launcher defaults unchanged while testing it. The direct EGL control
 above already establishes why Mesa patch 0024 is necessary on this kernel.
 
+### GTK DMA-BUF experiment
+
+`.github/workflows/gtk-dmabuf.yml` builds the pinned Termux GTK 4.24.1
+recipe with `HAVE_DMABUF` header detection restored. UDMABUF remains disabled,
+and the existing X11 EGL workaround remains in place. Debug diagnostics are
+retained; revision 101 also logs the two positive path markers unconditionally. This workflow produces a qualification artifact
+only; it does not add GTK to the normal repository or change launcher defaults.
+Extract its `libgtk-4.so.1` privately and prepend that directory only for Ghostty.
+The checked-in `tools/panvk-probes/ghostty-gtk-dmabuf.py` launcher does this
+when copied beside `gtk-dmabuf/lib/` and passed as `--ghostty-launcher` to the
+desktop probe. `PANVK_GTK_LIB_DIR` can select another private directory.
+
+[GTK CI 43558508034](https://github.com/cnshing/debian-livecd-termux/actions/runs/43558508034)
+passes, including the generated configuration audit: `#define HAVE_DMABUF` and
+`#undef HAVE_UDMABUF`. Earlier builds compiled and packaged successfully but
+failed an overly strict post-build check expecting a numeric boolean define.
+
+The first private device run, `ghostty-gtk-dmabuf-1`, loads the staged GTK
+library (confirmed in `/proc` mappings). It passes four fresh Ghostty captures,
+normal exit and isolation, but **still uses CPU fallback**: GTK rejects
+`Unsupported dmabuf format: AB24:0xffffffffffffff`. The compile-time gate is
+cleared; the modifier gate remains. Ghostty replaces `GDK_DEBUG` during startup,
+so the private revision 101 build adds unconditional positive import/download
+messages, without changing acceptance checks or synchronization.
+
+GTK's mmap importer advertises and accepts only `DRM_FORMAT_MOD_LINEAR`.
+The implicit modifier must not simply be relabelled for unknown layouts.
+`dmabuf-readback.py --spatial` passes 30 frames and 7,864,320 pixel checks with
+Mesa 104, using four distinct quadrants on each changing frame. Its additional
+`--require-linear` check rejects Mesa 104, matching GTK's rejection.
+
+Mesa revision 105 adds
+`0025-zink-export-linear-image-modifier.patch`: report LINEAR only when Zink's
+resource records that the image was created with `VK_IMAGE_TILING_LINEAR` and
+its modifier was otherwise INVALID. The existing Vulkan subresource offset and
+row pitch are retained. Unknown/optimal layouts keep their existing modifier.
+This follows the [Vulkan linear-tiling definition](https://docs.vulkan.org/refpages/latest/refpages/source/VkImageTiling.html)
+and [DRM linear-layout contract](https://www.kernel.org/doc/html/latest/userspace-api/dma-buf-alloc-exchange.html).
+[Mesa 105 CI 43558925571](https://github.com/cnshing/debian-livecd-termux/actions/runs/43558925571)
+passes, but its strict device oracle still rejects the implicit modifier.
+The queried resource is not recorded as Vulkan linear; reporting metadata alone
+is therefore insufficient.
+
+Revision 106 additionally provides opt-in `ZINK_LINEAR_DMABUF_EXPORT=1` through
+`0026-zink-opt-in-linear-dmabuf-export.patch`. It reuses Zink's backing-image
+rebind/copy path before export metadata queries, requests DMA-BUF backing
+(which uses a linear image or an explicit modifier), and waits for the copy.
+Unsupported conversions fail instead of inventing a modifier. The private
+Ghostty launcher enables this option; normal launcher defaults do not.
+Runtime qualification is pending CI 43559993100.
+
+`check-ghostty-panvk.py --require-dmabuf` requires positive GTK texture-import
+and mmap-download diagnostics at least once per fresh capture, in addition to
+all pixel, GPU identity, normal-exit and isolation checks. It rejects the saved
+CPU-fallback run. `panvk-desktop.py` now records GTK library mappings to prove
+which library the process loaded. A passing Cairo/mmap test would establish
+DMA-BUF transport with a CPU download inside GTK; it would not establish a
+GPU-only presentation path.
+
 ### Package candidate
 
 `mesa-vulkan-icd-panvk-kbase-sync-fd` reuses the shared source-package support

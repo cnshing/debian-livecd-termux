@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Prepare an opt-in GTK artifact; never added to the normal package repository."""
 import pathlib
+import shutil
 import sys
 
 checkout = pathlib.Path(sys.argv[1])
@@ -15,7 +16,11 @@ build = recipe / 'build.sh'
 text = build.read_text()
 assert 'TERMUX_PKG_REVISION=' not in text, 'review upstream revision before overriding'
 # Separate artifact identity. Extract privately for testing; do not apt-install.
-text += '\nTERMUX_PKG_REVISION=100\n'
+text += '\nTERMUX_PKG_REVISION=101\n'
 # Keep GDK_DEBUG=dmabuf diagnostics for positive import/download evidence.
 text += '\nTERMUX_PKG_EXTRA_CONFIGURE_ARGS+=" -Ddebug=true"\n'
 build.write_text(text)
+
+# Ghostty clears GDK_DEBUG itself. Keep positive diagnostics in this private build.
+shutil.copyfile(pathlib.Path(__file__).with_name('gtk-dmabuf-diagnostics.patch'),
+                recipe / 'dmabuf-diagnostics.patch')

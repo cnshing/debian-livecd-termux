@@ -1,0 +1,271 @@
+diff --git a/src/compiler/nir/nir_lower_shader_calls.c b/src/compiler/nir/nir_lower_shader_calls.c
+index a626491..9e2c2b8 100644
+--- a/src/compiler/nir/nir_lower_shader_calls.c
++++ b/src/compiler/nir/nir_lower_shader_calls.c
+@@ -69,7 +69,9 @@ instr_is_shader_call(nir_instr *instr)
+    nir_intrinsic_instr *intrin = nir_instr_as_intrinsic(instr);
+    return intrin->intrinsic == nir_intrinsic_trace_ray ||
+           intrin->intrinsic == nir_intrinsic_report_ray_intersection ||
+-          intrin->intrinsic == nir_intrinsic_execute_callable;
++          intrin->intrinsic == nir_intrinsic_execute_callable ||
++          (intrin->intrinsic == nir_intrinsic_barrier &&
++           nir_intrinsic_execution_scope(intrin) == SCOPE_WORKGROUP);
+ }
+ 
+ static bool
+@@ -642,6 +644,11 @@ spill_ssa_defs_and_lower_shader_calls(nir_shader *shader, uint32_t num_calls,
+          case nir_intrinsic_report_ray_intersection:
+             UNREACHABLE("Any-hit shaders must be inlined");
+ 
++         case nir_intrinsic_barrier:
++            nir_rt_execute_callable(b, nir_imm_int(b, 0), nir_imm_int(b, 0),
++                                    .call_idx = call_idx, .stack_size = offset);
++            break;
++
+          case nir_intrinsic_execute_callable: {
+             nir_rt_execute_callable(b, call->src[0].ssa, call->src[1].ssa, .call_idx = call_idx, .stack_size = offset);
+             break;
+diff --git a/src/panfrost/vulkan/panvk_physical_device.c b/src/panfrost/vulkan/panvk_physical_device.c
+index 17d23dd..fe23146 100644
+--- a/src/panfrost/vulkan/panvk_physical_device.c
++++ b/src/panfrost/vulkan/panvk_physical_device.c
+@@ -438,7 +438,8 @@ init_shader_caches(struct panvk_physical_device *device,
+                      sizeof(device->kmod.dev->props.gpu_id));
+ 
+    const uint8_t g77_lwg = pan_arch(device->kmod.dev->props.gpu_id) == 9 &&
+-                           debug_get_bool_option("PANVK_G77_LWG", false);
++                           debug_get_bool_option("PANVK_G77_LWG", false)
++      ? 1 + 2 * debug_get_bool_option("PANVK_G77_NESTED", false) : 0;
+    _mesa_blake3_update(&blake3_ctx, &g77_lwg, sizeof(g77_lwg));
+ 
+    unsigned char blake3[BLAKE3_KEY_LEN];
+diff --git a/src/panfrost/vulkan/panvk_vX_shader.c b/src/panfrost/vulkan/panvk_vX_shader.c
+index cc9461b..bcf1ff3 100644
+--- a/src/panfrost/vulkan/panvk_vX_shader.c
++++ b/src/panfrost/vulkan/panvk_vX_shader.c
+@@ -819,6 +819,195 @@ lwg_rewrite_ids(nir_builder *b, nir_function_impl *impl, nir_def *lin,
+    }
+ }
+ 
++static bool
++panvk_lower_barrier_workgroup(nir_shader *nir, unsigned max_hw)
++{
++   const uint16_t lsize[3] = {nir->info.workgroup_size[0],
++                              nir->info.workgroup_size[1],
++                              nir->info.workgroup_size[2]};
++   const unsigned n = lsize[0] * lsize[1] * lsize[2];
++   const unsigned subgroup_size = pan_subgroup_size(PAN_ARCH);
++   const unsigned max_aligned = max_hw & ~(subgroup_size - 1);
++   if (!max_aligned)
++      return false;
++   const unsigned k = DIV_ROUND_UP(n, max_aligned);
++   if (k > 16)
++      return false;
++   const unsigned h = ALIGN_POT(DIV_ROUND_UP(n, k), subgroup_size);
++
++   NIR_PASS(_, nir, nir_lower_continue_constructs);
++   NIR_PASS(_, nir, nir_lower_vars_to_explicit_types, nir_var_function_temp,
++            glsl_get_natural_size_align_bytes);
++   NIR_PASS(_, nir, nir_lower_explicit_io, nir_var_function_temp,
++            nir_address_format_32bit_offset);
++   NIR_PASS(_, nir, nir_opt_dce);
++
++   const nir_lower_shader_calls_options options = {
++      .address_format = nir_address_format_32bit_offset,
++      .stack_alignment = 64,
++   };
++   nir_shader **resumes = NULL;
++   uint32_t num_resumes = 0;
++   mesa_logi("lwg7: splitting nested barriers");
++   if (!nir_lower_shader_calls(nir, &options, &resumes, &num_resumes, nir))
++      return false;
++
++   mesa_logi("lwg7: split %u resumes", num_resumes);
++   nir_shader **regions = calloc(num_resumes + 1, sizeof(*regions));
++   regions[0] = nir_shader_clone(nir, nir);
++   unsigned stride = nir->scratch_size;
++   for (unsigned r = 0; r < num_resumes; r++) {
++      regions[r + 1] = resumes[r];
++      stride = MAX2(stride, resumes[r]->scratch_size);
++   }
++   for (unsigned r = 0; r <= num_resumes; r++) {
++      nir_function_impl *ri = nir_shader_get_entrypoint(regions[r]);
++      nir_foreach_block(block, ri) {
++         nir_foreach_instr(instr, block) {
++            if (instr->type != nir_instr_type_intrinsic)
++               continue;
++            nir_intrinsic_instr *intr = nir_instr_as_intrinsic(instr);
++            if (intr->intrinsic == nir_intrinsic_rt_execute_callable ||
++                intr->intrinsic == nir_intrinsic_rt_resume)
++               stride = MAX2(stride, nir_intrinsic_stack_size(intr));
++         }
++      }
++   }
++   stride = ALIGN_POT(stride, 64);
++
++   nir_function_impl *old_impl = nir_shader_get_entrypoint(nir);
++   nir_function *main = old_impl->function;
++   main->impl = NULL;
++   nir_function_impl *impl = nir_function_impl_create(main);
++   nir_builder b = nir_builder_at(nir_before_impl(impl));
++   nir_def *hw = nir_load_local_invocation_index(&b);
++   nir_variable **states = calloc(k, sizeof(*states));
++   for (unsigned c = 0; c < k; c++) {
++      states[c] = nir_local_variable_create(impl, glsl_uint_type(), "lwg_pc");
++      nir_store_var(&b, states[c],
++                    nir_bcsel(&b, nir_ult_imm(&b, hw, n - c * h),
++                              nir_imm_int(&b, 0), nir_imm_int(&b, -1)), 1);
++   }
++
++   nir_push_loop(&b);
++   for (unsigned c = 0; c < k; c++) {
++      nir_def *entry = nir_load_var(&b, states[c]);
++      nir_store_var(&b, states[c], nir_imm_int(&b, -1), 1);
++      for (unsigned r = 0; r <= num_resumes; r++) {
++         mesa_logi("lwg7: cloning copy=%u region=%u", c, r);
++         nir_push_if(&b, nir_ieq_imm(&b, entry, r));
++         nir_shader *region = nir_shader_clone(nir, regions[r]);
++         nir_function_impl *ri = nir_shader_get_entrypoint(region);
++         nir_variable *state = nir_local_variable_create(ri, glsl_uint_type(), "lwg_next");
++         nir_builder rb = nir_builder_at(nir_before_impl(ri));
++         nir_def *rhw = nir_load_local_invocation_index(&rb);
++         nir_def *lin = nir_iadd_imm(&rb, rhw, c * h);
++         lwg_rewrite_ids(&rb, ri, lin, nir_def_instr_nonconst(rhw), lsize);
++
++         nir_foreach_block(block, ri) {
++            nir_foreach_instr_safe(instr, block) {
++               if (instr->type == nir_instr_type_jump) {
++                  nir_jump_instr *jump = nir_instr_as_jump(instr);
++                  if (jump->type == nir_jump_halt)
++                     jump->type = nir_jump_return;
++                  continue;
++               }
++               if (instr->type != nir_instr_type_intrinsic)
++                  continue;
++               nir_intrinsic_instr *intr = nir_instr_as_intrinsic(instr);
++               rb.cursor = nir_before_instr(instr);
++               switch (intr->intrinsic) {
++               case nir_intrinsic_rt_execute_callable:
++                  nir_store_var(&rb, state,
++                                nir_imm_int(&rb, nir_intrinsic_call_idx(intr) + 1), 1);
++                  nir_instr_remove(instr);
++                  break;
++               case nir_intrinsic_rt_resume:
++                  nir_instr_remove(instr);
++                  break;
++               case nir_intrinsic_load_scratch:
++                  nir_src_rewrite(&intr->src[0],
++                                  nir_iadd_imm(&rb, intr->src[0].ssa, c * stride));
++                  break;
++               case nir_intrinsic_store_scratch:
++                  nir_src_rewrite(&intr->src[1],
++                                  nir_iadd_imm(&rb, intr->src[1].ssa, c * stride));
++                  break;
++               default:
++                  break;
++               }
++            }
++         }
++         nir_lower_returns_impl(ri);
++         struct hash_table *map = _mesa_pointer_hash_table_create(NULL);
++         struct exec_node *original = exec_list_get_head(&nir->variables);
++         nir_foreach_variable_in_shader(var, region) {
++            assert(!exec_node_is_tail_sentinel(original));
++            nir_variable *target = exec_node_data(nir_variable, original, node);
++            _mesa_hash_table_insert(map, var, target);
++            original = exec_node_get_next(original);
++         }
++         nir_foreach_function_temp_variable(var, ri) {
++            if (var == state) {
++               _mesa_hash_table_insert(map, var, states[c]);
++            } else {
++               nir_variable *copy = nir_variable_clone(var, nir);
++               nir_function_impl_add_variable(impl, copy);
++               _mesa_hash_table_insert(map, var, copy);
++            }
++         }
++         nir_foreach_block(block, ri) {
++            nir_foreach_instr(instr, block) {
++               if (instr->type != nir_instr_type_deref)
++                  continue;
++               nir_deref_instr *deref = nir_instr_as_deref(instr);
++               if (deref->deref_type == nir_deref_type_var &&
++                   nir_variable_is_global(deref->var)) {
++                  struct hash_entry *mapped = _mesa_hash_table_search(map, deref->var);
++                  assert(mapped);
++                  deref->var = mapped->data;
++               }
++            }
++         }
++         nir_cf_list body;
++         nir_cf_extract(&body, nir_before_impl(ri), nir_after_impl(ri));
++         body.impl = impl;
++         nir_cf_list copy;
++         nir_cf_list_clone(&copy, &body, &impl->cf_node, map);
++         b.cursor = nir_cf_reinsert(&copy, b.cursor);
++         _mesa_hash_table_destroy(map, NULL);
++         ralloc_free(region);
++         nir_pop_if(&b, NULL);
++      }
++   }
++   nir_def *pending = nir_imm_false(&b);
++   for (unsigned c = 0; c < k; c++)
++      pending = nir_ior(&b, pending, nir_ine_imm(&b, nir_load_var(&b, states[c]), -1));
++   nir_push_if(&b, nir_inot(&b, pending));
++   nir_jump(&b, nir_jump_break);
++   nir_pop_if(&b, NULL);
++   nir_barrier(&b, .execution_scope = SCOPE_WORKGROUP,
++               .memory_scope = SCOPE_DEVICE,
++               .memory_semantics = NIR_MEMORY_ACQ_REL,
++               .memory_modes = nir_var_mem_shared | nir_var_mem_ssbo |
++                               nir_var_image | nir_var_mem_global);
++   nir_pop_loop(&b, NULL);
++
++   mesa_logi("lwg7: validating scheduler");
++   nir->scratch_size = stride * k;
++   nir->info.workgroup_size[0] = h;
++   nir->info.workgroup_size[1] = 1;
++   nir->info.workgroup_size[2] = 1;
++   nir_progress(true, impl, nir_metadata_none);
++   nir_repair_ssa_impl(impl);
++   nir_lower_vars_to_ssa(nir);
++   nir_opt_dce(nir);
++   nir_validate_shader(nir, "G77 nested barrier scheduler");
++   free(states);
++   free(regions);
++   return true;
++}
++
+ static bool
+ panvk_lower_large_workgroup(nir_shader *nir, unsigned max_hw)
+ {
+@@ -861,20 +1050,26 @@ panvk_lower_large_workgroup(nir_shader *nir, unsigned max_hw)
+     * hardware subgroup/invocation layout. */
+    struct util_dynarray barriers;
+    util_dynarray_init(&barriers, NULL);
+-   bool ok = true;
++   bool ok = true, nested = false, blocked = false;
+    nir_foreach_block(block, impl) {
+       nir_foreach_instr(instr, block) {
+-         if (lwg_instr_blocks(instr))
++         if (lwg_instr_blocks(instr)) {
+             ok = false;
++            blocked = true;
++         }
+          if (lwg_is_wg_barrier(instr)) {
+-            if (block->cf_node.parent != &impl->cf_node)
++            if (block->cf_node.parent != &impl->cf_node) {
+                ok = false;
++               nested = true;
++            }
+             util_dynarray_append(&barriers, instr);
+          }
+       }
+    }
+    if (!ok) {
+       util_dynarray_fini(&barriers);
++      if (nested && !blocked && debug_get_bool_option("PANVK_G77_NESTED", false))
++         return panvk_lower_barrier_workgroup(nir, max_hw);
+       mesa_logw("panvk: %u-invocation workgroup: barrier in control flow or "
+                 "global invocation index, left as is", n);
+       return false;

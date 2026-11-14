@@ -26,11 +26,36 @@ void main() {
    uint live = saved ^ neighbour;
    barrier();
 #ifdef NESTED
-   // Valid uniform control flow, deliberately outside the port's supported subset.
-   for (uint j = 0u; j < gl_NumWorkGroups.z; j++) {
-      values[i] += j;
+   uint private_values[4];
+   for (uint p = 0u; p < 4u; p++) private_values[p] = saved + p * 11u;
+   uint slot = i & 3u;
+#if NESTED == 2
+   if ((gl_WorkGroupID.x & 1u) == 0u) {
+      uint next_value = values[(i + 1u) % N];
+      barrier();
+      values[i] = next_value + 13u;
+      private_values[slot] += 13u;
+      barrier();
+   } else {
+      values[i] += 29u;
+      private_values[slot] += 29u;
+   }
+   barrier();
+#else
+   uint loops = gl_NumWorkGroups.x + gl_WorkGroupID.y;
+   for (uint j = 0u; j < 8u; j++) {
+      if (j >= loops) break;
+#if NESTED == 3
+      if (j == 1u) continue;
+#endif
+      uint next_value = values[(i + 1u) % N];
+      barrier();
+      values[i] = next_value + j + 1u;
+      private_values[slot] += j + 1u;
       barrier();
    }
+#endif
+   uint nested_result = values[i] ^ private_values[slot];
 #endif
    uint sg = gl_SubgroupSize;
    uint base = i - i % sg;
@@ -57,5 +82,9 @@ void main() {
    out_data[o + 12u] = sum;
    out_data[o + 13u] = saved;
    out_data[o + 14u] = flags;
+#ifdef NESTED
+   out_data[o + 15u] = nested_result;
+#else
    out_data[o + 15u] = live;
+#endif
 }

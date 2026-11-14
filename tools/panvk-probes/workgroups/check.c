@@ -16,7 +16,9 @@ int main(int argc, char **argv)
    setvbuf(stdout, NULL, _IONBF, 0);
    if (argc != 7) { fprintf(stderr, "check ICD SPV X Y Z run|compile|reject|skip\n"); return 2; }
    if (strcmp(argv[6], "run") && strcmp(argv[6], "compile") &&
-       strcmp(argv[6], "reject") && strcmp(argv[6], "skip")) return 2;
+       strcmp(argv[6], "reject") && strcmp(argv[6], "skip") &&
+       strcmp(argv[6], "run-nested") && strcmp(argv[6], "run-nested-if") &&
+       strcmp(argv[6], "run-nested-control") && strcmp(argv[6], "run-nested-prime")) return 2;
    const int capture_stats = getenv("PANVK_PROBE_STATS") && !strcmp(getenv("PANVK_PROBE_STATS"), "1");
    unsigned x = strtoul(argv[3], NULL, 10), y = strtoul(argv[4], NULL, 10);
    unsigned z = strtoul(argv[5], NULL, 10), n = x * y * z;
@@ -235,6 +237,20 @@ int main(int argc, char **argv)
       unsigned mine = i * 3 + g * 17 + 1, neighbour = (n - 1 - i) * 3 + g * 17 + 1;
       uint32_t expected[16] = {i, lx, ly, lz, (g % 3) * x + lx, (g / 3) * y + ly,
          lz, x, y, z, g, neighbour, n * (n - 1) / 2, mine, 15, mine ^ neighbour};
+      if (!strncmp(argv[6], "run-nested", 10)) {
+         unsigned loops = 3 + g / 3;
+         unsigned rotations = loops, delta = loops * (loops + 1) / 2;
+         if (strstr(argv[6], "control")) {
+            rotations--;
+            delta -= 2;
+         } else if (strstr(argv[6], "-if")) {
+            rotations = (g % 3) % 2 == 0 ? 1 : 0;
+            delta = rotations ? 13 : 29;
+         }
+         unsigned shared_value = ((i + rotations) % n) * 3 + g * 17 + 1 + delta;
+         unsigned private_value = mine + (i & 3) * 11 + delta;
+         expected[15] = shared_value ^ private_value;
+      }
       for (unsigned w = 0; w < 16; w++) {
          uint32_t got = map[((size_t)g * n + i) * 16 + w];
          if (got != expected[w]) {

@@ -12,6 +12,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--baseline", type=Path, required=True)
 parser.add_argument("--patched", type=Path, required=True)
 parser.add_argument("--out", type=Path, required=True)
+parser.add_argument("--nested", action="store_true", help="Opt in to the experimental continuation scheduler")
 parser.add_argument("--shader-cache", action="store_true", help="Use a private cache shared by sibling runs")
 args = parser.parse_args()
 args.out.mkdir(exist_ok=False, parents=True)
@@ -28,16 +29,23 @@ for variant, driver, enabled in (
     if enabled:
         cases += [(shape, "run") for shape in ("257-1-1", "511-1-1", "512-1-1", "513-1-1",
                   "769-1-1", "1023-1-1", "1024-1-1", "32-30-1", "8-8-16", "17-19-3")]
-        cases += [("nested", "reject")]
+        if args.nested:
+            cases += [(name, "run-" + name) for name in
+                      ("nested", "nested-if", "nested-control", "nested-prime")]
+        else:
+            cases += [("nested", "reject")]
     else:
         cases += [("1024-1-1", "skip")]
     for shape, mode in cases:
-        dims = [1024, 1, 1] if shape == "nested" else list(map(int, shape.split("-")))
+        dims = ([769 if shape == "nested-prime" else 1024, 1, 1]
+                if shape.startswith("nested") else list(map(int, shape.split("-"))))
         env = os.environ.copy()
-        for name in ("LD_PRELOAD", "LD_LIBRARY_PATH", "PANVK_G77_LWG", "MESA_GL_VERSION_OVERRIDE",
-                     "MESA_GLSL_VERSION_OVERRIDE", "PANVK_LWG_PRINT"):
+        for name in ("LD_PRELOAD", "LD_LIBRARY_PATH", "PANVK_G77_LWG", "PANVK_G77_NESTED", "MESA_GL_VERSION_OVERRIDE",
+                     "MESA_GLSL_VERSION_OVERRIDE", "PANVK_LWG_PRINT", "PANVK_PROBE_ROBUST",
+                     "PANVK_G77_NO_MERGE"):
             env.pop(name, None)
         env["PANVK_G77_LWG"] = "1" if enabled else "0"
+        env["PANVK_G77_NESTED"] = "1" if enabled and args.nested else "0"
         env["MESA_SHADER_CACHE_DISABLE"] = "false" if args.shader_cache else "true"
         env["XDG_CACHE_HOME"] = str(args.out.resolve().parent / "shader-cache")
         command = [str(here / "check"), str(driver), str(here / f"{shape}.spv"),

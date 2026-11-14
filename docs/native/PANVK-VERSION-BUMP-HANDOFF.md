@@ -68,8 +68,8 @@ the previously untested GL variable-size path for these cases, rather than
 establishing full conformance. The shader must use `gl_LocalGroupSizeARB`:
 the extension prohibits `gl_WorkGroupSize` in a variable-size shader.
 
-Nested-barrier work is isolated on `research/panvk-nested-barriers`, not in the
-default or accepted experimental binary. Its `0007` prototype uses NIR shader
+The tested nested-barrier lowering is now on main in
+`workgroup-patches/0007-experimental-nested-barrier-continuations.patch`. It uses NIR shader
 continuations to spill values across barriers and reconstruct loops/branches,
 with a per-logical-invocation program counter and separate scratch slices.
 It additionally requires `PANVK_G77_NESTED=1`. New probes cover dynamic loops,
@@ -80,8 +80,8 @@ are in revision `71e7a6f`, successfully built in
 [run 43560105312](https://github.com/cnshing/debian-livecd-termux/actions/runs/43560105312).
 The Android binary SHA-256 is
 `9a0d3fb9e89a4f4dbee17242a8f133f6156ddd0d05927e6340e8916c1e22805b`.
-Do not dispatch this prototype until its compile-only control succeeds. Do not
-promote it on the basis of a successful build alone.
+That older binary is retained only as diagnostic history; use the fixed build
+below for positive tests.
 
 After wireless access returned, `71e7a6f` passed compile-only creation and
 statistics capture. Its first nested dispatch completed but failed the CPU
@@ -227,6 +227,13 @@ an open gate.
 
 ## Desktop qualification still required
 
+The fixed `0007` binary passed **20 private GNOME/Ghostty cycles** with caching
+enabled and both opt-ins set. Both host checkers pass: 40 GTK captures with
+maximum channel error 0, 40 GPU Ghostty captures, rejected stale-frame controls,
+normal Ghostty exit and preserved session isolation. Presentation uses CPU
+readback. Evidence:
+`temp/panvk-qualification/evidence/nested-slices/desktop-20-01/`.
+
 The private harness can run the 20 capture cycles and 30-minute soak together:
 
 ```sh
@@ -310,12 +317,10 @@ oracle in all 448,512 output words.
 
 The pass is a working subset behind an environment variable. To ship it:
 
-1. **Cover nested barriers.** A shader with a barrier inside a loop still fails pipeline
-   creation with `VK_ERROR_FEATURE_NOT_PRESENT`. A driver that advertises 1024 must run
-   those valid shaders. Implement the control-flow-aware region split, or measure how often
-   real GL programs hit it and decide with the user. The 769-invocation refusal is now fixed:
-   `0005` pads each hardware group to a subgroup boundary and masks excess lanes inside each
-   cloned region, leaving workgroup barriers unconditional.
+1. **Qualify nested barriers beyond the probes.** `0007` now passes the nested
+   CPU oracles and repeated caches behind `PANVK_G77_NESTED=1`. Extend CTS
+   coverage and close the baseline compute failures before making it automatic.
+   `0005` already covers partial subgroups, keeping hardware barriers unconditional.
 2. **Variable workgroup sizes** (`ARB_compute_variable_group_size`) now pass the
    five-shape GL probe above; extend coverage with the conformance subset.
 3. **Extend the conformance subset**: the 195 GLES compute cases above pass on
@@ -326,12 +331,12 @@ The pass is a working subset behind an environment variable. To ship it:
    cache timestamp, and the phone tests confirm distinct UUIDs with correct repeated cached
    output. The older hash-pinned Ghostty experiment launcher still disables caching for its
    older binary. Continue testing cache reuse when changing the lowering pass.
-5. **Register pressure.** The adaptation halves the hardware thread limit (256 per hardware
-   workgroup) to leave room. Nobody has measured what that costs, or whether a shader can
-   still exceed it.
-6. **Then drop the opt-in** for architecture 9, and soak the desktop. The experiment's
-   GNOME and GTK check with the patched driver was two cycles; a default needs the 20-cycle
-   run and the 30-minute soak.
+5. **Register pressure.** The compiler statistics above quantify the straight-line
+   cases and show heavy spilling in the nested scheduler. Measure GPU throughput
+   and broader shader pressure; the 256-thread hardware cap is not a performance proof.
+6. **Then drop the opt-ins** for architecture 9 after qualification. The fixed nested
+   driver passed the private 20-cycle run. The 30-minute soak and installed 30/30
+   validation still remain.
 
 When the installed driver reports 4.3, nothing else needs changing for Ghostty:
 `src/native/terminal.py` asks `glxinfo` for the core version and keeps the GPU when it is at

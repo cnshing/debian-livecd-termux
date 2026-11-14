@@ -40,10 +40,10 @@ index 17d23dd..fe23146 100644
  
     unsigned char blake3[BLAKE3_KEY_LEN];
 diff --git a/src/panfrost/vulkan/panvk_vX_shader.c b/src/panfrost/vulkan/panvk_vX_shader.c
-index cc9461b..2cc6b92 100644
+index cc9461b..bcf1ff3 100644
 --- a/src/panfrost/vulkan/panvk_vX_shader.c
 +++ b/src/panfrost/vulkan/panvk_vX_shader.c
-@@ -819,6 +819,182 @@ lwg_rewrite_ids(nir_builder *b, nir_function_impl *impl, nir_def *lin,
+@@ -819,6 +819,195 @@ lwg_rewrite_ids(nir_builder *b, nir_function_impl *impl, nir_def *lin,
     }
  }
  
@@ -87,6 +87,19 @@ index cc9461b..2cc6b92 100644
 +   for (unsigned r = 0; r < num_resumes; r++) {
 +      regions[r + 1] = resumes[r];
 +      stride = MAX2(stride, resumes[r]->scratch_size);
++   }
++   for (unsigned r = 0; r <= num_resumes; r++) {
++      nir_function_impl *ri = nir_shader_get_entrypoint(regions[r]);
++      nir_foreach_block(block, ri) {
++         nir_foreach_instr(instr, block) {
++            if (instr->type != nir_instr_type_intrinsic)
++               continue;
++            nir_intrinsic_instr *intr = nir_instr_as_intrinsic(instr);
++            if (intr->intrinsic == nir_intrinsic_rt_execute_callable ||
++                intr->intrinsic == nir_intrinsic_rt_resume)
++               stride = MAX2(stride, nir_intrinsic_stack_size(intr));
++         }
++      }
 +   }
 +   stride = ALIGN_POT(stride, 64);
 +
@@ -226,7 +239,7 @@ index cc9461b..2cc6b92 100644
  static bool
  panvk_lower_large_workgroup(nir_shader *nir, unsigned max_hw)
  {
-@@ -861,20 +1037,26 @@ panvk_lower_large_workgroup(nir_shader *nir, unsigned max_hw)
+@@ -861,20 +1050,26 @@ panvk_lower_large_workgroup(nir_shader *nir, unsigned max_hw)
      * hardware subgroup/invocation layout. */
     struct util_dynarray barriers;
     util_dynarray_init(&barriers, NULL);

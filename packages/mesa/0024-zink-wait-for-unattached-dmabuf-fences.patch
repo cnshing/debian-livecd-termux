@@ -1,0 +1,87 @@
+Zink: finish a submitted dma-buf batch when its fence cannot be attached.
+
+The Galaxy S20 kernel lacks IMPORT/EXPORT_SYNC_FILE. Return an accurate
+attach result and wait on the batch timeline before notifying flush completion
+when attaching any plane fails. A signalled SYNC_FD (-1) needs no attachment.
+Keep patches 0021-0023 for ICDs without SYNC_FD support.
+
+--- a/src/gallium/drivers/zink/zink_screen.c
++++ b/src/gallium/drivers/zink/zink_screen.c
+@@ -2503,8 +2503,7 @@
+    int ret = drmIoctl(fd, DMA_BUF_IOCTL_EXPORT_SYNC_FILE, &export);
+    close(fd);
+    if (ret) {
+-      if (errno == ENOTTY || errno == EBADF || errno == ENOSYS) {
+-         assert(!"how did this fail?");
++      if (errno == ENOTTY || errno == ENOSYS) {
+          return VK_NULL_HANDLE;
+       } else {
+          mesa_loge("MESA: failed to import sync file '%s'", strerror(errno));
+@@ -2549,6 +2548,9 @@
+       return false;
+    }
+ 
++   if (sync_file_fd == -1)
++      return true;
++
+    bool ret = false;
+    int fd = zink_resource_get_dma_buf(screen, res);
+    if (fd != -1) {
+@@ -2556,20 +2558,13 @@
+          .flags = write ? DMA_BUF_SYNC_RW : DMA_BUF_SYNC_READ,
+          .fd = sync_file_fd,
+       };
+-      int ioctl_ret = drmIoctl(fd, DMA_BUF_IOCTL_IMPORT_SYNC_FILE, &import);
+-      if (ioctl_ret) {
+-         if (errno == ENOTTY || errno == EBADF || errno == ENOSYS) {
+-            assert(!"how did this fail?");
+-         } else {
+-            ret = true;
+-         }
+-      }
++      ret = drmIoctl(fd, DMA_BUF_IOCTL_IMPORT_SYNC_FILE, &import) == 0;
+       close(fd);
+    }
+    close(sync_file_fd);
+    return ret;
+ #else
+-   return true;
++   return false;
+ #endif
+ }
+ 
+--- a/src/gallium/drivers/zink/zink_batch.c
++++ b/src/gallium/drivers/zink/zink_batch.c
+@@ -818,6 +818,7 @@
+    );
+    simple_mtx_unlock(screen->queue_lock);
+ 
++   bool needs_wait = false;
+    unsigned i = 0;
+    VkSemaphore *sem = bs->signal_semaphores.data;
+    /* one semaphore per plane, unless the driver could not create them */
+@@ -829,13 +830,22 @@
+        */
+       if (res->obj->exportable_dmabuf) {
+          bool write = entry->data != NULL;
+-         for (; res && i < num_sem; res = zink_resource(res->base.b.next))
+-            zink_screen_import_dmabuf_semaphore(screen, res, sem[i++], write);
++         for (; res; res = zink_resource(res->base.b.next)) {
++            if (i < num_sem) {
++               if (!zink_screen_import_dmabuf_semaphore(screen, res, sem[i++], write))
++                  needs_wait = true;
++            } else {
++               needs_wait = true;
++            }
++         }
+       }
+ 
+       struct pipe_resource *pres = (void*)entry->key;
+       pipe_resource_reference(&pres, NULL);
+    }
++   if (needs_wait && !bs->is_device_lost &&
++       !zink_screen_timeline_wait(screen, batch_id, OS_TIMEOUT_INFINITE))
++      bs->is_device_lost = true;
+    _mesa_hash_table_clear(&bs->dmabuf_exports, NULL);
+ 
+    if (bs->sparse_semaphore)

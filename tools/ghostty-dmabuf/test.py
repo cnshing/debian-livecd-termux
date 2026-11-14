@@ -8,6 +8,8 @@ from pathlib import Path
 import subprocess
 import tempfile
 import unittest
+from unittest.mock import patch
+from types import SimpleNamespace
 
 HERE = Path(__file__).resolve().parent
 spec = importlib.util.spec_from_file_location('launcher', HERE / 'launcher.py')
@@ -16,6 +18,24 @@ spec.loader.exec_module(launcher)
 
 
 class EnvironmentTests(unittest.TestCase):
+    def test_android_kernel_guard_and_fd_close(self):
+        def version(fd, request, buffer, mutate):
+            self.assertEqual(request, (3 << 30) | (4 << 16) | 0x8000)
+            buffer[:] = b'\x0b\x00\x23\x00'
+        with patch.object(launcher.subprocess, 'check_output', return_value='x1s\n'), \
+             patch.object(launcher.os, 'uname', return_value=SimpleNamespace(machine='aarch64', release='4.19.87-27102101')), \
+             patch.object(launcher.os, 'open', return_value=7), \
+             patch.object(launcher.os, 'close') as close, \
+             patch.object(launcher.fcntl, 'ioctl', side_effect=version):
+            launcher.check_device()
+            close.assert_called_once_with(7)
+        with patch.object(launcher.subprocess, 'check_output', return_value='other-phone\n'), \
+             patch.object(launcher.os, 'uname', return_value=SimpleNamespace(machine='aarch64', release='4.19.87')), \
+             patch.object(launcher.os, 'open') as device_open:
+            with self.assertRaisesRegex(RuntimeError, 'qualified only'):
+                launcher.check_device()
+            device_open.assert_not_called()
+
     def test_private_stack_and_child_restoration(self):
         original = {'DISPLAY': ':88', 'DBUS_SESSION_BUS_ADDRESS': 'unix:path=/tmp/bus',
                     'LD_LIBRARY_PATH': str(launcher.PREFIX / 'lib') + ':/private/gnome',

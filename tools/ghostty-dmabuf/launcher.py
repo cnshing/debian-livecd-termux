@@ -5,7 +5,6 @@ import hashlib
 import json
 import os
 from pathlib import Path
-import platform
 import struct
 import subprocess
 import sys
@@ -37,7 +36,10 @@ def verify(root=ROOT):
 
 def check_device():
     device = subprocess.check_output(['/system/bin/getprop', 'ro.product.device'], text=True).strip()
-    if platform.machine() != 'aarch64' or device != 'x1s' or not platform.release().startswith('4.19.87'):
+    # Python's platform.release() returns the Android OS version, not the
+    # Linux kernel version. The kernel ABI guard must inspect uname directly.
+    uname = os.uname()
+    if uname.machine != 'aarch64' or device != 'x1s' or not uname.release.startswith('4.19.87'):
         raise RuntimeError('This package is qualified only for x1s/aarch64/Linux 4.19.87')
     fd = os.open('/dev/mali0', os.O_RDWR | os.O_CLOEXEC)
     try:

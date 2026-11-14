@@ -1,0 +1,55 @@
+name: Publish qualified Mali Ghostty assets
+
+on:
+  workflow_dispatch:
+    inputs:
+      controller_run:
+        description: Successful Native controller package run for the default routing
+        required: true
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      GH_TOKEN: ${{ github.token }}
+      CONTROLLER_RUN: ${{ inputs.controller_run }}
+    steps:
+    - uses: actions/checkout@v4
+    - name: Verify installer selection and fallback paths
+      run: |
+        bash -n install.sh packages/ghostty-panvk-dmabuf/build.sh
+        python3 tests/packaging/test-mali-terminal-install.py
+        python3 tests/native/test-terminal-environment.py
+    - name: Retrieve the qualified stack and controller
+      run: |
+        set -euo pipefail
+        gh run download 43596695017 -n ghostty-panvk-dmabuf-aarch64 -D assets
+        gh run download 43596695017 -n ghostty-panvk-dmabuf-sources -D sources
+        cp sources/*_sources.tar.gz assets/
+        cd assets
+        sha256sum --check SHA256SUMS
+        cd ..
+        test "$(gh run view "$CONTROLLER_RUN" --json conclusion --jq .conclusion)" = success
+        sha=$(gh run view "$CONTROLLER_RUN" --json headSha --jq .headSha)
+        gh run download "$CONTROLLER_RUN" -n "native-controller-$sha" -D controller
+        test "$(dpkg-deb -f controller/livecd-desktop_*.deb Version)" = 0.2.0-18
+        cp controller/livecd-desktop_*.deb assets/
+        python3 - <<'PY'
+        import hashlib, json, pathlib
+        p = json.load(open('packages/ghostty-panvk-dmabuf/release.lock.json'))
+        binary = pathlib.Path('assets') / p['controller_file']
+        assert hashlib.sha256(binary.read_bytes()).hexdigest() == p['controller_sha256']
+        PY
+        cd assets
+        sha256sum *.deb *_sources.tar.gz > SHA256SUMS
+    - name: Publish pinned prerequisites without changing the latest full release
+      run: |
+        gh release create ghostty-panvk-dmabuf-1.0-2 assets/* \
+          --prerelease --target "$GITHUB_SHA" \
+          --title 'Qualified Mali-G77 Ghostty DMA-BUF stack 1.0-2' \
+          --notes 'Exact x1s-qualified GTK GL DMA-BUF stack and complete corresponding sources from Actions run 43596695017. Includes the desktop controller that selects this stack on compatible hardware. Other Mali devices retain the existing terminal path. Source and installation details: tools/ghostty-dmabuf/README.md in the tagged commit.'

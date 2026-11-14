@@ -1,12 +1,31 @@
-# Opt-in Ghostty GTK GL DMA-BUF package
+# Qualified Ghostty GTK GL DMA-BUF package
 
 `ghostty-panvk-dmabuf` installs the exact private stack qualified on Galaxy S20
 `x1s` (Mali-G77, Android 13, Linux 4.19.87, kbase JM 11.35, Termux aarch64).
-It provides its own command and libraries. Installing it does not change the
-desktop controller, normal `ghostty`, system GTK/Mesa, global Vulkan ICDs or
-default terminal selection. Python, Ghostty 1.4.0 or later, normal GTK resources
+It provides its own command and libraries. System GTK/Mesa, global Vulkan ICDs
+and the compositor's renderer stay separate. Python, Ghostty 1.4.0 or later, normal GTK resources
 and the declared Termux library dependencies must already be available or
 installed by apt.
+
+## Automatic installation on compatible Mali devices
+
+`bash install.sh` now detects the tested x1s/aarch64/Linux 4.19.87/JM 11.35 ABI
+and installs this stack by default. Desktop terminal requests and the Terminal
+overlay select it automatically with `livecd-desktop` 0.2.0-18 or newer. Every
+launch checks the installed payload and device guard before selecting it.
+Other Mali devices retain the existing path; `/dev/mali0` alone is insufficient.
+The saved desktop renderer stays unchanged.
+
+Older online repository tarballs get the exact stack and controller from the
+[pinned prerequisite release](https://github.com/cnshing/debian-livecd-termux/releases/tag/ghostty-panvk-dmabuf-1.0-2),
+with SHA-256 validation before APT installs them. New repository builds include
+`packages/ghostty-panvk-dmabuf` normally. Offline installation requires a tarball
+containing both packages and their dependencies; it never downloads a fallback.
+Set `LIVECD_GHOSTTY_DMABUF=0` in the desktop's launch environment to retain the
+normal terminal path explicitly. A missing, incompatible or corrupt private
+stack also retains that path.
+
+## Manual installation
 
 Download both artifacts from the manual **Ghostty opt-in DMA-BUF package**
 Actions run: the binary package and its complete corresponding source bundle.

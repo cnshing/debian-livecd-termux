@@ -18,6 +18,7 @@ import uuid
 
 from graphics import apply_renderer, legacy_drawing, preferred_renderer
 from terminal import environment as terminal_environment
+from terminal import command as ghostty_command
 from integrations import Integrations
 
 PREFIX = Path('/data/data/com.termux/files/usr')
@@ -263,7 +264,7 @@ def cleanup(tag):
 
 
 def terminal_command(cwd):
-    return [str(PREFIX / 'bin/ghostty'), '--gtk-single-instance=false', '--working-directory=' + cwd]
+    return ghostty_command(['--gtk-single-instance=false', '--working-directory=' + cwd])
 
 
 def launch_terminal(env, cwd, emulator='ghostty'):
@@ -271,15 +272,15 @@ def launch_terminal(env, cwd, emulator='ghostty'):
         raise ValueError('Expected an existing absolute native directory')
     if emulator != 'ghostty':
         raise ValueError('Unknown native terminal emulator')
-    # As the Terminal overlay's launcher does: Ghostty 1.4 cannot create its surface while GTK
-    # also draws through GL on Zink. The terminal itself still renders with OpenGL.
+    # Use the qualified private GTK GL stack when available; otherwise retain
+    # the compatibility environment used by the Terminal overlay.
     return subprocess.Popen(terminal_command(cwd), env=terminal_environment(env), cwd=cwd, start_new_session=True)
 
 
 def standalone_terminal(cwd):
     if not Path(cwd).is_dir() or not Path(cwd).is_absolute():
         raise ValueError('Expected an existing absolute native directory')
-    env = environment()
+    env = terminal_environment(environment())
     tag = uuid.uuid4().hex
     env['LIVECD_NATIVE_SESSION'] = tag
     runtime = tempfile.TemporaryDirectory(prefix='livecd-terminal-', dir=RUNTIME.parent)

@@ -119,6 +119,8 @@ jobs:
       run: python3 tests/native/test-graphics.py
     - name: Test Ghostty context compatibility
       run: python3 tests/native/test-terminal-environment.py
+    - name: Test automatic Mali terminal setup and offline fallback
+      run: python3 tests/packaging/test-mali-terminal-install.py
     - name: Test the camera supervisor and its desktop wiring
       run: python3 tests/camera/test-camera-controller.py
     - name: Test GNOME wallpaper registration

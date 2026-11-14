@@ -102,6 +102,7 @@ class PanVKBrowsers(unittest.TestCase):
                 '{"ICD": {"library_path": "libvulkan_panfrost.so"}}')
         receipt = self.tmp / 'build-source.json'
         receipt.write_text('0010-clip-pixmap-damage')
+        real_exists = os.path.exists
         for patch in (
             mock.patch.dict(os.environ, {'DISPLAY': ':5'}, clear=True),
             mock.patch.object(acceleration, 'settings', return_value={}),
@@ -112,7 +113,10 @@ class PanVKBrowsers(unittest.TestCase):
             mock.patch.object(acceleration, 'ensure_daemon'),
             mock.patch.object(graphics, 'PANVK', self.panvk),
             mock.patch.object(graphics.os, 'access', return_value=True),
-            mock.patch.object(acceleration.os.path, 'exists', return_value=False),
+            # Python 3.14's pathlib.exists also calls os.path.exists. Hide
+            # only KGSL, retaining the real packaged-library fixture paths.
+            mock.patch.object(acceleration.os.path, 'exists',
+                side_effect=lambda path: False if str(path) == '/dev/kgsl-3d0' else real_exists(path)),
             mock.patch.object(mali, 'available', return_value=True),
         ):
             patch.start()

@@ -154,19 +154,43 @@ were not exercised. QPA evidence is in `vk-basic-release-01/` and
 
 Research `0008` adds `PANVK_G77_NO_MERGE=1`, a diagnostic that disables workgroup
 merging consistently in compilation and dispatch and gives it a separate cache
-identity. This tests a hypothesis about the barrier-free failures; it is not
-yet a verified fix. Build:
-[43593759926](https://github.com/cnshing/debian-livecd-termux/actions/runs/43593759926).
-The CTS runner records this mode explicitly with `--unmerged-compute`.
+identity. Build [43593759926](https://github.com/cnshing/debian-livecd-termux/actions/runs/43593759926)
+produced Android SHA-256
+`e0839fc06d2ea096cc29a9749ee2f8d50b5a873dd8354902ffa4608079de653d`.
+It still fails maximum-local-size X at invocation 288 of 512. Disabling optional
+write-back host memory with `PANVK_DEBUG=no_wb_mmap` also fails on the unmodified
+source baseline. Neither diagnostic is a fix; `0008` stays off main. Evidence:
+`vk-max-local-unmerged-01/` and `vk-max-local-source-uncached-01/`.
+The runner records these modes explicitly with `--unmerged-compute` and
+`--uncached-host-memory`.
+
+Smaller controls narrow the failure without resolving it. A barrier-free
+six-workgroup oracle passes 49,152 words at local X=512, with buffer robustness
+both enabled and disabled. A reduced CTS fixture using specialization constants,
+one workgroup, scalar stores, explicit buffer barriers, flush and invalidate
+passes 512 words for Vulkan 1.1 and 1.3 SPIR-V. Raw ICD, Termux loader, preloaded
+Android platform dependency and supported Vulkan 1.1–1.3 core-feature controls
+also pass. Thus the failure is not explained by the absence of barriers,
+specialization, core buffer robustness, loader use or those core feature bits
+alone. Retain the failing CTS result; these reduced passes cannot replace it.
+The `bare-*` and `cts-max-*` probes and their controls are documented in
+`tools/panvk-probes/workgroups/README.md`.
+
+A separate release `dEQP-VK.info.*` run stopped after nine passes, one unsupported
+case and `device_memory_budget_multi_instance` failing. Its QPA reports that
+heap 0 usage did not increase when allocation and budget query used different
+Vulkan instances. The single-instance budget case passed. Evidence:
+`temp/panvk-qualification/evidence/vk-general-info-release-01/`. This is another
+baseline blocker, separate from workgroup lowering.
 
 `tools/panvk-probes/cts/run.py` lists the requested cases and executes one at a
 time, recording QPA results, exit status, mapped libraries and binary hashes.
 It stops at the first failure/crash/timeout, enforces a 3 GB available-memory
 floor and a run time limit, and never counts an empty or all-skipped run as a
 pass. Bounded successful chunks can resume only with matching binary identities
-and selection. Resumed results retain their original QPA/log directory. Six
+and selection. Resumed results retain their original QPA/log directory. Seven
 host tests cover parsing, resume, failure stopping, process exit failures,
-all-skipped runs and the explicit merge mode. Use only the X11 dependency directory in
+all-skipped runs and the explicit merge/host-memory modes. Use only the X11 dependency directory in
 `LD_LIBRARY_PATH`; the Vulkan suite loads Termux's Vulkan **loader**, not the raw
 ICD as a loader. For example, with a freshly extracted CTS artifact on the phone:
 
@@ -233,6 +257,14 @@ maximum channel error 0, 40 GPU Ghostty captures, rejected stale-frame controls,
 normal Ghostty exit and preserved session isolation. Presentation uses CPU
 readback. Evidence:
 `temp/panvk-qualification/evidence/nested-slices/desktop-20-01/`.
+
+The first 30-minute attempt stopped after six samples through 151.5 seconds
+because another owner's private X93 display appeared. None of the monitored
+workloads exited, but isolation failed; this is not a completed soak. Evidence:
+`temp/panvk-qualification/evidence/nested-slices/soak-30min-01/`. Retry 02 was
+stopped deliberately to yield the shared lock to a previously queued short
+package test. Neither partial interval counts toward the required continuous
+1,800 seconds.
 
 The private harness can run the 20 capture cycles and 30-minute soak together:
 
@@ -391,7 +423,8 @@ It checks declarations added by 1.4; it does not requalify inherited Vulkan
 requirements or prove their behavior. Its report always records
 `conformance_proven: false`. Local report:
 `temp/panvk-qualification/vulkan14-audit.json`. In particular, a true
-`largePoints` flag cannot clear the known point-rendering defect.
+`largePoints` flag cannot establish correct point rendering; use the rendering
+control below.
 
 1. **Change `get_api_version()`** in the packaged driver's source to return 1.4 for
    architecture 9 on kbase, as a patch in `tools/panvk-probes/driver-patches/`.
@@ -411,6 +444,26 @@ requirements or prove their behavior. Its report always records
 Do not raise the number without step 2. A wrong 1.3 costs nothing here; a wrong 1.4 makes
 applications use paths that were never exercised.
 
+### Isolated point-size result, 2026-11-14
+
+The point-size-only variant in Actions
+[43595656433](https://github.com/cnshing/debian-livecd-termux/actions/runs/43595656433)
+passes the 11-pixel point control in both ABIs: 121 yellow pixels, plus 185 green
+wide-line pixels and 1,154 triangle pixels. The Android 64×64 image is byte equal
+to the saved lavapipe reference. Patched ICD SHA-256 values:
+
+- Android: `d8cc7af890341631df873a552ad4fe89c469751d68d3e801cf2a614277fcf361`
+- glibc: `f76b5c7181b32470608f9cb09dade82b6c154f82a3e3aa5578d19c53af6d3f5c`
+
+The Android binary also passes two private GNOME/GTK cycles: four captures,
+maximum channel error 0, stale-frame control rejected and session isolation
+preserved. The earlier combined X11/point-size failure is not reproduced in
+this bounded point-size-only test. Evidence:
+`temp/panvk-qualification/evidence/point-only/{graphics-01,desktop-gtk-02-01}/`.
+This build has no large-workgroup series and exposes GL 4.2. Its separate Ghostty
+attempt exits before shell readiness, so it does not qualify Ghostty or the
+combined point-size/workgroup driver. No installed driver was changed.
+
 ## Shared prerequisite: a package that can carry a patch
 
 Both changes are patches to the driver, and the package installs upstream's release
@@ -424,8 +477,9 @@ with the workgroup series. What is missing:
   release, but byte equality with the release cannot be shown. Installed desktop validation
   (30 of 30) is still required before changing the normal package's binary pins.
 - **Separate variants now exist in CI.** The `driver-patches/` pair (X11 sonames, point
-  size) fails GTK swapchain creation and was never bisected. Use `variant=x11` and
-  `variant=point-size` to qualify each independently; keep new patches isolated as well.
+  size) failed GTK swapchain creation together. The isolated `point-size` variant
+  now passes the rendering control and short GTK run above; `x11` still needs its
+  independent test. Keep new patches isolated as well.
 - A source-built driver can link Termux's X11 library names directly, which would retire
   the package's `bionic/x11` link directory.
 

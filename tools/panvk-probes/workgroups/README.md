@@ -1,61 +1,85 @@
 # G77 large-workgroup experiment
 
-Research only. The installed PanVK package and desktop configuration are not
-changed. Builds run only in GitHub Actions (`panvk-workgroups.yml`).
+Builds run in GitHub Actions (`panvk-workgroups.yml`). The installed driver and
+managed desktop selection stay on their existing packages.
 
-Source: soulexit/panvk-kirin990 c024c056ac2426acead6a8741ccc38081964fddb,
-`patches/mesa-26.3/0012`, `0044`, `0061` (MIT; license beside the patches).
-These three patches apply to our reconstructed p0175 tree without other G76
-patches. The independent series deliberately excludes the earlier point-size
-and X11-soname experiment, which regressed GTK presentation.
+Patches `0001`–`0003` import soulexit/panvk-kirin990
+`c024c056ac2426acead6a8741ccc38081964fddb`, patches `0012`, `0044`, `0061`
+(MIT; license beside the patches). `0004` gates architecture-9 lowering with
+`PANVK_G77_LWG=1`. `0005` pads partial subgroups and masks excess logical lanes;
+`0006` separates pipeline and disk caches by mode. `0007` adds continuation-based
+nested barriers, separately gated by `PANVK_G77_NESTED=1`, including live-value
+spills, per-copy scratch and dynamic loops/branches. This series excludes the
+independent X11-soname and point-size patches.
 
-The fourth patch enables the pass for PAN_ARCH=9 only with PANVK_G77_LWG=1.
-It uses half the device's thread limit, requires subgroup-aligned copy sizes,
-and rejects compute shaders still above that limit after preprocessing.
-Unsupported large workgroups must fail pipeline creation, never GPU execution.
+With the large-workgroup opt-in, the driver reports 1024 invocations and Zink
+exposes GL 4.6/GLES 3.2 without version overrides. This remains experimental:
+passing these probes does not establish conformance. Do not enable it globally
+before the remaining CTS and desktop gates in
+[PANVK-VERSION-BUMP-HANDOFF.md](../../../docs/native/PANVK-VERSION-BUMP-HANDOFF.md).
+Unsupported large workgroups must fail pipeline creation before dispatch.
 
-For this opt-in **experimental subset only**, the Vulkan workgroup limits are
-1024. This is not a claim of Vulkan or OpenGL 4.3 conformance. Barriers in
-control flow, awkward workgroup sizes, variable workgroups and other unhandled
-patterns are not a general implementation. No GL/GLSL version override is used.
-Do not set this environment variable for the managed desktop or normal apps.
-Shader caches must be disabled during the experiment because the opt-in is not
-part of the upstream cache identity.
+The CI artifact contains baseline/patched ICDs and Android probes. Run from a
+fresh private directory on x1s:
 
-The CI artifact contains a baseline ICD, patched ICD and Android probes. On
-x1s, in a fresh private directory, run its probes with:
-
-```
-python workgroups/run.py --baseline /private/libvulkan_panfrost.so \
-  --patched /private/patched/libvulkan_panfrost.so --out /private/results-new
+```sh
+python workgroups/run.py --baseline /private/base.so --patched /private/patched.so \
+  --nested --out /private/results-uncached
 ```
 
-The runner tests 128/256-invocation baseline and opt-out controls before enabling
-the pass. Larger workgroups are tested only with the pass enabled, since register
-pressure can lower the original hardware residency limit. It
-never dispatches beyond advertised limits. Each successful case checks all 16
-output words per invocation against a CPU oracle: local/global IDs, workgroup
-sizes, multiple dispatch groups, shared-memory atomics and barriers, subgroup
-IDs/count/reduction/ballot, module-private variables and values live across
-barriers. Tests cover 128, 256, 512, 960 and 1024 invocations with 1D, 2D and 3D
-workgroups. Uniform loop barriers and a prime-sized workgroup are expected
-pipeline rejections. Each process has a bounded wait; stop at the first error.
+Without `--nested`, the runner requires the nested case to be refused. With it,
+loop, uniform-branch, break/continue and 769-invocation nested cases must produce
+correct output. Baseline and opt-out controls precede opt-in dispatches; shaders
+above advertised limits are never dispatched. Every successful case checks 16
+words per invocation against a CPU oracle: local/global IDs, workgroup sizes,
+shared memory, atomics, subgroup operations, module-private variables and values
+live across barriers. Shapes include aligned and partial-subgroup workgroups in
+one, two and three dimensions, through 1024 invocations. Stop at the first error.
 
-Further gates before promotion: handle all required valid workgroup patterns,
-full capability audit against our exact Zink build, relevant Vulkan/GL CTS,
-Ghostty output/input correctness, and presentation regressions. The previously
-deferred 30-minute soak remains pending independently.
+Caches are disabled by default. Add `--shader-cache` for cold and warm runs in
+fresh sibling output directories; they share a private cache in their parent.
+The fixed nested driver passed all 66 decisions and 3,615,840 words across these
+three modes. It also passed 20 private GNOME/Ghostty cycles. The handoff records
+exact binary identities, 195 passing GLES compute cases on each control driver,
+and Vulkan CTS failures that still block promotion.
 
-## Ghostty app acceptance
+## Diagnostic probes
 
-The [Ghostty handoff](../../../docs/native/GHOSTTY-PANVK-HANDOFF.md) records the
-passing GPU terminal path and its limitations. Mesa 26.2.6-102 rejects unsafe
-DMA-BUF export on this ICD, allowing Ghostty's GPU-rendered CPU-readback path.
-DMA-BUF has no accepted path until actual SYNC_FD support is implemented.
+`PANVK_PROBE_STATS=1` enables compiler executable statistics. `compile` creates
+a pipeline without dispatch; preflight a new lowering before running it.
+`PANVK_PROBE_ROBUST=0` disables core buffer robustness to match CTS defaults.
 
-After staging the exact driver and Mesa artifacts described in that handoff,
-copy `ghostty-gpu.py` to `~/gpu-x1s/panvk/workgroups/` and invoke it with Python.
-It verifies library hashes and joins the existing desktop session. It does not
-install libraries or change the normal Ghostty/desktop defaults. The large
-workgroup opt-in and disabled shader cache remain mandatory; this is an
-experimental app-specific pass, not OpenGL/Vulkan qualification.
+`bare-{256,512,769,1024}.spv` produces the same output layout without barriers,
+shared memory or subgroup operations. A passing barrier-based probe alone does
+not cover this path.
+
+`cts-max-{1.1,1.3}.spv` reduces the CTS maximum-local-size test to one specialized
+workgroup, scalar stores, buffer barriers and explicit mapped-memory cache
+operations. Its CPU oracle requires every word to equal 1:
+
+```sh
+PANVK_PROBE_ROBUST=0 workgroups/check /private/driver.so \
+  workgroups/cts-max-1.3.spv 512 1 1 compile-cts-max
+PANVK_PROBE_ROBUST=0 workgroups/check /private/driver.so \
+  workgroups/cts-max-1.3.spv 512 1 1 run-cts-max
+```
+
+`PANVK_PROBE_CORE_FEATURES=1` enables the supported Vulkan 1.1–1.3 core
+features for this fixture. `PANVK_PROBE_COPY_READBACK=1` copies the mapped
+output through `memcpy` before checking, matching the CTS readback operation.
+The executable logs the selected memory type and allocation size.
+
+The check executable can load either a raw ICD or a Vulkan loader. For a loader,
+set `VK_DRIVER_FILES` to a private ICD JSON selecting the intended driver.
+
+## Older Ghostty launcher snapshot
+
+`ghostty-gpu.py` retains its older hash-pinned driver and Mesa 26.2.6-102 snapshot.
+After staging those exact artifacts from the
+[Ghostty handoff](../../../docs/native/GHOSTTY-PANVK-HANDOFF.md), copy the launcher
+to `~/gpu-x1s/panvk/workgroups/` and invoke it with Python. It checks hashes and
+joins the existing session without changing its defaults. That older snapshot
+still requires its disabled shader cache and uses GPU rendering with CPU
+presentation readback. It is distinct from the newer cache-qualified nested
+binary. Current DMA-BUF work is documented separately in
+[PANVK-SYNC-FD-HANDOFF.md](../../../docs/native/PANVK-SYNC-FD-HANDOFF.md).

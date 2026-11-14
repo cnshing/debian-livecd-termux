@@ -217,6 +217,8 @@ int main(int argc, char **argv)
    while (type < memory.memoryTypeCount && (!(req.memoryTypeBits & (1u << type)) ||
           (memory.memoryTypes[type].propertyFlags & want) != want)) type++;
    if (type == memory.memoryTypeCount) return 1;
+   printf("memoryType=%u properties=0x%x allocationBytes=%llu\n", type,
+          memory.memoryTypes[type].propertyFlags, (unsigned long long)req.size);
    VkMemoryAllocateInfo mai = {.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
       .allocationSize = req.size, .memoryTypeIndex = type};
    VkDeviceMemory allocation;
@@ -282,6 +284,16 @@ int main(int argc, char **argv)
    CHECK(vkWaitForFences(device, 1, &fence, VK_TRUE, 5000000000ull));
    if (cts_max) {
       CHECK(vkInvalidateMappedMemoryRanges(device, 1, &mapped_range));
+      const char *copy_readback = getenv("PANVK_PROBE_COPY_READBACK");
+      if (copy_readback && !strcmp(copy_readback, "1")) {
+         uint32_t *copy = malloc(words * sizeof(*copy));
+         if (!copy) return 1;
+         memcpy(copy, map, words * sizeof(*copy));
+         map = copy;
+         puts("readback=memcpy");
+      } else {
+         puts("readback=direct");
+      }
       size_t wrong = 0;
       for (unsigned i = 0; i < n; i++) if (map[i] != 1) {
          if (wrong < 12) printf("mismatch i=%u got=%u expected=1\n", i, map[i]);

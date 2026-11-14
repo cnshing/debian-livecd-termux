@@ -1,0 +1,40 @@
+Drop late decoder output for every codec, not only AV1.
+
+When a fence is destroyed the client reuses its VA surface. For VP9, HEVC
+and H.264 the pending entry stayed in use and not ready, so a MediaCodec
+frame that arrived late was still copied into the reused surface and an
+older picture flashed back. Wait for it (bounded) at fence destruction as
+AV1 already did, then drop anything later.
+
+--- a/src/gallium/frontends/va/tva_bridge.c
++++ b/src/gallium/frontends/va/tva_bridge.c
+@@ -924,6 +924,10 @@
+     memset(p, 0, sizeof(*p));
+     p->in_use = true;
+     p->unit_seq = unit_seq;
++    /* Every codec recycles a surface once its fence is destroyed.  Keep a
++     * late MediaCodec output out of the reused surface (seen as an older
++     * frame flashing back), not only for AV1. */
++    p->drop_on_fence_destroy = fence != NULL;
+     if (target) {
+         struct pipe_resource *res[4] = {0};
+         target->get_resources(target, res);
+@@ -4807,15 +4811,15 @@
+         mtx_lock(&c->pend_mutex);
+         const uint64_t wait_elapsed = os_time_get_nano() - wait_start;
+         if (!p->ready || wait_elapsed >= 1000000ull)
+-            TVA_TRACE("recycled AV1 fence wait unit=%u ready=%d wait_ms=%u "
++            TVA_TRACE("recycled fence wait unit=%u ready=%d wait_ms=%u "
+                       "elapsed=%.3f ms", p->unit_seq, p->ready, wait_ms,
+                       (double)wait_elapsed / 1000000.0);
+         if (!p->ready) {
+-            TVA_TRACE("recycled AV1 fence timed out unit=%u", p->unit_seq);
++            TVA_TRACE("recycled fence timed out unit=%u", p->unit_seq);
+             fail = true;
+         } else if (!p->failed && !p->copied && p->staging) {
+             p->copied = tva_copy_frame(c, p);
+-            TVA_TRACE("recycled AV1 fence copy unit=%u result=%d",
++            TVA_TRACE("recycled fence copy unit=%u result=%d",
+                       p->unit_seq, p->copied);
+             if (!p->copied)
+                 fail = true;

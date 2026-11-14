@@ -1,0 +1,28 @@
+diff --git a/src/panfrost/vulkan/panvk_physical_device.c b/src/panfrost/vulkan/panvk_physical_device.c
+--- a/src/panfrost/vulkan/panvk_physical_device.c
++++ b/src/panfrost/vulkan/panvk_physical_device.c
+@@ -443,6 +443,10 @@ init_shader_caches(struct panvk_physical_device *device,
+       ? 1 + 2 * debug_get_bool_option("PANVK_G77_NESTED", false) : 0;
+    _mesa_blake3_update(&blake3_ctx, &g77_lwg, sizeof(g77_lwg));
+ 
++   const uint8_t g77_no_merge = pan_arch(device->kmod.dev->props.gpu_id) == 9 &&
++      debug_get_bool_option("PANVK_G77_NO_MERGE", false);
++   _mesa_blake3_update(&blake3_ctx, &g77_no_merge, sizeof(g77_no_merge));
++
+    unsigned char blake3[BLAKE3_KEY_LEN];
+    _mesa_blake3_final(&blake3_ctx, blake3);
+ 
+diff --git a/src/panfrost/vulkan/panvk_vX_shader.c b/src/panfrost/vulkan/panvk_vX_shader.c
+--- a/src/panfrost/vulkan/panvk_vX_shader.c
++++ b/src/panfrost/vulkan/panvk_vX_shader.c
+@@ -5991,7 +5991,9 @@
+ #if PAN_ARCH >= 9
+       nir_shader_gather_info(nir, nir_shader_get_entrypoint(nir));
+       variant->info.cs.allow_merging_workgroups =
+-         valhall_can_merge_workgroups(nir);
++         valhall_can_merge_workgroups(nir) &&
++         (PAN_ARCH != 9 ||
++          !debug_get_bool_option("PANVK_G77_NO_MERGE", false));
+ 
+       /* With merged workgroups, we need to use different divergence analysis
+        * options to take into account that threads from different workgroups

@@ -10,60 +10,102 @@ Read [ENCODING.md](ENCODING.md) for the design and the Adreno results, and
 what works, what is blocked and by what, and what to do next. Paths under `temp/` are local
 files that Git ignores.
 
-## Takeover checkpoint — 2026-11-14 01:31 UTC (Nov 13 Pacific)
+## Checkpoint — 2026-11-14 06:40 UTC (Nov 13 Pacific)
 
-This session has stopped at the user's request so another agent can continue.
-**Browser hardware encoding is not enabled by default.** Native encoding already
-uses hardware where the driver is installed. Do not enable browser defaults until
-actual browser output, software-decoded pixels and WebRTC all pass.
+**Browser hardware encoding is still not enabled by default.** Native encoding
+already uses hardware where the driver is installed.
 
-- **Worktree:** `/home/cs/debian-livecd-termux/temp/encoding-ci-worktree`.
-  Use the existing **single CI branch `fix/chromium-webcodecs-shmem`**, or main;
-  the user explicitly prohibited multiple branches. Latest implementation/evidence
-  commit before this checkpoint is `d5e3c11`; CI bootstrap is `0feaa97`.
-  The root checkout contains older/user changes: leave them untouched and work in
-  this worktree. Production package builds go through GitHub CI.
-- **CI:** dependency bootstrap [43538498322](https://github.com/cnshing/debian-livecd-termux/actions/runs/43538498322)
-  is **in progress in Build**, checked at this checkpoint. It automatically
-  dispatches the normal Chromium build after success. Do not start a duplicate.
-  Inspect the child run when it appears; only the child produces the Chromium
-  revision 2 artifact. The original six-hour run timed out (details below).
-- **Phone released:** `temp/PHONE-STATUS` is available. All private processes from
-  these probes stopped. Desktop PID 23548, X server 23573, GNOME shell 23741 and
-  shared daemon 26041 were still running unchanged. Recheck ownership under
-  `temp/PHONE-STATUS.lock` before taking the phone.
-- **Connection:** wireless ADB currently has no device. LAN SSH works via the
-  ignored helper `temp/gpu-x1s/encoding-acceptance-20261113/ssh-lan`; it connects
-  to `192.168.1.238:8022` and verifies `temp/gpu-x1s/known_hosts` with host alias
-  `x1s-gpu`. The older `temp/gpu-x1s/ssh` helper depends on ADB and fails here.
-- **Private tested runtime:** phone
-  `~/gpu-x1s/eaccept-ff4/root/data/data/com.termux/files/usr` contains Firefox
-  FFmpeg revision 4 and VA driver revision 8 from successful CI 43436860855.
-  These are extracted test libraries, not installed package replacements.
-- **Results:** Firefox H.264/VP9 hardware output and flush work (60/60), but
-  ordinary canvas WebCodecs and H.264 WebRTC colours still fail. Explicit BT.709
-  input controls pass; they isolate the matrix/signalling issue, not acceptance
-  of the normal path. HEVC's requested WebCodecs config remains unsupported.
-  The anomalous 450 fps comes from Mozilla's WebRTC encoder configuration before
-  FFmpeg/VA. Detailed measurements and source links follow below.
-- **Evidence:** ignored host directory
-  `temp/gpu-x1s/encoding-acceptance-20261113/` has `status.json`, CI timeout log,
-  source snapshots, probe scripts, and gzip-validated `firefox4-phone-logs.tgz`
-  plus `firefox4-bt709-logs.tgz`. Archives exclude browser profiles. The committed
-  `tests/video-encode/webcodecs.html` was exercised on the S20 with VP9/BT.709:
-  60 chunks/60 decoded pictures, no encode/flush error, maximum channel error 12.
-  H.264 and VP9 explicit-input controls also independently software-decode with
-  error 2 under BT.709 versus 21 under default/BT.601.
+- **Worktree and branch:** `/home/cs/debian-livecd-termux/temp/encoding-ci-worktree`, the
+  single CI branch `fix/chromium-webcodecs-shmem`. The root checkout holds other work: leave it.
+- **Chromium revision 2 is not built yet.** The dependency bootstrap
+  [43538498322](https://github.com/cnshing/debian-livecd-termux/actions/runs/43538498322)
+  compiled for 2 h 20 min and then failed to upload: an artifact refuses the colon in
+  `ca-certificates-java_1:2026.10.20-1_all.deb`. The browser job would have failed the same
+  way after its own build. `058ebe1` leaves the epoch out of uploaded file names and restores
+  the builder's names from each package's control fields. The bootstrap was restarted as
+  [43564525031](https://github.com/cnshing/debian-livecd-termux/actions/runs/43564525031)
+  at 06:04 UTC and starts the browser build itself when it succeeds. Do not start a
+  duplicate, and **do not change `packages/chromium` while the chain runs**: the dependency
+  artifact is named by that recipe's hash, and the browser job would not find it.
+- **Firefox WebRTC is fixed in a private runtime** (`android-firefox-video` 9.0.2-5, below).
+  The failed "colour" check was the frame rate, not the colour matrix.
+- **Firefox WebCodecs from a canvas has the same colour error with Firefox's own software
+  encoder.** It is Firefox's behaviour, not this encoder's (below). Whether that still
+  blocks a default is the user's decision.
+- **Phone:** released, `temp/PHONE-STATUS` says available. Revision 5 is extracted at
+  `~/gpu-x1s/eaccept-ff5b` on the S20, not installed. LAN SSH works through
+  `temp/gpu-x1s/encoding-acceptance-20261113/ssh-lan`; the phone was off the network
+  between about 01:35 and 05:55 UTC.
+- **Evidence:** `temp/gpu-x1s/encoding-acceptance-20261113/`: `firefox5-control-logs.tgz`,
+  `firefox5-rate-logs.tgz` (no browser profiles), the probes `accept-firefox-webrtc5.py` and
+  `accept-firefox-webcodecs5.py`, and the runners `run5.sh` and `runff.sh`.
 
-**Next agent:** follow the existing CI chain and privately stage Chromium revision
-2 when ready. Run constant-bitrate WebCodecs with saved-stream software pixel
-checks, then H.264/VP9 WebRTC; installed revision 1's baseline is not acceptance
-of revision 2. Meanwhile fix colour conversion/signalling without changing decoder
-settings or loosening pixel thresholds, and trace the WebRTC frame-rate source.
-Default gating must distinguish fixed Bionic Chromium revision 2 from revision 1
-and prebuilt Chrome; the existing `livecd-vaapi.json` receipt lacks a revision
-field, so a version-only check is insufficient. Firefox, Chrome and Serein defaults
-remain gated by their failures below.
+**Next:** when the Chromium chain finishes, stage revision 2 privately and run
+constant-bitrate WebCodecs with saved-stream software pixel checks, then H.264 and VP9
+WebRTC. Decide the two Firefox questions under "What to do next".
+
+## Firefox: frame rate and colour controls (2026-11-14)
+
+### The WebRTC failure was the declared frame rate
+
+Firefox's WebRTC sender does not tell the encoder the capture rate. It passes libwebrtc's
+`VideoCodec::maxFramerate`, which
+[`VideoStreamFactory::SelectFrameRate`](https://github.com/mozilla-firefox/firefox/blob/28b7a7bffb5f82828143d9ad63839ad263b598be/dom/media/webrtc/libwebrtcglue/VideoStreamFactory.cpp#L336)
+computes as the H.264 level's macroblock rate over the picture size: 108,000 for level 3.1,
+so 450 fps at 320x180, 211 at 480x270 and 117 at 640x360. The three requests in the old log
+are those three sizes. VA-API has no timestamps, and the daemon numbers pictures at the
+declared rate, so the Exynos encoder spread the bitrate over 450 pictures a second while
+about 27 arrived.
+
+| Run on the S20, same page, 30 fps canvas | Sent | Received | Colour check |
+| --- | --- | --- | --- |
+| Revision 4, as Firefox declares | 86 kb/s of a 288 kb/s target | 320x180, never larger | fails (the page requires 640 wide; earlier run also two samples off) |
+| Revision 4, page caps the sender at `maxFramerate: 30` | 156 kb/s | 640x360 | passes |
+| Revision 5, as Firefox declares | 155 kb/s | 640x360, 246 encoded, 245 decoded | passes |
+
+The cap is the only difference between the first two rows, so the rate is the cause.
+Revision 5 (`0102-follow-real-picture-rate.patch`, CI
+[43566269511](https://github.com/cnshing/debian-livecd-termux/actions/runs/43566269511))
+gives the driver the declared rate up to 60 fps, otherwise 30, and scales the rate-control
+bitrate by the interval measured from the pictures' timestamps. The three hardware sessions
+then open at `fps=30/1` and change bitrate once or twice each. VP9 WebRTC still uses
+Firefox's software encoder and passes.
+
+`tests/video-encode/test-firefox-ffmpeg.py` now encodes five streams per codec whose declared
+and real rates differ. Revision 4 fails two per codec, 1.0 of 2.0 Mb/s for "450 declared,
+30 sent" and for "30 declared, 15 sent"; revision 5 passes all 18 checks at 1.80 to 2.06 Mb/s.
+
+**Still open for WebRTC:** Firefox applies a bitrate change on the fly only to `libx264` and
+Android's MediaCodec
+([`ProcessReconfigure`](https://github.com/mozilla-firefox/firefox/blob/28b7a7bffb5f82828143d9ad63839ad263b598be/dom/media/platforms/ffmpeg/FFmpegDataEncoder.cpp#L287)).
+For `h264_vaapi` it rejects the change, so the stream keeps the bitrate its encoder was
+created with until the resolution changes and a new encoder starts. Congestion control
+cannot lower it in between. This runtime cannot change that. For scale: this Firefox has
+no OpenH264 plugin, so without the hardware encoder it sends no H.264 at all (the earlier
+"connected, 0 frames").
+
+### The WebCodecs canvas colour error is Firefox's own
+
+The same canvas page was run with `hardwareAcceleration: "prefer-software"`:
+
+| Encoder | Chunks, decoded | Maximum channel error | Pictures over 16 |
+| --- | --- | --- | --- |
+| Firefox software VP9 (`libvpx-vp9`, no daemon client) | 60, 60 | 22 | 16 |
+| Hardware VP9, revision 5 | 60, 60 | 22 | 16 |
+| Hardware H.264, revision 5 | 60, 60 | 22 | 16 |
+
+Firefox converts a canvas to I420 with BT.601 and then describes the stream as BT.709 in the
+decoder configuration it hands the page
+([`EncoderConfigToDecoderConfig`](https://github.com/mozilla-firefox/firefox/blob/28b7a7bffb5f82828143d9ad63839ad263b598be/dom/media/webcodecs/VideoEncoder.cpp#L605)).
+Its decoder takes a complete configured colour space over the stream's own
+(`VideoDecoder.cpp`, line 873), so writing BT.601 into the stream would not change what the
+page sees. The hardware encoder keeps the pixels it is given: the saved streams decode to
+error 2 with the matrix they were converted in. Software H.264 could not be compared; this
+Firefox reports it unsupported.
+
+Both hardware runs kept 60 units in and 60 packets out with two key frames and no bitrate
+change. Do not loosen the page's check; treat this row as "equal to Firefox's software
+encoder" and decide whether that is the bar.
 
 ## Acceptance in progress (2026-11-13)
 
@@ -76,10 +118,10 @@ prepared source, but that C++ regression test has not been compiled or run.
 [Packages CI run 43421748237](https://github.com/cnshing/debian-livecd-termux/actions/runs/43421748237)
 hit its six-hour job limit at 28,875/28,941 Ninja actions, without a compiler error.
 The adapter compiled for both host and target; its regression test remains unrun.
-Host tools consumed about 1¾ hours of that job. A dependency-only bootstrap,
-[run 43538498322](https://github.com/cnshing/debian-livecd-termux/actions/runs/43538498322),
-now builds and uploads the exact dependency packages, then automatically dispatches
-the normal Chromium build with a fresh six-hour window. The browser job reuses
+Host tools consumed about 1¾ hours of that job. A dependency-only bootstrap
+builds and uploads the exact dependency packages, then automatically dispatches
+the normal Chromium build with a fresh six-hour window. Its first run, 43538498322,
+lost its packages at upload; 43564525031 replaced it (checkpoint above). The browser job reuses
 matching dependency artifacts from the same single CI branch,
 `fix/chromium-webcodecs-shmem`; build flags are unchanged. The bootstrap does not
 publish an apt repository or a Chromium artifact. The S20 still has revision 1.
@@ -231,9 +273,9 @@ The anomalous WebRTC rate originates before FFmpeg/VA: the existing Mozilla log
 already says `Request platform encoder ... frameRate=450`.
 [`WebrtcMediaDataEncoder::CreateEncoder`](https://github.com/mozilla-firefox/firefox/blob/28b7a7bffb5f82828143d9ad63839ad263b598be/dom/media/webrtc/libwebrtcglue/WebrtcMediaDataEncoderCodec.cpp#L258)
 passes `VideoCodec::maxFramerate` directly into `EncoderConfig`, and
-`FFmpegVideoEncoder` copies that value to `AVCodecContext::framerate`. Investigate
-the upstream WebRTC rate configuration; clamping it in the driver would conceal
-the source and mishandle legitimate high-rate callers.
+`FFmpegVideoEncoder` copies that value to `AVCodecContext::framerate`. The source
+was traced and fixed on 2026-11-14 (section above), in Firefox's private FFmpeg
+rather than the driver, so other VA clients keep their declared rates.
 
 Evidence: `firefox4-bt709-{avc,vp9}-run.txt`, private daemon logs, saved chunks and
 software-decode results in the local acceptance directory; `firefox4-bt709-logs.tgz`
@@ -328,7 +370,7 @@ has AVC and HEVC only.
 | Chromium, WebCodecs `VideoEncoder` | not run | **crashes the GPU process** (Chromium CHECK) |
 | Google Chrome, WebRTC | not run | cannot connect: no network interfaces under Bionilux |
 | Google Chrome, WebCodecs | not run | same crash as Chromium |
-| Firefox | reported blocklisted (`VIDEO_ENCODING_MISSING`) before the probe fix; not rechecked | installed hardware encode fails; VP9 WebRTC software passes; private revision 4 produces hardware H.264/VP9, but WebCodecs and WebRTC colour checks still fail |
+| Firefox | reported blocklisted (`VIDEO_ENCODING_MISSING`) before the probe fix; not rechecked | installed hardware encode fails. Private revision 5: H.264 WebRTC loopback passes in hardware; WebCodecs H.264/VP9 produce 60/60 with the same canvas colour error as Firefox's software encoder; HEVC config unsupported |
 | MediaRecorder, any browser | not run | Firefox VP8 software output passes; hardware encode not accepted |
 
 **Browser hardware encoding is off by default everywhere.** No launcher passes
@@ -424,14 +466,16 @@ changing this preload, which is loaded into every desktop process.
    absent). Require confirmed hardware frames, a clean flush, independently software-decoded
    correct pixels and a passing WebRTC loopback without a GPU crash. A successful
    software fallback alone does not qualify a hardware default. Gate by fixed package
-   revision; leave prebuilt Chrome and older Chromium builds unchanged.
-2. **Fix Firefox colour handling and qualify defaults.** Private revision 4 hardware
-   output and flush work, but the browser colour checks fail (above). Retest: a page with WebCodecs `VideoEncoder`
-   (`hardwareAcceleration: 'prefer-hardware'`, `avc1.42001f`, `vp09.00.10.08`, `hvc1`),
-   `MediaRecorder`, and a WebRTC loopback, with
-   `MOZ_LOG=FFmpegVideo:5,PlatformEncoderModule:5`. Likely obstacles: the rate-control modes
-   and packed headers Firefox wants against what the driver reports, and the upload path of
-   the software surface backend.
+   revision; leave prebuilt Chrome and older Chromium builds unchanged. The receipt
+   `share/doc/chromium/livecd-vaapi.json` has no revision, and adding a field means another
+   six-hour build, so read the installed package's version from dpkg instead.
+2. **Decide Firefox's default, then qualify it.** One preference,
+   `media.use-remote-encoder.video.platform`, turns the hardware encoders on for WebCodecs
+   and WebRTC together. Two things need the user's decision first (details in the 2026-11-14
+   section): the canvas colour error that Firefox's software encoder shares, and WebRTC
+   bitrate changes that Firefox does not apply to these encoders. If it goes ahead: merge
+   revision 5, rerun `MediaRecorder` and the HEVC WebCodecs configuration, measure a call
+   whose available bitrate drops, and require the package revision in the launcher.
 3. **Chrome networking** (blocker 3), then rerun the Chrome WebRTC loopback.
 4. **Qualify Mali revision 8 for deployment** (blocker 4), retaining the existing
    native tests. Revision 7 passed 46/46 FFmpeg checks; revision 8 passes native

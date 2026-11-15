@@ -3,6 +3,7 @@ TERMUX_PKG_DESCRIPTION="Runs glibc programs, such as Google Chrome, directly on 
 TERMUX_PKG_LICENSE="MIT"
 TERMUX_PKG_MAINTAINER="@cnshing"
 TERMUX_PKG_VERSION="0.5.0"
+TERMUX_PKG_REVISION=1
 TERMUX_PKG_SRCURL=https://codeload.github.com/theonuverse/bionilux/tar.gz/4152b476db31ffa8e2bb50b060292a59e15d0031
 TERMUX_PKG_SHA256=aed1a206f8c74d0c375dfc91cde5ed4e6c43659fbbda944a5eb4538114598480
 TERMUX_PKG_BUILD_IN_SRC=true

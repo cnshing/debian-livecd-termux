@@ -1,0 +1,222 @@
+--- a/src/preload/hooks.c
++++ b/src/preload/hooks.c
+@@ -568,4 +568,217 @@
+ 
+ __attribute__((constructor)) static void on_init(void) {
+     DBG("Injection successful!\n");
+-}
+\ No newline at end of file
++}
++// ── NETLINK_ROUTE for Chromium's AddressTrackerLinux ───────────────
++// Chrome lists interfaces for WebRTC over its own netlink socket, not
++// getifaddrs. Android's SELinux refuses two of its steps from the Termux
++// app: bind() with multicast groups (live change notifications) and the
++// RTM_GETLINK dump. Chrome then logs "Could not bind NETLINK socket",
++// gives up, and WebRTC finds no interfaces and no ICE candidates.
++// Termux's own Chromium patches the same two steps in source
++// (1013-chromium-net-address-tracker.patch); Chrome cannot be patched,
++// so the preload does it: a refused multicast bind becomes a plain bind,
++// and a refused link dump is answered from ioctl(), queued for the next
++// recv on that socket.
++#include <linux/netlink.h>
++#include <linux/rtnetlink.h>
++#include <pthread.h>
++
++#define BN_NL_FDS 4096
++static struct { char *buf; size_t len; } bn_nl_queue[BN_NL_FDS];
++static pthread_mutex_t bn_nl_lock = PTHREAD_MUTEX_INITIALIZER;
++
++int bind(int fd, const struct sockaddr *addr, socklen_t len) {
++    typedef int (*fn_t)(int, const struct sockaddr *, socklen_t);
++    static fn_t real;
++    REAL(real, "bind");
++    int r = real(fd, addr, len);
++    if (r == 0 || errno != EACCES || !addr || addr->sa_family != AF_NETLINK ||
++        len < sizeof(struct sockaddr_nl))
++        return r;
++    struct sockaddr_nl plain;
++    memcpy(&plain, addr, sizeof plain);
++    if (!plain.nl_groups) return r;
++    DBG("netlink bind to groups 0x%x refused, binding without them\n", plain.nl_groups);
++    plain.nl_groups = 0;
++    r = real(fd, (struct sockaddr *)&plain, sizeof plain);
++    // Already bound, or the kernel binds on the first send anyway.
++    if (r != 0 && errno == EINVAL) r = 0;
++    return r;
++}
++
++static void nl_put(char **p, char *end, struct nlmsghdr **h, unsigned short type,
++                   unsigned seq, size_t payload) {
++    *h = NULL;
++    size_t need = NLMSG_SPACE(payload);
++    if ((size_t)(end - *p) < need) return;
++    *h = (struct nlmsghdr *)*p;
++    memset(*h, 0, need);
++    (*h)->nlmsg_len = NLMSG_LENGTH(payload);
++    (*h)->nlmsg_type = type;
++    (*h)->nlmsg_flags = NLM_F_MULTI;
++    (*h)->nlmsg_seq = seq;
++    (*h)->nlmsg_pid = 0;
++    *p += need;
++}
++
++// RTM_NEWLINK for each interface ioctl() knows, then NLMSG_DONE.
++static size_t synth_link_dump(char *buf, size_t size, unsigned seq) {
++    int s = socket(AF_INET, SOCK_DGRAM | SOCK_CLOEXEC, 0);
++    if (s < 0) return 0;
++    struct ifreq reqs[32];
++    struct ifconf ic = { .ifc_len = sizeof reqs, .ifc_req = reqs };
++    int n = ioctl(s, SIOCGIFCONF, &ic) == 0 ? ic.ifc_len / (int)sizeof(struct ifreq) : 0;
++    char *p = buf, *end = buf + size;
++    int seen[32], nseen = 0;
++    for (int i = 0; i < n; i++) {
++        struct ifreq q;
++        memset(&q, 0, sizeof q);
++        memcpy(q.ifr_name, reqs[i].ifr_name, IFNAMSIZ - 1);
++        if (ioctl(s, SIOCGIFINDEX, &q) != 0) continue;
++        int index = q.ifr_ifindex, dup = 0;
++        for (int j = 0; j < nseen; j++) dup |= seen[j] == index;
++        if (dup) continue;
++        seen[nseen++] = index;
++        unsigned flags = ioctl(s, SIOCGIFFLAGS, &q) == 0 ? (unsigned short)q.ifr_flags : 0;
++        // The kernel's IFF_LOWER_UP is not in the 16-bit ioctl flags.
++        if (flags & IFF_RUNNING) flags |= 0x10000; // IFF_LOWER_UP
++        size_t name_len = strnlen(q.ifr_name, IFNAMSIZ - 1) + 1;
++        size_t payload = NLMSG_ALIGN(sizeof(struct ifinfomsg)) + RTA_SPACE(name_len);
++        struct nlmsghdr *h;
++        nl_put(&p, end, &h, RTM_NEWLINK, seq, payload);
++        if (!h) break;
++        struct ifinfomsg *ifi = NLMSG_DATA(h);
++        ifi->ifi_family = AF_UNSPEC;
++        ifi->ifi_type = (flags & IFF_LOOPBACK) ? 772 /* ARPHRD_LOOPBACK */ : 1 /* ARPHRD_ETHER */;
++        ifi->ifi_index = index;
++        ifi->ifi_flags = flags;
++        ifi->ifi_change = 0xffffffff;
++        struct rtattr *rta = (struct rtattr *)((char *)ifi + NLMSG_ALIGN(sizeof *ifi));
++        rta->rta_type = IFLA_IFNAME;
++        rta->rta_len = RTA_LENGTH(name_len);
++        memcpy(RTA_DATA(rta), q.ifr_name, name_len - 1);
++        DBG("  synthesised RTM_NEWLINK %s index=%d flags=0x%x\n", q.ifr_name, index, flags);
++    }
++    close(s);
++    struct nlmsghdr *done;
++    nl_put(&p, end, &done, NLMSG_DONE, seq, sizeof(int));
++    return done ? (size_t)(p - buf) : 0;
++}
++
++static int is_link_dump(int fd, const void *msg, size_t len) {
++    if (fd < 0 || fd >= BN_NL_FDS || len < sizeof(struct nlmsghdr)) return 0;
++    const struct nlmsghdr *h = msg;
++    if (h->nlmsg_type != RTM_GETLINK || !(h->nlmsg_flags & NLM_F_DUMP)) return 0;
++    int domain = 0, proto = 0;
++    socklen_t l = sizeof domain;
++    if (getsockopt(fd, SOL_SOCKET, SO_DOMAIN, &domain, &l) != 0 || domain != AF_NETLINK) return 0;
++    l = sizeof proto;
++    return getsockopt(fd, SOL_SOCKET, SO_PROTOCOL, &proto, &l) == 0 && proto == NETLINK_ROUTE;
++}
++
++static int queue_link_dump(int fd, const struct nlmsghdr *request) {
++    char *buf = malloc(16384);
++    if (!buf) return 0;
++    size_t len = synth_link_dump(buf, 16384, request->nlmsg_seq);
++    if (!len) { free(buf); return 0; }
++    pthread_mutex_lock(&bn_nl_lock);
++    free(bn_nl_queue[fd].buf);
++    bn_nl_queue[fd].buf = buf;
++    bn_nl_queue[fd].len = len;
++    pthread_mutex_unlock(&bn_nl_lock);
++    DBG("netlink RTM_GETLINK refused, answered %zu bytes from ioctl\n", len);
++    return 1;
++}
++
++ssize_t sendto(int fd, const void *msg, size_t len, int flags,
++               const struct sockaddr *addr, socklen_t alen) {
++    typedef ssize_t (*fn_t)(int, const void *, size_t, int, const struct sockaddr *, socklen_t);
++    static fn_t real;
++    REAL(real, "sendto");
++    ssize_t r = real(fd, msg, len, flags, addr, alen);
++    if (r < 0 && errno == EACCES && is_link_dump(fd, msg, len) && queue_link_dump(fd, msg))
++        return (ssize_t)len;
++    return r;
++}
++
++ssize_t send(int fd, const void *msg, size_t len, int flags) {
++    return sendto(fd, msg, len, flags, NULL, 0);
++}
++
++// Hands out the queued answer, whole, as the kernel hands out one dump batch.
++static ssize_t take_queued(int fd, void *buf, size_t len, int flags, int *truncated) {
++    if (fd < 0 || fd >= BN_NL_FDS || !bn_nl_queue[fd].buf) return -1;
++    pthread_mutex_lock(&bn_nl_lock);
++    ssize_t r = -1;
++    if (bn_nl_queue[fd].buf) {
++        size_t n = bn_nl_queue[fd].len;
++        *truncated = n > len;
++        memcpy(buf, bn_nl_queue[fd].buf, n > len ? len : n);
++        r = (ssize_t)(n > len ? len : n);
++        if (flags & MSG_TRUNC) r = (ssize_t)n;
++        if (!(flags & MSG_PEEK)) {
++            free(bn_nl_queue[fd].buf);
++            bn_nl_queue[fd].buf = NULL;
++        }
++    }
++    pthread_mutex_unlock(&bn_nl_lock);
++    return r;
++}
++
++ssize_t recvfrom(int fd, void *buf, size_t len, int flags, struct sockaddr *addr,
++                 socklen_t *alen) {
++    typedef ssize_t (*fn_t)(int, void *, size_t, int, struct sockaddr *, socklen_t *);
++    static fn_t real;
++    REAL(real, "recvfrom");
++    int truncated;
++    ssize_t r = take_queued(fd, buf, len, flags, &truncated);
++    if (r >= 0) {
++        if (addr && alen && *alen >= sizeof(struct sockaddr_nl)) {
++            struct sockaddr_nl kernel = { .nl_family = AF_NETLINK };
++            memcpy(addr, &kernel, sizeof kernel);
++            *alen = sizeof kernel;
++        }
++        return r;
++    }
++    return real(fd, buf, len, flags, addr, alen);
++}
++
++ssize_t recv(int fd, void *buf, size_t len, int flags) {
++    return recvfrom(fd, buf, len, flags, NULL, NULL);
++}
++
++ssize_t recvmsg(int fd, struct msghdr *m, int flags) {
++    typedef ssize_t (*fn_t)(int, struct msghdr *, int);
++    static fn_t real;
++    REAL(real, "recvmsg");
++    if (m && m->msg_iovlen >= 1 && fd >= 0 && fd < BN_NL_FDS && bn_nl_queue[fd].buf) {
++        int truncated;
++        ssize_t r = take_queued(fd, m->msg_iov[0].iov_base, m->msg_iov[0].iov_len, flags,
++                                &truncated);
++        if (r >= 0) {
++            if (m->msg_name && m->msg_namelen >= sizeof(struct sockaddr_nl)) {
++                struct sockaddr_nl kernel = { .nl_family = AF_NETLINK };
++                memcpy(m->msg_name, &kernel, sizeof kernel);
++                m->msg_namelen = sizeof kernel;
++            }
++            m->msg_controllen = 0;
++            m->msg_flags = truncated ? MSG_TRUNC : 0;
++            return r;
++        }
++    }
++    return real(fd, m, flags);
++}
++
++int close(int fd) {
++    typedef int (*fn_t)(int);
++    static fn_t real;
++    REAL(real, "close");
++    if (fd >= 0 && fd < BN_NL_FDS && bn_nl_queue[fd].buf) {
++        pthread_mutex_lock(&bn_nl_lock);
++        free(bn_nl_queue[fd].buf);
++        bn_nl_queue[fd].buf = NULL;
++        pthread_mutex_unlock(&bn_nl_lock);
++    }
++    return real(fd);
++}

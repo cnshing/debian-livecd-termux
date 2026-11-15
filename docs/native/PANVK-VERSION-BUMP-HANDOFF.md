@@ -4,14 +4,13 @@ State on 2026-11-14, Galaxy S20 (`x1s`, Mali-G77 MC11, architecture 9, kbase job
 For whoever raises the versions the Mali stack reports. Paths under `temp/` are local files
 that Git ignores.
 
-Latest checkpoint: the nested candidate passes 195 selected GLES compute cases,
-20 private GNOME/Ghostty cycles and a continuous 30-minute soak. Three fixes
-are now available on main: process-wide memory-budget accounting, correct ION
-CPU cache mode and GPU-local coherence for imports on non-I/O-coherent GPUs.
-The final import-coherence candidate completes all selected Vulkan basic
-compute cases with 73 passes and eight unsupported cases, without diagnostic
-overrides. These are separate qualified components; combine and requalify the
-required patches before changing installed drivers or default versions.
+Latest checkpoint: the exact combined candidate builds for both ABIs, passes
+3,615,840 CPU-oracle words, 597 expanded GLES cases and installed desktop
+validation **30/30 in both default and nested modes**. The release controller
+and desktop have been restored and pass 30/30. Broader CTS exposes two remaining
+promotion blockers: placed-mapping SIGBUS and the Android private-extension
+loader boundary. Default versions and package pins remain unchanged. The exact
+combined candidate's continuous 30-minute soak is running.
 
 ## Combined qualification in progress, 2026-11-14
 
@@ -23,7 +22,28 @@ the resulting content tree is `a4db9b7adcb014dfe30ca0bfcb72e2a77913a7b2`.
 The cache patch's include context was adjusted to compose with the budget patch.
 The first combined build failed at that include context before producing a
 candidate; [corrected build 43666745173](https://github.com/cnshing/debian-livecd-termux/actions/runs/43666745173)
-is pending qualification. Driver and probe compilation remains CI-only.
+succeeded for both ABIs. Driver and probe compilation remains CI-only.
+
+| Combined artifact | SHA-256 |
+| --- | --- |
+| Bionic | `1fa20d672c80b87b6160fc9e3c9fcbb3d6aa11febdb312dc8e52993da04855da` |
+| glibc | `228f2323f8cd2ee52728eac922b239a658467c1f5ca3eb7d4c4ec1ae3584ec0f` |
+
+The exact combined pair passes seven basic processes and both graphics feature
+checks on each ABI. The glibc probe environment includes the staged X11/Wayland
+libraries followed by Chrome's normal dependency directory (which supplies
+`libdrm.so.2`); the first attempt without that directory failed to load libdrm,
+before Vulkan enumeration. Bionic's complete 16,384-byte graphics readback
+matches the previously accepted point-size image byte for byte: 121 yellow
+point pixels, 185 green line pixels and 1,154 triangle pixels.
+
+Nested compilation succeeds before dispatch. Uncached, cold-cache and warm-cache
+runs then pass **66 decisions and 3,615,840 CPU-oracle words**. Both default and
+nested modes retain their distinct cache identities. Default-mode Vulkan basic
+CTS completes **73 Pass, eight NotSupported**. Nested-mode basic, built-in
+variables, indirect dispatch, 64-bit indexing and info queries complete all
+**156 cases: 130 Pass, 26 NotSupported**, including both budget tests. Every
+case maps the exact combined Bionic driver without diagnostic filtering.
 
 Additional controls use the previously qualified import-coherence binary
 `0f793fe3dc3fe8d91447401c5c3ed8b11ca6da7f87ad55511f1f0df373246b7c`:
@@ -33,15 +53,82 @@ Additional controls use the previously qualified import-coherence binary
 - Vulkan zero-initialized workgroup memory: **617 Pass, 29 NotSupported**, all
   646 cases complete. Run 01 reached its time bound after 621 accepted cases;
   run 02 resumed with the same identity and retained each original log path.
+- GLES atomic counters and synchronization: **402/402 Pass**.
 - The existing installed Zink desktop passes **30/30** before any switch.
 
 Neither CTS control uses diagnostic feature filtering, import flags or a trace
 loader. Every case maps the intended ICD. Local evidence is under
 `temp/panvk-qualification/evidence/combined/control-{extended-01,zero-init-01,zero-init-02}/`;
-the installed control is `installed-baseline.json`. The exact combined binary
-still needs its own oracle, CTS, private integrated and installed-session checks.
-The controlled installed test will restore the original controller and release
-session afterward; it does not promote package pins or default feature flags.
+the installed control is `installed-baseline.json`. Combined evidence is in
+`oracle-{uncached,cache-cold,cache-warm}/`, `basic/`, `basic-glibc/`,
+`vk-default-basic-01/` and `vk-nested-core-01/` beneath the same directory.
+The combined nested-mode expansion also completes:
+
+| CTS selection | Pass | NotSupported |
+| --- | ---: | ---: |
+| GLES compute, atomic counters and synchronization | 597 | 0 |
+| Vulkan zero-initialized workgroup memory | 617 | 29 |
+| Vulkan compute memory barriers and host/shader concurrency | 1 | 64 |
+
+All 64 compute-barrier cases require a dedicated compute queue, which x1s does
+not expose; they do not provide barrier-execution coverage. Every executed
+case maps the combined ICD. Reports: `gles-nested-expanded-01/`,
+`vk-nested-zero-init-01/` and `vk-nested-memory-01/`.
+
+The integrated private run uses the phone's installed Mesa **26.2.6-103**, the
+staged controller and exact combined ICD. Twenty cycles pass **40 GTK captures
+with maximum channel error 0** and **40 Ghostty captures**, including stale-frame
+rejection, normal exit and preserved live-session isolation. Shell, GTK and
+Ghostty all map the combined driver and hold Mali FDs. Presentation remains the
+CPU fallback. Evidence: `desktop-integrated-20-01/` and its two pixel reports.
+
+Installed qualification temporarily selects the same staged root through the
+actual packaged controller module, then starts normal managed sessions on `:0`:
+
+| Managed session | Checks | GL / GLES | Driver |
+| --- | --- | --- | --- |
+| Combined, both opts off | 30/30 | 4.2 / 3.1 | exact combined Bionic SHA above |
+| Combined, both opts on | 30/30 | 4.6 / 3.2 | exact combined Bionic SHA above |
+| Restored release | 30/30 | 4.2 / 3.1 | unchanged release |
+
+`installed-{default,nested}-identity.json` verifies the live compositor's mapped
+library, binary hash and both environment flags. No GL version override is used.
+The two installed screenshots show Nautilus rendering the small fixture's folder
+and text file. The original controller hash is restored to
+`46eea9ffcf91ca66fd31801c725ef97b9bcb635349d0efcac9887692dec35666`;
+the home compatibility symlink is restored too. No package pin or saved default
+renderer was changed.
+
+The entrypoints under `~/.local/lib/livecd-native` are symlinks. Python imports
+from **`$PREFIX/libexec/livecd-native`**, so replacing only the home graphics
+symlink does not select the candidate. The first attempt was caught by its
+wrong-driver assertion, restored automatically and archived in
+`installed-wrong-selection-01/`; its 30/30 release result is not a candidate
+result. Resolve the actual imported module before any future controlled switch.
+
+The additional memory control stopped after two passes at
+`dEQP-VK.memory.map_placed.exact_size.size_65536`, with SIGBUS / BUS_ADRALN.
+One focused trace reproduces it on the coherence control. Android's crash log
+identifies libc `memset+172` (`stp q0, q0, [x3, #-32]`), faulting at the first
+placed page while CTS fills the surrounding file-backed reservation. This
+localizes the CPU mapping failure but does not establish its cause. No CTS test
+or allowlist has been changed. Evidence: `control-memory-01/`,
+`control-placed-trace-01/` and local `combined/placed-logcat.txt`. The rest of that
+78-case selection did not execute and cannot be called passing.
+The exact combined driver also fails the placed selection, this time at its
+first 1 MiB case (`size_1048576`, SIGBUS); the remaining twelve cases never run.
+`vk-nested-placed-01/` preserves that untraced result. The independent
+`vk-nested-android-extension-01/` selection fails with
+`Unknown extension: VK_ANDROID_native_buffer`. These remain failures; none of
+the passing subsets or installed checks establishes Vulkan conformance.
+
+`cts/ion-map-boundary.c` is a CPU-only diagnostic built by the probes workflow.
+It opens ION and memfd mappings without Vulkan or Mali, compares cached and
+uncached allocations at three sizes, and compares libc memset within the ION
+mapping against memset across its file-backed guard boundaries. Twelve finite
+child controls catch SIGBUS/SIGSEGV and report the fault stage/address through a
+pipe; caught faults still make the diagnostic exit nonzero. It has not yet run
+on x1s. Keep it separate from qualification counts and run it after the soak.
 
 ## Progress on the source-package prerequisite
 
@@ -51,7 +138,9 @@ prerelease assets and installed source provenance. Its glibc binary has the CI
 RUNPATH removed. [PANVK-SOURCE-PACKAGE.md](PANVK-SOURCE-PACKAGE.md) records the
 build, asset identities, isolated patch variants and promotion procedure.
 The normal package and launcher selection still use the upstream release.
-Installed desktop validation (30/30) remains the gate for repinning that package.
+The combined pair above passes installed validation; the pinned unmodified
+package pair remains a separate identity. Neither package is repinned while the
+combined candidate's conformance blockers remain open.
 
 ## Workgroup follow-up
 
@@ -503,8 +592,10 @@ For that final gate, the current controller's `graphics.PANVK` selects only
 it. Prepare a controller copy with **only** `PANVK` set to the candidate's
 installed root, check both ABI ICD library paths and provenance, and run the
 private harness with `--integrated --controller-dir <staged-controller>` first.
-Once those checks pass and an interruption is agreed, save the installed
-controller file/hash and session renderer, stop the managed desktop through
+Resolve the symlinked entrypoint and imported `graphics.py` first: the packaged
+module is under `$PREFIX/libexec/livecd-native`, not the home compatibility
+symlink. Once those checks pass and an interruption is authorized, save the
+actual installed module/hash, compatibility link and session renderer. Stop the managed desktop through
 its controller, atomically install that same tested graphics module, and start
 the normal Zink session. Run `desktop.py validate` in that session, preserving
 the output and compositor maps proving the candidate actually loaded. Restore

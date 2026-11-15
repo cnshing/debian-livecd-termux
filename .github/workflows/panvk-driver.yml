@@ -6,7 +6,7 @@ on:
       variant:
         description: Isolated driver change (baseline applies no patches)
         type: choice
-        options: [baseline, point-size, x11, workgroups, research]
+        options: [baseline, point-size, x11, workgroups, memory-budget, ion-cache, import-coherence, combined, research]
         default: baseline
   push:
     branches: [research/panvk-kbase-probes]

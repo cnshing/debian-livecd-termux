@@ -1,13 +1,12 @@
 --- a/src/panfrost/vulkan/panvk_physical_device.c
 +++ b/src/panfrost/vulkan/panvk_physical_device.c
-@@ -28,6 +28,7 @@
+@@ -26,5 +26,6 @@
+ #include "util/disk_cache.h"
+ #include "util/os_file.h"
++#include "util/u_debug.h"
  #include "util/os_misc.h"
  #include "util/os_time.h"
  #include "util/u_atomic.h"
-+#include "util/u_debug.h"
- #include "git_sha1.h"
- 
- #include "vk_android.h"
 @@ -436,6 +437,10 @@
     _mesa_blake3_update(&blake3_ctx, &device->kmod.dev->props.gpu_id,
                       sizeof(device->kmod.dev->props.gpu_id));

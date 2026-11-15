@@ -323,7 +323,7 @@ int main(int argc,char **argv) {
             driver.mkdir()
             manifest = {'libraries': ['mesa', 'support'], 'preloads': ['ion.so'],
                 'driver_directory': 'mesa/dri', 'mesa_library_directory': 'mesa',
-                'vulkan_icd': 'icd.json', 'ion_fallback': 'preload'}
+                'vulkan_icd': 'icd.json', 'dma_heap_preload': 'lib/heap.so'}
             for profile in ('chromium', 'ungoogled-chromium'):
                 root = prefix / 'opt/livecd-browsers' / profile
                 (root / 'lib').mkdir(parents=True)
@@ -336,8 +336,9 @@ int main(int argc,char **argv) {
                     'GALLIUM_DRIVER': 'virpipe', 'DISPLAY': ':71',
                     'TERMUX_VA_SOCKET': '/private/va.sock',
                     'LIVECD_' + profile.upper().replace('-', '_') + '_GPU': '1'}
-                for video in ('on', 'off'):
-                    with self.subTest(profile=profile, video=video), patch.dict(os.environ, env, clear=True), \
+                for video, heap in (('on', True), ('on', False), ('off', True)):
+                    with self.subTest(profile=profile, video=video, heap=heap), patch.dict(os.environ, env, clear=True), \
+                            patch.object(module, 'dma_heap_emulation', return_value=heap), \
                             patch.object(module, 'settings', return_value={}), \
                             patch.object(module, 'stack', return_value=(driver, manifest)), \
                             patch.object(module, 'ensure_daemon') as daemon:
@@ -357,6 +358,8 @@ int main(int argc,char **argv) {
                         if video == 'on':
                             self.assertTrue(observed['BIONILUX_EXTRA_PRELOAD'].startswith(
                                 str(root / 'lib/liblivecd-va-completion.so') + ':'))
+                            # The heap emulation joins only on ION-only phones.
+                            self.assertEqual(str(driver / 'lib/heap.so') in observed['BIONILUX_EXTRA_PRELOAD'].split(':'), heap, observed['BIONILUX_EXTRA_PRELOAD'])
                         else:
                             self.assertNotIn('va-completion', observed.get('BIONILUX_EXTRA_PRELOAD', ''))
                 receipt = root / 'livecd-vaapi.json'

@@ -162,12 +162,21 @@ def ensure_daemon(env):
         raise RuntimeError('Termux:VA did not create its endpoint')
 
 
+def dma_heap_emulation():
+    """Whether /dev/dma_heap must be served from ION: no heaps, ION present, not turned off."""
+    return (os.environ.get('LIVECD_DMA_HEAP_ION') != '0' and not os.path.exists('/dev/dma_heap')
+            and os.path.exists('/dev/ion'))
+
+
 def video_environment(env, selected, abi, config):
     root, manifest = selected
     mali = mali_usable()
     variant = manifest.get('mali', {}) if abi == 'glibc' and mali else {}
     libraries = ':'.join(str(root / p) for p in [*variant.get('libraries', []), *manifest['libraries']])
-    preloads = ':'.join(str(root / p) for p in manifest['preloads'])
+    # On ION-only kernels the bridge's dma-heap allocations need the heap emulation.
+    # It stays inactive where /dev/dma_heap exists or /dev/ion does not. See dma-heap.c.
+    heap = [manifest['dma_heap_preload']] if manifest.get('dma_heap_preload') and dma_heap_emulation() else []
+    preloads = ':'.join(str(root / p) for p in [*manifest['preloads'], *heap])
     if abi == 'glibc':
         env['BIONILUX_LIBRARY_PATH'] = libraries
         env['BIONILUX_EXTRA_PRELOAD'] = preloads
@@ -183,8 +192,6 @@ def video_environment(env, selected, abi, config):
     else:
         env.update(TERMUX_VA_GPU_BACKEND='kgsl', TERMUX_VA_X11_DRI3='1',
                    TERMUX_VA_CONTIGUOUS_DMABUF='1')
-    if manifest.get('ion_fallback') == 'preload':
-        env.setdefault('LIVECD_TVA_ION_FALLBACK', '1')
     decode_safeguards(env, config, mali)
     ensure_daemon(env)
 

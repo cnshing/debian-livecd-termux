@@ -4,6 +4,45 @@ State on 2026-11-14, Galaxy S20 (`x1s`, Mali-G77 MC11, architecture 9, kbase job
 For whoever raises the versions the Mali stack reports. Paths under `temp/` are local files
 that Git ignores.
 
+Latest checkpoint: the nested candidate passes 195 selected GLES compute cases,
+20 private GNOME/Ghostty cycles and a continuous 30-minute soak. Three fixes
+are now available on main: process-wide memory-budget accounting, correct ION
+CPU cache mode and GPU-local coherence for imports on non-I/O-coherent GPUs.
+The final import-coherence candidate completes all selected Vulkan basic
+compute cases with 73 passes and eight unsupported cases, without diagnostic
+overrides. These are separate qualified components; combine and requalify the
+required patches before changing installed drivers or default versions.
+
+## Combined qualification in progress, 2026-11-14
+
+The `combined` driver variant now selects eleven patches: workgroups `0001`–
+`0007`, point-size, process-wide budget, ION CPU cache mode and import coherence.
+It excludes the X11 soname and diagnostic NO_MERGE patches. Both workgroup modes
+remain opt-in. All eleven apply to the pinned baseline in an isolated index;
+the resulting content tree is `a4db9b7adcb014dfe30ca0bfcb72e2a77913a7b2`.
+The cache patch's include context was adjusted to compose with the budget patch.
+The first combined build failed at that include context before producing a
+candidate; [corrected build 43666745173](https://github.com/cnshing/debian-livecd-termux/actions/runs/43666745173)
+is pending qualification. Driver and probe compilation remains CI-only.
+
+Additional controls use the previously qualified import-coherence binary
+`0f793fe3dc3fe8d91447401c5c3ed8b11ca6da7f87ad55511f1f0df373246b7c`:
+
+- Vulkan built-in variables, indirect dispatch and 64-bit indexing: **35 Pass,
+  17 NotSupported**, all 52 selected cases complete.
+- Vulkan zero-initialized workgroup memory: **617 Pass, 29 NotSupported**, all
+  646 cases complete. Run 01 reached its time bound after 621 accepted cases;
+  run 02 resumed with the same identity and retained each original log path.
+- The existing installed Zink desktop passes **30/30** before any switch.
+
+Neither CTS control uses diagnostic feature filtering, import flags or a trace
+loader. Every case maps the intended ICD. Local evidence is under
+`temp/panvk-qualification/evidence/combined/control-{extended-01,zero-init-01,zero-init-02}/`;
+the installed control is `installed-baseline.json`. The exact combined binary
+still needs its own oracle, CTS, private integrated and installed-session checks.
+The controlled installed test will restore the original controller and release
+session afterward; it does not promote package pins or default feature flags.
+
 ## Progress on the source-package prerequisite
 
 A side-by-side `mesa-vulkan-icd-panvk-kbase-source` recipe now packages the
@@ -134,6 +173,13 @@ prototype. Retrieved evidence is in the original checkout's
 `temp/panvk-qualification/evidence/gles-{basic,shared-indirect}-{release,lwg}-01/`
 and `gles-info-fixed-01/`.
 
+The final nested binary `2b57c92c…`, with both workgroup and nested opt-ins
+enabled, now also passes those **195/195 GLES compute cases**, with no skips or
+warnings. Every case's recorded maps include that exact staged ICD. Evidence:
+`temp/panvk-qualification/evidence/gles-compute-nested-01/`. This adds the final
+nested candidate to the earlier release and `0001`–`0006` controls; it does not
+clear the Vulkan failures below.
+
 The packaged release's Vulkan `api.info.*` run stopped after two passes and one
 failure: `dEQP-VK.api.info.android.no_unknown_extensions` reports
 `Unknown extension: VK_ANDROID_native_buffer`. The Android-specific test expects
@@ -141,6 +187,14 @@ private loader extensions to be hidden; this standalone build uses Termux's
 Khronos loader. Preserve this failure as a platform/loader qualification issue;
 do not edit the CTS test or count the remaining 10,487 cases as passed. Evidence:
 `temp/panvk-qualification/evidence/vk-info-fixed-01/`.
+
+There is a concrete Android-loader boundary to check here: AOSP's
+[`EnumerateDeviceExtensionProperties`](https://android.googlesource.com/platform/frameworks/native/+/18fa257ea2/vulkan/libvulkan/driver.cpp)
+translates the private `VK_ANDROID_native_buffer` entry into `VK_KHR_swapchain`
+before returning it to applications. The observed Termux-loader result differs
+from that path. Preserve the failing CTS result and investigate the intended
+Termux ICD/loader contract; changing the CTS allowlist would not qualify that
+contract. Changes to extension advertisement also need WSI/AHB regression checks.
 
 Vulkan compute also found failures in the controls, independent of the nested
 prototype. The release's `compute.pipeline.basic.*` run stopped with 13 passes,
@@ -176,6 +230,27 @@ alone. Retain the failing CTS result; these reduced passes cannot replace it.
 The `bare-*` and `cts-max-*` probes and their controls are documented in
 `tools/panvk-probes/workgroups/README.md`.
 
+The diagnostic forwarding loader passes a one-case lavapipe CPU control and
+captures CTS's exact 732-byte SPIR-V 1.0 shader. On source baseline Android hash
+`18373403292ec998ae55679b4a486e215d21692d7e6d39054a58b7f4790fb97f`,
+that exact shader and the reduced legacy SSBO fixture both pass 512 words with
+direct and copied readback, enabling supported Vulkan 1.1–1.3 core features.
+Yet the same binary fails traced CTS: immediately after invalidate, 288 mapped
+words equal 1 and 224 equal 0, first non-one at index 96. CTS reports the same
+index. Thus the stale CPU-visible values precede its verification copy; this
+does not distinguish absent GPU writes from incoherent CPU visibility. Shader
+encoding and `memcpy` alone do not explain the failure. This separately built
+baseline has its own identity; it is not the earlier `db0bf89a…` control.
+Evidence: `reduced-cts-legacy-01/`, `vk-max-local-source-trace-01/` and
+`vk-max-local-lavapipe-trace-01/` under the qualification evidence directory.
+Moving buffer allocation before pipeline creation, matching CTS, also passes
+with the exact captured shader and copied readback. Evidence:
+`reduced-cts-buffer-first-01/`. Device extension/features outside Vulkan 1.1–1.3
+core remain differences to investigate. The features2 creation form and a
+second live instance also pass the reduced exact-shader test
+(`reduced-cts-features2-01/`). The updated probe build additionally passes the
+full 22-decision uncached nested matrix in `nested-slices/current-probe-uncached-01/`.
+
 A separate release `dEQP-VK.info.*` run stopped after nine passes, one unsupported
 case and `device_memory_budget_multi_instance` failing. Its QPA reports that
 heap 0 usage did not increase when allocation and budget query used different
@@ -183,12 +258,122 @@ Vulkan instances. The single-instance budget case passed. Evidence:
 `temp/panvk-qualification/evidence/vk-general-info-release-01/`. This is another
 baseline blocker, separate from workgroup lowering.
 
+The isolated `memory-budget` variant now fixes this accounting failure. It
+shares an atomic application-allocation counter between physical-device objects
+for the same kernel device node, with reference-counted registry lifetime,
+while retaining the local counters used for internal trimming. Actions
+[43660659573](https://github.com/cnshing/debian-livecd-termux/actions/runs/43660659573)
+built both ABIs. The Android driver passes both budget cases, then completes
+`dEQP-VK.info.*` with **22 passes and one unsupported case**. The unsupported
+peer-memory case requires a group of at least two physical GPUs. Every case
+maps the intended ICD. No test was edited or filtered. Evidence: `vk-budget-fix-01/` and `vk-info-budget-fix-01/`.
+
+- Android SHA-256: `ce9fef7506cabf99f8299f3e15895542b023dfb670be24f8a345eed0eb0cb999`
+- glibc SHA-256: `fee10abad5f97f18e9cf0a438b44fd407d9486656a87286254b832bf101e2b66`
+
+The patch and isolated CI variant are on main under `budget-patches/`; the
+package pins and installed drivers are unchanged. Both ABIs also pass seven
+basic processes (enumeration, compute, three triangle paths and synchronization
+controls), stopping on error; the SYNC_FD probe still reports its expected
+baseline unavailability. Evidence: `budget-basic-01/`. A glibc CTS budget test
+has not been run.
+
+The compute failure is now narrowed to a device-feature-controlled allocation
+path. Traced CTS passes when optional features are removed, but that filtered
+run is diagnostic only. More decisively, the exact reduced shader fails when
+the placed-mapping feature structure is added: 336 of 512 words are wrong.
+The same executable with that feature structure disabled passes all 512 words
+(`reduced-cts-placed-off-01/`). Enabling this feature
+makes ordinary host-visible allocations shareable even without a placed-map
+request. The ION allocator hardcoded cached backing while the Vulkan memory type
+advertised host coherence. The isolated `ion-cache` fix in
+[43661900884](https://github.com/cnshing/debian-livecd-termux/actions/runs/43661900884)
+makes the ION cached flag follow `PAN_KMOD_BO_FLAG_WB_MMAP`. Both ABIs build.
+The placed-mapping reproducer then passes all 512 words. The normal, unfiltered
+Vulkan basic-compute run now passes all four empty-workgroup cases and maximum
+local sizes X/Y/Z. It reaches a new first failure after **52 passes, eight
+unsupported cases and one failure**: `ssbo_cmd_barrier_multiple`, expected
+122,815, got 17,545. The remaining 20 selected cases were not attempted.
+This producer/consumer test uses a 11×5×7 dispatch and an SSBO atomic reduction;
+separate dispatch ordering, multidimensional group merging and global atomic
+behavior before attributing the error to a barrier alone. Evidence:
+`reduced-cts-ion-fix-01/` and `vk-basic-ion-fix-01/`. Every attempted case maps the
+intended ION-fix ICD.
+
+Matched controls on that same ION-fix binary confirm that the multiple-group
+case fails standalone with normal features, passes when optional features are
+filtered out, and the single-group case passes unfiltered. The older `0008`
+driver also passes the multiple-group case in both merge modes under the core
+feature filter; disabling merging is not established as the fix. Evidence:
+`vk-ssbo-ion-{multiple,multiple-core,single}-01/` and
+`vk-ssbo-{merged,unmerged}-core-filter-01/`. Filtered passes remain diagnostic.
+Next isolate the placed-mapping/imported-output atomic path from the other
+optional feature bits; do not treat this as proven barrier failure yet.
+
+An additional same-driver control keeps both the forwarding loader and normal
+features enabled and still fails (expected 122,815, got 26,620), whereas the
+same loader with the core-feature filter passes. Both failing sums are exactly
+one 11×5 Z-plane's contribution, not the full seven-plane sum. This is an
+observation, not yet a diagnosis.
+
+The existing import-flag escape hatch gives a positive control: clearing
+`BASE_MEM_COHERENT_SYSTEM` (`0x400`) and setting `BASE_MEM_COHERENT_LOCAL`
+(`0x800`) makes the multiple-group SSBO case pass with normal CTS features.
+`--local-coherent-imports` records this configuration and marks it diagnostic
+only; inherited import overrides are cleared by default. The ordinary kbase
+allocation path already requests local coherence, whereas imported buffers
+unconditionally requested system coherence even on this non-I/O-coherent GPU.
+The research `import-coherence` variant combines the ION CPU cache-mode patch
+with selecting local/system coherence according to `is_io_coherent`. Build
+[43663975090](https://github.com/cnshing/debian-livecd-termux/actions/runs/43663975090)
+now builds both ABIs. With the recorded override, the full selected
+basic-compute run first completed with **73 passes and eight unsupported cases**.
+The code-built Android candidate then repeats that complete result with no
+trace loader, feature filter or import override. Every case maps the exact
+requested ICD, and the report is not marked diagnostic-only. Evidence:
+`vk-ssbo-ion-multiple-trace-01/`, `vk-ssbo-ion-local-import-01/` and
+`vk-basic-local-import-01/`.
+
+The final `import-coherence` artifact has reconstructed Mesa content tree
+`db01c10f176b6b91e929175de79fe2a564b4c3a9` and these patched ICD identities:
+
+- Android: `0f793fe3dc3fe8d91447401c5c3ed8b11ca6da7f87ad55511f1f0df373246b7c`
+- glibc: `bd62a983339cad63a4c278dbc88d53a3a40baf144f0594fe0c7fed6fb9a8ec21`
+
+It also passes **20 private GNOME/GTK cycles**, 40 exact captures, stale-frame
+rejection and session isolation. Nautilus folder contents and Settings were
+visually checked. The same default candidate also passes **195/195 selected
+GLES compute cases**, with no skips or warnings and the intended ICD mapped
+in every case. Evidence: `vk-basic-coherence-fix-01/`,
+`gles-compute-coherence-01/` and `coherence/desktop-gtk-20-01/` under the
+qualification evidence directory.
+The GPU-local patch and `import-coherence` variant are on main under
+`coherence-patches/`; this variant includes the ION cache-mode fix but does not
+include budget, point-size or workgroup patches. No default package pins were
+changed. The glibc binary is build-verified; this Vulkan CTS run is Bionic.
+
+The preceding ION-only artifact, which still has the SSBO failure, is retained
+for comparison:
+
+- Android SHA-256: `e6d981b8e4bc8d56077fc90b22a782adb0b0db2c1c766007218a23a7b091b020`
+- glibc SHA-256: `3a727046e1cfe1ed484b1c1910a0a6167a304b1bdb02b2db8be8e40e59132a9f`
+
+The ION-fix Android binary also passes **20 private GNOME/GTK cycles**: 40
+captures, maximum channel error 0, stale-frame rejection and session isolation.
+Shell and Settings captures were visually checked; the Nautilus capture shows
+its window still loading and does not establish folder-content correctness.
+Evidence: `temp/panvk-qualification/evidence/ion/desktop-gtk-20-02/`. It exposes
+GL 4.2 and was not used for a Ghostty qualification. Its glibc build has not had
+the same placed-mapping runtime test. The patch and isolated variant are now on
+main under `ion-patches/`. This is a separate binary from the budget and nested
+candidates; combine and requalify the required patches before changing defaults.
+
 `tools/panvk-probes/cts/run.py` lists the requested cases and executes one at a
 time, recording QPA results, exit status, mapped libraries and binary hashes.
 It stops at the first failure/crash/timeout, enforces a 3 GB available-memory
 floor and a run time limit, and never counts an empty or all-skipped run as a
 pass. Bounded successful chunks can resume only with matching binary identities
-and selection. Resumed results retain their original QPA/log directory. Nine
+and selection. Resumed results retain their original QPA/log directory. Twelve
 host tests cover parsing, resume, failure stopping, process exit failures,
 all-skipped runs, explicit merge/host-memory modes and trace isolation. Use only the X11 dependency directory in
 `LD_LIBRARY_PATH`; the Vulkan suite loads Termux's Vulkan **loader**, not the raw
@@ -259,6 +444,12 @@ then run the exact saved SPIR-V through `check ... run-cts-max`. Additional CPU
 logging/reads can affect timing, so a traced pass alone cannot clear the original
 failure. Keep untraced controls and both logs.
 
+`--core-features-only` additionally filters optional device feature structures
+through the trace loader while retaining CTS's core 1.0–1.3 feature values and
+device extension list. This changes device creation, prints an explicit warning
+and sets `diagnostic_only: true` in the report. A pass in that mode is a debugging
+result and cannot clear CTS qualification. It requires `--trace-loader`.
+
 ## Desktop qualification still required
 
 The fixed `0007` binary passed **20 private GNOME/Ghostty cycles** with caching
@@ -268,13 +459,20 @@ normal Ghostty exit and preserved session isolation. Presentation uses CPU
 readback. Evidence:
 `temp/panvk-qualification/evidence/nested-slices/desktop-20-01/`.
 
-The first 30-minute attempt stopped after six samples through 151.5 seconds
-because another owner's private X93 display appeared. None of the monitored
-workloads exited, but isolation failed; this is not a completed soak. Evidence:
-`temp/panvk-qualification/evidence/nested-slices/soak-30min-01/`. Retry 02 was
-stopped deliberately to yield the shared lock to a previously queued short
-package test. Neither partial interval counts toward the required continuous
-1,800 seconds.
+The fixed nested driver now also passes the **continuous 30-minute private
+soak**: 1,800.000 seconds, 60 samples, stable Shell/vkcube/glxgears PIDs, the
+same PanVK mapping and Mali FDs throughout, GL frame progress, and preserved
+session isolation. Both pixel checkers also pass its four GTK and four Ghostty
+captures, including stale-frame rejection and normal terminal exit. Shell RSS
+changed from 337,816 to 335,200 KiB, cube stayed at 36,944 KiB, and gears changed
+from 175,000 to 177,000 KiB; FD counts stayed at 31/10/10. These endpoints do not
+establish a general leak bound. Evidence and the independent soak report:
+`temp/panvk-qualification/evidence/nested-slices/soak-30min-03/`.
+
+The first attempt stopped after six samples through 151.5 seconds because
+another owner's private X93 display appeared. Retry 02 was stopped deliberately
+to yield the shared lock to a previously queued short package test. Neither
+partial interval was added to retry 03's continuous 1,800 seconds.
 
 After a soak, run `tests/native/check-panvk-soak.py <evidence-directory>` as
 well as both pixel checkers. It requires at least 1,800 continuous seconds,
@@ -354,7 +552,7 @@ hardware workgroup, taken from the Mali-G76 work in
 
 | Piece | Where |
 | --- | --- |
-| The imported patches, G77 adaptation and follow-up fixes | `tools/panvk-probes/workgroup-patches/0001` to `0006` |
+| The imported patches, G77 adaptation and follow-up fixes | `tools/panvk-probes/workgroup-patches/0001` to `0007` |
 | CI build of a baseline and a patched driver, with probes | `.github/workflows/panvk-workgroups.yml` |
 | Compute probes checked against a CPU oracle | `tools/panvk-probes/workgroups/` (`run.py`, `check.c`, `check.comp`) |
 | Opt-in Ghostty launcher for the staged driver | `tools/panvk-probes/workgroups/ghostty-gpu.py` |
@@ -376,9 +574,13 @@ The pass is a working subset behind an environment variable. To ship it:
    `0005` already covers partial subgroups, keeping hardware barriers unconditional.
 2. **Variable workgroup sizes** (`ARB_compute_variable_group_size`) now pass the
    five-shape GL probe above; extend coverage with the conformance subset.
-3. **Extend the conformance subset**: the 195 GLES compute cases above pass on
-   both the release and opt-in drivers. Vulkan compute, broader coverage and
-   the Android loader information-test failure still need qualification.
+3. **Extend the conformance subset**: the 195 GLES compute cases pass on the
+   release, `0001`–`0006` and final nested drivers. The budget fix clears its
+   isolated information subset, and the ION fix clears the old compute
+   failures, and the import-coherence variant clears the SSBO reduction failure
+   and completes the selected basic-compute subset. Combine the required fixes
+   with the workgroup series and qualify that exact combined binary.
+   Broader CTS and the Android loader information-test failure remain open.
 4. **Cache identity is now covered.** `0006` hashes the architecture-9 opt-in into the
    physical device cache digest, uses that digest for both the pipeline UUID and the disk
    cache timestamp, and the phone tests confirm distinct UUIDs with correct repeated cached
@@ -388,15 +590,15 @@ The pass is a working subset behind an environment variable. To ship it:
    cases and show heavy spilling in the nested scheduler. Measure GPU throughput
    and broader shader pressure; the 256-thread hardware cap is not a performance proof.
 6. **Then drop the opt-ins** for architecture 9 after qualification. The fixed nested
-   driver passed the private 20-cycle run. The 30-minute soak and installed 30/30
-   validation still remain.
+   driver passed the private 20-cycle run and 30-minute soak. Installed 30/30
+   validation, unresolved CTS failures and performance qualification remain.
 
-When the installed driver reports 4.3, nothing else needs changing for Ghostty:
-`src/native/terminal.py` asks `glxinfo` for the core version and keeps the GPU when it is at
-least 4.3. Its test is `tests/native/test-terminal-environment.py`.
-
-Ghostty will then present through its CPU readback, because the driver has no SYNC_FD
-semaphores. That is the subject of [PANVK-SYNC-FD-HANDOFF.md](PANVK-SYNC-FD-HANDOFF.md).
+The separately qualified `ghostty-panvk-dmabuf` package now provides its own
+private driver/Mesa stack. The terminal launcher uses it when its device and
+payload guard passes; see [PANVK-SYNC-FD-HANDOFF.md](PANVK-SYNC-FD-HANDOFF.md).
+That path does not depend on promoting this candidate to the general desktop
+driver. Without that package, the fallback Ghostty path still requires GL 4.3
+and selects software rendering when the desktop driver exposes only GL 4.2.
 
 ## Vulkan 1.4
 

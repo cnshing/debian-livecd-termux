@@ -52,8 +52,6 @@ termux_step_pre_configure() {
 	CXXFLAGS+=" --target=aarch64-linux-android29"
 	CPPFLAGS+=" -D__TERMUX__ -D__USE_GNU"
 	LDFLAGS+=" --target=aarch64-linux-android29 -landroid-shmem -Wl,-rpath=$TERMUX_PREFIX/lib/android-vaapi"
-	# Without /dev/dma_heap/system, as on Android 11 phones, allocate shared buffers through ION.
-	cp "$TERMUX_PKG_BUILDER_DIR/tva_ion.h" src/gallium/frontends/va/
 	# Without a GPU the bridge can drive (Mali), its software surfaces live in dma-bufs, so
 	# browsers can import decoded frames. See tva_ion_winsys.h.
 	cp "$TERMUX_PKG_BUILDER_DIR/tva_ion_winsys.h" src/gallium/frontends/va/
@@ -84,6 +82,9 @@ termux_step_make_install() {
 	# Presents KGSL or Mali as /dev/dri/renderD128, with the sysfs view libdrm reads.
 	$CC --target=aarch64-linux-android29 -O2 -Wall -shared -fPIC -U_FORTIFY_SOURCE \
 		-o "$private/libandroid-vaapi-render-node.so" "$TERMUX_PKG_BUILDER_DIR/render-node.c"
+	# Presents /dev/dma_heap/system{,-uncached} on ION-only kernels. See dma-heap.c.
+	$CC --target=aarch64-linux-android29 -O2 -Wall -shared -fPIC -U_FORTIFY_SOURCE \
+		-o "$private/libandroid-dma-heap.so" "$TERMUX_PKG_BUILDER_DIR/dma-heap.c" -ldl
 	local node variant sysroot uevent
 	for variant in kgsl mali; do
 		sysroot="$private/render-node-sys"
@@ -105,6 +106,6 @@ termux_step_make_install() {
 	cat > "$private/manifest.json" <<-JSON
 		{"format": 1, "abi": "bionic", "libraries": ["lib/va-client"], "driver_directory": "dri",
 		 "preloads": ["libtva_drm_shim_wayland.so"], "session_preload": "libandroid-vaapi-render-node.so",
-		 "ion_fallback": "built-in", "encoders": ["h264", "hevc"]}
+		 "dma_heap_preload": "libandroid-dma-heap.so", "encoders": ["h264", "hevc"]}
 	JSON
 }

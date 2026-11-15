@@ -68,6 +68,10 @@ def main():
                         help='Disable the optional write-back host-memory type for diagnosis')
     parser.add_argument('--trace-loader', type=Path,
                         help='Diagnostic forwarding loader; records setup and mapped readback')
+    parser.add_argument('--core-features-only', action='store_true',
+                        help='Diagnostic: filter optional device features through the trace loader')
+    parser.add_argument('--local-coherent-imports', action='store_true',
+                        help='Diagnostic: request GPU-local rather than system coherence for imports')
     parser.add_argument('--case-timeout', type=int, default=45)
     parser.add_argument('--max-seconds', type=int, default=600)
     parser.add_argument('--max-cases', type=int, default=0, help='0 means all selected cases')
@@ -77,6 +81,8 @@ def main():
         parser.error('--nested requires --large-workgroups')
     if args.trace_loader and args.suite != 'vk':
         parser.error('--trace-loader is only for the Vulkan suite')
+    if args.core_features_only and not args.trace_loader:
+        parser.error('--core-features-only requires --trace-loader')
     if min(args.case_timeout, args.max_seconds) < 1 or args.max_cases < 0:
         parser.error('Invalid run bounds')
     prefix = Path(os.environ['PREFIX'])
@@ -86,10 +92,12 @@ def main():
                 'driver_sha256': digest(driver), 'patterns': args.pattern,
                 'large_workgroups': args.large_workgroups, 'nested': args.nested,
                 'unmerged_compute': args.unmerged_compute,
-                'uncached_host_memory': args.uncached_host_memory}
+                'uncached_host_memory': args.uncached_host_memory,
+                'local_coherent_imports': args.local_coherent_imports}
     if args.trace_loader:
         args.trace_loader = args.trace_loader.resolve(strict=True)
         identity['trace_loader_sha256'] = digest(args.trace_loader)
+        identity['core_features_only'] = args.core_features_only
     args.out = args.out.resolve()
     args.out.mkdir(parents=True, exist_ok=False)
     with (Path(os.environ['TMPDIR']) / 'livecd-panvk-cts.lock').open('a') as lock:
@@ -107,10 +115,13 @@ def run(args, prefix, cts, driver, executable, identity):
                  'MESA_SHADER_CACHE_DIR', '__EGL_VENDOR_LIBRARY_FILENAMES',
                  'LIBGL_ALWAYS_SOFTWARE', 'LIBGL_ALWAYS_INDIRECT', 'ZINK_DEBUG',
                  'MESA_VK_DEVICE_SELECT', 'DRI_PRIME', 'PANVK_KBASE_DRI3', 'PANVK_DEBUG',
-                 'PANVK_TRACE_LOADER', 'PANVK_TRACE_SPIRV_DIR'):
+                 'PANVK_TRACE_LOADER', 'PANVK_TRACE_SPIRV_DIR', 'PANVK_TRACE_CORE_FEATURES_ONLY',
+                 'PANVK_KBASE_IMPORT_CLEAR', 'PANVK_KBASE_IMPORT_SET'):
         env.pop(name, None)
     if args.uncached_host_memory:
         env['PANVK_DEBUG'] = 'no_wb_mmap'
+    if args.local_coherent_imports:
+        env.update(PANVK_KBASE_IMPORT_CLEAR='0x400', PANVK_KBASE_IMPORT_SET='0x800')
     env.update(LD_LIBRARY_PATH=str(prefix / 'lib/panvk-kbase/bionic/x11'),
                VK_DRIVER_FILES=str(icd), VK_ICD_FILENAMES=str(icd),
                EGL_PLATFORM='surfaceless', GALLIUM_DRIVER='zink', MESA_LOADER_DRIVER_OVERRIDE='zink',
@@ -128,6 +139,8 @@ def run(args, prefix, cts, driver, executable, identity):
             spirv = args.out / 'spirv'
             spirv.mkdir()
             env.update(PANVK_TRACE_LOADER=str(loader), PANVK_TRACE_SPIRV_DIR=str(spirv))
+            if args.core_features_only:
+                env['PANVK_TRACE_CORE_FEATURES_ONLY'] = '1'
         command.append('--deqp-vk-library-path=' + str(args.trace_loader or loader))
     selected = []
     for index, pattern in enumerate(args.pattern):
@@ -146,7 +159,8 @@ def run(args, prefix, cts, driver, executable, identity):
         raise RuntimeError('No tests matched; refusing an empty qualification run')
     (args.out / 'selected.txt').write_text('\n'.join(selected) + '\n')
     report = {'identity': identity, 'driver': str(driver), 'selected': len(selected),
-              'results': [], 'complete': False, 'ok': False}
+              'results': [], 'complete': False, 'ok': False,
+              'diagnostic_only': args.core_features_only or args.local_coherent_imports}
     for filename in ('BUILD.txt', 'PLATFORM.patch'):
         metadata = cts / filename
         if metadata.is_file():

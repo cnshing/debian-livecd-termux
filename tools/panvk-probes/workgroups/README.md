@@ -65,7 +65,9 @@ PANVK_PROBE_ROBUST=0 workgroups/check /private/driver.so \
 ```
 
 `PANVK_PROBE_CORE_FEATURES=1` enables the supported Vulkan 1.1–1.3 core
-features for this fixture. `PANVK_PROBE_COPY_READBACK=1` copies the mapped
+features through the `VkPhysicalDeviceFeatures2` device-creation form for this
+fixture. `PANVK_PROBE_SECOND_INSTANCE=1` also enumerates the same GPU through a
+second live Vulkan instance. `PANVK_PROBE_COPY_READBACK=1` copies the mapped
 output through `memcpy` before checking, matching the CTS readback operation.
 The executable logs the selected memory type and allocation size.
 
@@ -73,6 +75,10 @@ The Vulkan 1.0 fixture retains the legacy `Uniform`/`BufferBlock` SSBO
 encoding used by CTS; newer targets use `StorageBuffer`. Compare the saved
 shader from `--trace-loader` too, rather than assuming the reduced shader has
 identical SPIR-V.
+
+`PANVK_PROBE_PLACED_MAP=1` enables `VK_EXT_map_memory_placed` while the test
+still uses ordinary buffer mapping. This isolates its effect on allocation
+backing and host coherence; it is separate from the compiler-statistics mode.
 
 The check executable can load either a raw ICD or a Vulkan loader. For a loader,
 set `VK_DRIVER_FILES` to a private ICD JSON selecting the intended driver.

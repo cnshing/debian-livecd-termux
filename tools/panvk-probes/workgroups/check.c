@@ -24,7 +24,10 @@ int main(int argc, char **argv)
    const int cts_max = !strcmp(argv[6], "run-cts-max") || !strcmp(argv[6], "compile-cts-max");
    const int full_core = getenv("PANVK_PROBE_CORE_FEATURES") &&
       !strcmp(getenv("PANVK_PROBE_CORE_FEATURES"), "1");
-   if (full_core && !cts_max) return 2;
+   const int placed_map = getenv("PANVK_PROBE_PLACED_MAP") &&
+      !strcmp(getenv("PANVK_PROBE_PLACED_MAP"), "1");
+   if ((full_core || placed_map) && !cts_max) return 2;
+   if (placed_map && capture_stats) return 2;
    unsigned x = strtoul(argv[3], NULL, 10), y = strtoul(argv[4], NULL, 10);
    unsigned z = strtoul(argv[5], NULL, 10), n = x * y * z;
    if (!x || !y || !z || n > 1024) return 2;
@@ -60,6 +63,19 @@ int main(int argc, char **argv)
       return !strcmp(argv[6], "skip") ? 0 : 1;
    }
    if (!strcmp(argv[6], "skip")) { puts("FAIL: expected a limit rejection"); return 1; }
+   const char *second_mode = getenv("PANVK_PROBE_SECOND_INSTANCE");
+   if (second_mode && !strcmp(second_mode, "1")) {
+      VkInstance companion;
+      CHECK(vkCreateInstance(&ici, NULL, &companion));
+      VkPhysicalDevice other;
+      uint32_t other_count = 1;
+      CHECK(vkEnumeratePhysicalDevices(companion, &other_count, &other));
+      VkPhysicalDeviceProperties other_props;
+      vkGetPhysicalDeviceProperties(other, &other_props);
+      if (other_count != 1 || other_props.vendorID != props.vendorID ||
+          other_props.deviceID != props.deviceID) return 1;
+      puts("secondInstance=1");
+   }
    VkPhysicalDeviceFeatures features;
    vkGetPhysicalDeviceFeatures(physical, &features);
    const char *robust_mode = getenv("PANVK_PROBE_ROBUST");
@@ -100,6 +116,24 @@ int main(int argc, char **argv)
       di.pNext = feature_chain;
       printf("coreFeatures11_13=%u\n", full_core);
    }
+   const char *placed_extensions[] = {VK_EXT_MAP_MEMORY_PLACED_EXTENSION_NAME,
+                                      VK_KHR_MAP_MEMORY_2_EXTENSION_NAME};
+   VkPhysicalDeviceMapMemoryPlacedFeaturesEXT placed_features = {
+      .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAP_MEMORY_PLACED_FEATURES_EXT,
+      .pNext = feature_chain};
+   if (placed_map) {
+      INST(vkGetPhysicalDeviceFeatures2);
+      VkPhysicalDeviceFeatures2 available = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2,
+         .pNext = &placed_features};
+      vkGetPhysicalDeviceFeatures2(physical, &available);
+      if (!placed_features.memoryMapPlaced) return 1;
+      core13.robustImageAccess = VK_FALSE;
+      feature_chain = &placed_features;
+      di.pNext = feature_chain;
+      di.enabledExtensionCount = 2;
+      di.ppEnabledExtensionNames = placed_extensions;
+      puts("memoryMapPlaced=1");
+   }
    const char *stats_extension = VK_KHR_PIPELINE_EXECUTABLE_PROPERTIES_EXTENSION_NAME;
    VkPhysicalDevicePipelineExecutablePropertiesFeaturesKHR stats_feature = {
       .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PIPELINE_EXECUTABLE_PROPERTIES_FEATURES_KHR,
@@ -115,6 +149,13 @@ int main(int argc, char **argv)
       di.pNext = &stats_feature;
       di.enabledExtensionCount = 1;
       di.ppEnabledExtensionNames = &stats_extension;
+   }
+   VkPhysicalDeviceFeatures2 create_features = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2,
+      .pNext = (void *)di.pNext, .features = features};
+   if (full_core) {
+      di.pEnabledFeatures = NULL;
+      di.pNext = &create_features;
+      puts("createDeviceFeatures2=1");
    }
    VkDevice device;
    CHECK(vkCreateDevice(physical, &di, NULL, &device));
@@ -149,6 +190,34 @@ int main(int argc, char **argv)
       .setLayoutCount = 1, .pSetLayouts = &sl};
    VkPipelineLayout layout;
    CHECK(vkCreatePipelineLayout(device, &pli, NULL, &layout));
+   const size_t words = cts_max ? n : (size_t)n * 6 * 16;
+   VkBufferCreateInfo bi = {.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+      .size = words * 4, .usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT};
+   VkBuffer buffer;
+   CHECK(vkCreateBuffer(device, &bi, NULL, &buffer));
+   VkMemoryRequirements req;
+   vkGetBufferMemoryRequirements(device, buffer, &req);
+   VkPhysicalDeviceMemoryProperties memory;
+   vkGetPhysicalDeviceMemoryProperties(physical, &memory);
+   unsigned type = 0;
+   VkMemoryPropertyFlags want = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+   while (type < memory.memoryTypeCount && (!(req.memoryTypeBits & (1u << type)) ||
+          (memory.memoryTypes[type].propertyFlags & want) != want)) type++;
+   if (type == memory.memoryTypeCount) return 1;
+   printf("memoryType=%u properties=0x%x allocationBytes=%llu\n", type,
+          memory.memoryTypes[type].propertyFlags, (unsigned long long)req.size);
+   VkMemoryAllocateInfo mai = {.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+      .allocationSize = req.size, .memoryTypeIndex = type};
+   VkDeviceMemory allocation;
+   CHECK(vkAllocateMemory(device, &mai, NULL, &allocation));
+   CHECK(vkBindBufferMemory(device, buffer, allocation, 0));
+   uint32_t *map;
+   CHECK(vkMapMemory(device, allocation, 0, VK_WHOLE_SIZE, 0, (void **)&map));
+   memset(map, cts_max ? 0 : 0xee, words * 4);
+   VkMappedMemoryRange mapped_range = {.sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE,
+      .memory = allocation, .size = VK_WHOLE_SIZE};
+   if (cts_max) CHECK(vkFlushMappedMemoryRanges(device, 1, &mapped_range));
+   puts("bufferBeforePipeline=1");
    VkComputePipelineCreateInfo pi = {.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO,
       .flags = capture_stats ? VK_PIPELINE_CREATE_CAPTURE_STATISTICS_BIT_KHR : 0,
       .stage = {.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
@@ -203,33 +272,6 @@ int main(int argc, char **argv)
    if (!strcmp(argv[6], "compile") || !strcmp(argv[6], "compile-cts-max")) {
       puts("PASS: pipeline creation; no dispatch"); return 0;
    }
-   const size_t words = cts_max ? n : (size_t)n * 6 * 16;
-   VkBufferCreateInfo bi = {.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
-      .size = words * 4, .usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT};
-   VkBuffer buffer;
-   CHECK(vkCreateBuffer(device, &bi, NULL, &buffer));
-   VkMemoryRequirements req;
-   vkGetBufferMemoryRequirements(device, buffer, &req);
-   VkPhysicalDeviceMemoryProperties memory;
-   vkGetPhysicalDeviceMemoryProperties(physical, &memory);
-   unsigned type = 0;
-   VkMemoryPropertyFlags want = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
-   while (type < memory.memoryTypeCount && (!(req.memoryTypeBits & (1u << type)) ||
-          (memory.memoryTypes[type].propertyFlags & want) != want)) type++;
-   if (type == memory.memoryTypeCount) return 1;
-   printf("memoryType=%u properties=0x%x allocationBytes=%llu\n", type,
-          memory.memoryTypes[type].propertyFlags, (unsigned long long)req.size);
-   VkMemoryAllocateInfo mai = {.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
-      .allocationSize = req.size, .memoryTypeIndex = type};
-   VkDeviceMemory allocation;
-   CHECK(vkAllocateMemory(device, &mai, NULL, &allocation));
-   CHECK(vkBindBufferMemory(device, buffer, allocation, 0));
-   uint32_t *map;
-   CHECK(vkMapMemory(device, allocation, 0, VK_WHOLE_SIZE, 0, (void **)&map));
-   memset(map, cts_max ? 0 : 0xee, words * 4);
-   VkMappedMemoryRange mapped_range = {.sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE,
-      .memory = allocation, .size = VK_WHOLE_SIZE};
-   if (cts_max) CHECK(vkFlushMappedMemoryRanges(device, 1, &mapped_range));
    VkDescriptorPoolSize ps = {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1};
    VkDescriptorPoolCreateInfo dpi = {.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
       .maxSets = 1, .poolSizeCount = 1, .pPoolSizes = &ps};

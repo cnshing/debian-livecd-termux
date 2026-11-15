@@ -1,0 +1,13 @@
+diff --git a/src/panfrost/lib/kmod/kbase_kmod.c b/src/panfrost/lib/kmod/kbase_kmod.c
+index aad56a3..a615d58 100644
+--- a/src/panfrost/lib/kmod/kbase_kmod.c
++++ b/src/panfrost/lib/kmod/kbase_kmod.c
+@@ -2750,7 +2750,7 @@ kbase_kmod_bo_alloc_dmabuf(struct pan_kmod_dev *dev, uint64_t size,
+       struct kbase_ion_alloc ia = {
+          .len = alloc.len,
+          .heap_id_mask = kbase_dev->ion_heap_mask,
+-         .flags = 1, /* ION_FLAG_CACHED */
++         .flags = (kmod_flags & PAN_KMOD_BO_FLAG_WB_MMAP) ? 1 : 0,
+       };
+       if (ioctl(kbase_dev->dma_heap_fd, KBASE_ION_IOC_ALLOC, &ia)) {
+          mesa_loge("kbase: ION_IOC_ALLOC failed: %s", strerror(errno));

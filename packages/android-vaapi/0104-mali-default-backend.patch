@@ -1,0 +1,24 @@
+From: LiveCD Termux maintainers
+Subject: [PATCH] Select CPU upload surfaces automatically on Mali
+
+Native VA clients discover the emulated render node without launcher settings.
+Choose the existing software-surface backend before probing that node as a DRM
+GPU. MediaCodec continues to provide the hardware encoder.
+
+--- a/src/gallium/frontends/va/tva_bridge.c
++++ b/src/gallium/frontends/va/tva_bridge.c
+@@ -5200,6 +5200,14 @@
+         setenv("TERMUX_VA_GPU_BACKEND", "kgsl", 0);
+         setenv("TERMUX_VA_CONTIGUOUS_DMABUF", "1", 0);
+         backend = "kgsl";
++    } else if (!strcmp(backend, "auto") && access("/dev/mali0", R_OK | W_OK) == 0) {
++        /* Mali has no KGSL/Gallium screen in this VA driver. MediaCodec
++         * still encodes in hardware; only the upload surfaces are on the CPU.
++         * Select this before attempting DRM/GBM probing on the emulated node.
++         * Preserve any explicit backend choice, just as on KGSL above. */
++        setenv("TERMUX_VA_BRIDGE", "1", 0);
++        setenv("TERMUX_VA_GPU_BACKEND", "sw", 0);
++        backend = "sw";
+     }
+ #endif
+ 

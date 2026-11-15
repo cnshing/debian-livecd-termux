@@ -57,6 +57,9 @@ class Packaging(unittest.TestCase):
         self.assertEqual(video['packages'].split()[0], 'libva')
         self.assertEqual(video['timeout'], 350)
         self.assertFalse(video['exact'])
+        # Termux's firefox pulls Termux's ffmpeg in as a dependency, and the builder then skips ours.
+        order = video['packages'].split()
+        self.assertLess(order.index('ffmpeg'), order.index('android-firefox-video'))
         self.assertEqual(jobs['easyeffects_lsp-plugins-lv2']['host_packages'],
                          'libcairo2-dev libsndfile1-dev')
         self.assertEqual(jobs['chromium']['host_packages'], '')

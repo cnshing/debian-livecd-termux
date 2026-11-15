@@ -27,11 +27,17 @@ offline install: it downloads only when the phone is online.
 
 ## Open problems
 
-1. **The VP9 SSIM miss on Mali.** Frame numbers and colours are right, and the other three
-   comparisons score 0.905 to 0.909. Only the windowed compositor capture of frame 36 misses.
-   Software Chrome scores 0.921 there. The packaged driver and the earlier research build give
-   the same score. The working guess is chroma upsampling in ANGLE's Vulkan NV12 path; nobody
-   has shown it. Do not lower the threshold.
+1. **The VP9 SSIM miss on Mali was a test-layout artifact, not decoding** (2026-11-14,
+   decode-chrome). Per-plane SSIM of the failing shell capture against the reference is
+   Y 0.952, U 0.943, V 0.922; Chromium's passing capture is Y 0.963, U 0.947, V 0.926, so the
+   chroma guess is wrong. The failing shell capture matches Chrome's own CDP capture of the
+   same frame everywhere except rows 0 to 3 (max difference 148). In the 1280x1024 stage
+   capture the crop starts at y=175, and that row is grey (225): Google Chrome paints its
+   1 px toolbar separator over the first row of the web content. The windowed page put the
+   video at `top: 0`, so the separator landed on the video. Shifting the crop is worse (the
+   geometry is exact: rows 176 to 747 are video, 748 is page). Dropping the top 2 rows gives
+   0.903 with the same oracle. Fix: `tests/browsers/test-fullscreen.py` pads the probe page
+   by 4 px so browser UI cannot overlap the video. The threshold is unchanged.
 2. **H.264**: [decode-h264.md](decode-h264.md).
 3. The user reported **black tearing in Chrome** on Adreno in early November. It was never
    reproduced: [decode-frame-sync.md](decode-frame-sync.md).

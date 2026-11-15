@@ -1,0 +1,79 @@
+From: LiveCD Termux maintainers
+Subject: [PATCH] Use shared-memory input for WebCodecs encoding on Termux
+
+The Linux adapter unconditionally selects GPU memory buffer input. Termux's
+X11 shared images use shared memory, so VA-API's native-pixmap import aborts
+the GPU process. Select the CPU upload path as WebRTC already does. Both the
+configuration and input preference must agree, otherwise shared-image canvas
+frames can still reach native-pixmap import. Keep desktop Linux and ChromeOS
+on their existing paths; __ANDROID__ identifies the Bionic compiler target
+while Chromium itself is built with IS_LINUX.
+
+The encoder remains hardware-backed: VA-API uploads the shared-memory frame.
+This does not enable AcceleratedVideoEncoder by default; phone acceptance is
+still required before changing launcher policy.
+
+--- a/media/video/video_encode_accelerator_adapter.cc
++++ b/media/video/video_encode_accelerator_adapter.cc
+@@ -607,7 +607,14 @@
+ #endif  // BUILDFLAG(USE_PROPRIETARY_CODECS)
+ 
+   auto storage_type = VideoEncodeAccelerator::Config::StorageType::kShmem;
+-#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
++#if BUILDFLAG(IS_LINUX) && defined(__ANDROID__)
++  // Termux uses the Linux VA-API encoder on Bionic, but its shared images
++  // are backed by shared memory rather than GBM native pixmaps. Requesting
++  // GpuMemoryBuffer input reaches a NATIVE_PIXMAP CHECK in the GPU process.
++  // Keep both the VEA configuration and frame preparation on the CPU path,
++  // including for canvas frames which arrive as shared images.
++  input_buffer_preference_ = InputBufferKind::CpuMemBuf;
++#elif BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
+   // Linux/ChromeOS require a special configuration to use dmabuf storage.
+   // We need to keep sending frames with the same storage type.
+   // Other platforms will happily mix GpuMemoryBuffer storage with shared-mem
+--- a/media/video/video_encode_accelerator_adapter_test.cc
++++ b/media/video/video_encode_accelerator_adapter_test.cc
+@@ -305,6 +305,43 @@
+   scoped_refptr<base::SequencedTaskRunner> callback_runner_;
+ };
+ 
++#if BUILDFLAG(IS_LINUX) && defined(__ANDROID__)
++TEST_F(VideoEncodeAcceleratorAdapterTest, TermuxUsesSharedMemoryInputByDefault) {
++  VideoEncoder::Options options;
++  options.frame_size = gfx::Size(640, 480);
++  options.bitrate = Bitrate::ConstantBitrate(1000000);
++
++  auto gpu_frame =
++      CreateGreenGpuFrame(options.frame_size, base::Milliseconds(2));
++  ASSERT_TRUE(gpu_frame);
++
++  // No testing override: exercise the default used by WebCodecs. Even an
++  // ordinary CPU frame used to allocate a GPU buffer on Linux.
++  EXPECT_CALL(*sii_, DoCreateSharedImage(_, _, _, _)).Times(0);
++  int outputs_count = 0;
++  vea()->SetEncodingCallback(base::BindLambdaForTesting(
++      [&](BitstreamBuffer&, bool keyframe, scoped_refptr<VideoFrame> frame) {
++        EXPECT_EQ(frame->storage_type(), VideoFrame::STORAGE_SHMEM);
++        EXPECT_EQ(frame->format(), PIXEL_FORMAT_NV12);
++        EXPECT_EQ(frame->coded_size(), options.frame_size);
++        return BitstreamBufferMetadata(1, keyframe, frame->timestamp());
++      }));
++  adapter()->Initialize(
++      profile_, options, /*info_cb=*/base::DoNothing(),
++      base::BindLambdaForTesting(
++          [&](VideoEncoderOutput,
++              std::optional<VideoEncoder::CodecDescription>) { outputs_count++; }),
++      ValidatingStatusCB());
++  adapter()->Encode(
++      CreateGreenCpuFrame(options.frame_size, base::Milliseconds(1)),
++      VideoEncoder::EncodeOptions(true), ValidatingStatusCB());
++  adapter()->Encode(gpu_frame, VideoEncoder::EncodeOptions(false),
++                    ValidatingStatusCB());
++  RunUntilIdle();
++  EXPECT_EQ(outputs_count, 2);
++}
++#endif  // BUILDFLAG(IS_LINUX) && defined(__ANDROID__)
++
+ TEST_F(VideoEncodeAcceleratorAdapterTest, PreInitialize) {
+   VideoEncoder::Options options;
+   options.frame_size = gfx::Size(640, 480);

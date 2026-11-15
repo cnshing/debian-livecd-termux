@@ -35,6 +35,17 @@ These come from reading the code; none has been run on a phone.
    `/dev/dri`: `android-vaapi` revision 5 presents only the Snapdragon GPU. Revisions 7 and 8
    present `/dev/mali0` but are not released ([encode-native.md](encode-native.md)).
 
+## Outcome (2026-11-14, decode-native)
+
+Gap 1 is fixed in code on `fix/decode-native`: `decode_safeguards()` in
+`src/native/acceleration.py` sets the codec list (`disabled_va_codecs`, default H.264 and AV1)
+and, on Mali, `TERMUX_VA_HEVC_REORDER_PICS=0`. Both `video_environment` and the session's
+`native_encode()` call it. `tests/packaging/test-session-decode.py` covers it, and it fails
+without the fix. Not yet run on a phone (the S20 was claimed by another agent); the check is to
+log in to the desktop, open a terminal and run `env | grep TERMUX_VA_`, then decode an HEVC
+clip with `-hwaccel vaapi` against `-f framemd5`. Gaps 2 and 3 belong to encode-native. Next
+steps 2 and 3 below are still open.
+
 ## Next steps
 
 These serve the parity criterion; [s20-codec-parity.md](s20-codec-parity.md) adds VP8, MPEG-4,
@@ -63,3 +74,19 @@ These serve the parity criterion; [s20-codec-parity.md](s20-codec-parity.md) add
 | Launcher profiles (mpv flags, VA environment) | `src/native/acceleration.py` |
 | mpv on Mali | `src/native/mali.py` |
 | Adreno results | [native-acceleration-checks.md](../../browsers/native-acceleration-checks.md) |
+
+## VP8 colours through MediaCodec (2026-11-14, decode-native)
+
+codec-parity found VP8 decoded by MediaCodec on the S20 about 30 dB from libvpx after RGB
+conversion, although the YUV is bit-exact. The cause is the colour matrix, not the range: every
+frame is tagged `tv` either way, but FFmpeg's MediaCodec frames carry `bt709` where FFmpeg's own
+VP8 decoder says `bt470bg` (VP8 is always BT.601). Retagging the hardware frame with
+`setparams=colorspace=bt470bg` gives identical RGB to the software decode (PSNR inf, contact
+sheet checked by eye). VP9, HEVC and MPEG-4 have the same range and matrix as software (only the
+transfer tag differs, which does not affect RGB conversion).
+
+Fix: `packages/ffmpeg/libavcodec-mediacodecdec_common.c.patch` forces BT.601 for VP8 (revision
+101). `tests/browsers/test-native-mediacodec.py` now fails a case whose MediaCodec range or
+matrix differs from the software decoder; it fails on the S20's current FFmpeg. The patched
+build has not yet been installed on a phone, and the S20 runs Termux's 9.0.2-1 (gap 2), so the
+fix reaches it only once this project's FFmpeg is installed there.

@@ -10,8 +10,8 @@ State on 2026-11-14. Chromium here is this project's source build (`packages/chr
 
 | Codec | Adreno (Note10+) | Mali (S20) |
 | --- | --- | --- |
-| VP9 | passes: `VaapiVideoDecoder`, browser and compositor pixels, fullscreen cycles, fresh install 2026-11-10 | passes: 200 frames out of the hardware decoder, 4 of 4 frame comparisons, through the installed launcher 2026-11-13 |
-| HEVC | not accepted on the source build (see below) | passes: 198 frames out of `OMX.Exynos.hevc.dec`, 4 of 4 |
+| VP9 | passes: `VaapiVideoDecoder`, browser and compositor pixels, fullscreen cycles, fresh install 2026-11-10 | passes: 200 frames out of the hardware decoder, 4 of 4 frame comparisons, through the installed launcher 2026-11-13. Again on 2026-11-15 with revision 3 and the dma-heap bridge (SSIM 0.909, 0 dropped frames, frames viewed; `--require-gpu` finds the GPU process holding `/dev/mali0` with PanVK mapped) |
+| HEVC | not accepted on the source build (see below) | passes: 198 frames out of `OMX.Exynos.hevc.dec`, 4 of 4. Again on 2026-11-15 with revision 3 and the dma-heap bridge (SSIM 0.911, frames viewed) |
 | H.264 | software, by default | software, by default ([decode-h264.md](decode-h264.md)) |
 | AV1 | software; no hardware decoder | software; never tried |
 
@@ -21,7 +21,7 @@ State on 2026-11-14. Chromium here is this project's source build (`packages/chr
 | --- | --- |
 | `android-vaapi` ≥ 2 | Private `libva.so.2` / `libva-drm.so.2` aliases. Chromium dlopens those names; Termux's libva has unversioned files |
 | Bounded wait at `vaEndPicture` (`TERMUX_VA_SYNC_END_PICTURE=1`, set by the launcher for Chromium) | Without it the compositor shows an older frame than the browser captured. `LIVECD_VA_DISABLE_COMPLETION=1` is the negative control |
-| `android-vaapi` ≥ 3 on Mali | ION dma-buf surfaces, so ANGLE can import decoded frames |
+| `android-vaapi` ≥ 11 on Mali: `libandroid-dma-heap.so`, loaded by the launcher | DMA-BUF surfaces, so ANGLE can import decoded frames. With `LIVECD_DMA_HEAP_ION=0` Chromium falls back to `VpxVideoDecoder` (checked 2026-11-15), so the library is required on ION-only phones |
 | `TERMUX_VA_HEVC_REORDER_PICS=0` on Mali (launcher) | Exynos's HEVC decoder holds back as many pictures as the bridge declares (3). Chromium's per-picture wait then fails and it falls back to software. At 0 the decoder returns each picture at once |
 | ANGLE on Vulkan: PanVK on Mali, Turnip on Adreno | GPU compositing |
 
@@ -69,3 +69,17 @@ command; check their hashes. Host checks: `python3 tests/packaging/test-mali-acc
 | ION surfaces | `packages/android-vaapi/tva_ion_winsys.h` |
 | HEVC reorder count | `packages/android-vaapi/0103-hevc-reorder-count.patch` |
 | Results | [X1S-BROWSER-VERIFICATION.md](../X1S-BROWSER-VERIFICATION.md), [native-acceleration-checks.md](../../browsers/native-acceleration-checks.md) |
+
+## Outcome of the 2026-11-14 attempt (agent decode-chromium)
+
+Nothing changed in code. Step 1 needs the Note10+, which was not attached (`adb devices`
+listed only the x1s). Step 2 is waiting on the H.264 bridge fix ([decode-h264.md](decode-h264.md)).
+Step 3, the soak and seek runs, needs the x1s, and another agent had claimed it in
+`temp/PHONE-STATUS` (a 20-cycle qualification). So all three next steps are still open as written above.
+
+Later the same day, step 2 was unblocked: android-vaapi 27.0.0~devel20261029-10 (CI run
+43596220676, branch fix/decode-h264) rebuilds the PPS from the slice headers. To test, set
+`disabled_va_codecs=['av1']` in a private config, set `TERMUX_VA_H264_REORDER_FRAMES=0` on Mali,
+and make the fixture with `make-video-fixtures.py --codecs h264-fast`. On Mali, FFmpeg also needs
+the render-node preload from fix/chromium-webcodecs-shmem. The x1s was still busy
+(a Ghostty GL test, with a 30-minute soak queued behind it), so Chromium H.264 has not been run yet.

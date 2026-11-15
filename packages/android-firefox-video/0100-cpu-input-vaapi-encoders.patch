@@ -1,0 +1,219 @@
+From: LiveCD Termux maintainers
+Subject: [PATCH] Upload I420 input for the private Firefox VAAPI encoders
+
+Firefox's GTK FFmpeg encoder submits ordinary I420 frames and does not allocate
+a VA frames context. Merely compiling VAAPI encoders makes discovery succeed,
+then initialization fails. Add a CPU-input adapter in this private runtime:
+create the standard VA device/pool, interleave I420 chroma into NV12, upload,
+and preserve timestamps, key-frame requests and colour properties. Existing
+VAAPI-frame callers follow the upstream path. No system FFmpeg library changes.
+
+The optional input hook is internal to libavcodec and unused by other hardware
+encoders. This package's I420 upload mode is limited to 8-bit input without B
+frames, matching the bridge. Its hardware encoding remains under device
+acceptance; do not enable Firefox's remote platform encoder preference until
+actual output passes software decode and pixel checks.
+
+--- a/libavcodec/hw_base_encode.h
++++ b/libavcodec/hw_base_encode.h
+@@ -111,6 +111,8 @@
+     size_t priv_size;
+     // Initialize API-specific internals
+     int (*init)(AVCodecContext *avctx, FFHWBaseEncodePicture *pic);
++    // Optionally upload a software input frame before picture submission.
++    int (*prepare_input)(AVCodecContext *avctx, AVFrame *frame);
+     // Issue the picture structure, which will send the frame surface to HW Encode API.
+     int (*issue)(AVCodecContext *avctx, FFHWBaseEncodePicture *pic);
+     // Get the output AVPacket.
+--- a/libavcodec/hw_base_encode.c
++++ b/libavcodec/hw_base_encode.c
+@@ -583,6 +583,12 @@
+         frame = NULL;
+     } else if (err < 0)
+         return err;
++
++    if (frame && ctx->op->prepare_input) {
++        err = ctx->op->prepare_input(avctx, frame);
++        if (err < 0)
++            return err;
++    }
+ 
+     err = hw_base_encode_send_frame(avctx, ctx, frame);
+     if (err < 0)
+--- a/libavcodec/vaapi_encode.h
++++ b/libavcodec/vaapi_encode.h
+@@ -148,6 +148,10 @@
+ 
+     // Codec-specific hooks.
+     const struct VAAPIEncodeType *codec;
++
++    // The private Firefox runtime accepts I420 from libavcodec clients
++    // which do not create an AVHWFramesContext themselves.
++    int cpu_upload;
+ 
+     // Use low power encoding mode.
+     int             low_power;
+--- a/libavcodec/vaapi_encode.c
++++ b/libavcodec/vaapi_encode.c
+@@ -2137,10 +2137,112 @@
+     return err;
+ }
+ 
++/* CPU-input adapter for the private native Firefox FFmpeg runtime. Firefox's
++ * GTK encoder submits I420, without a VA device or upload filter. Keep its
++ * libavcodec interface while using the same VA surfaces as ordinary VA clients.
++ * Callers which already provide VAAPI frames retain the upstream path. */
++static int vaapi_encode_prepare_cpu_input(AVCodecContext *avctx, AVFrame *frame)
++{
++    VAAPIEncodeContext *ctx = avctx->priv_data;
++    AVFrame *nv12 = NULL, *hardware = NULL;
++    AVHWFramesContext *pool;
++    int err = 0, x, y;
++
++    if (!ctx->cpu_upload)
++        return 0;
++    if (frame->format != AV_PIX_FMT_YUV420P ||
++        frame->width != avctx->width || frame->height != avctx->height)
++        return AVERROR(EINVAL);
++
++    nv12 = av_frame_alloc();
++    hardware = av_frame_alloc();
++    if (!nv12 || !hardware) {
++        err = AVERROR(ENOMEM);
++        goto done;
++    }
++    pool = (AVHWFramesContext *)ctx->base.input_frames_ref->data;
++    nv12->format = AV_PIX_FMT_NV12;
++    nv12->width = pool->width;
++    nv12->height = pool->height;
++    err = av_frame_get_buffer(nv12, 32);
++    if (err < 0)
++        goto done;
++
++    /* Initialize coded padding as well as visible pixels. */
++    for (y = 0; y < nv12->height; y++)
++        memset(nv12->data[0] + y * nv12->linesize[0], 16, nv12->linesize[0]);
++    for (y = 0; y < (nv12->height + 1) / 2; y++)
++        memset(nv12->data[1] + y * nv12->linesize[1], 128, nv12->linesize[1]);
++    for (y = 0; y < frame->height; y++)
++        memcpy(nv12->data[0] + y * nv12->linesize[0],
++               frame->data[0] + y * frame->linesize[0], frame->width);
++    for (y = 0; y < (frame->height + 1) / 2; y++) {
++        uint8_t *uv = nv12->data[1] + y * nv12->linesize[1];
++        const uint8_t *u = frame->data[1] + y * frame->linesize[1];
++        const uint8_t *v = frame->data[2] + y * frame->linesize[2];
++        for (x = 0; x < (frame->width + 1) / 2; x++) {
++            uv[2*x] = u[x];
++            uv[2*x + 1] = v[x];
++        }
++    }
++    err = av_hwframe_get_buffer(ctx->base.input_frames_ref, hardware, 0);
++    if (err < 0)
++        goto done;
++    err = av_hwframe_transfer_data(hardware, nv12, 0);
++    if (err < 0)
++        goto done;
++    err = av_frame_copy_props(hardware, frame);
++    if (err < 0)
++        goto done;
++    av_frame_unref(frame);
++    av_frame_move_ref(frame, hardware);
++done:
++    av_frame_free(&hardware);
++    av_frame_free(&nv12);
++    return err;
++}
++
++static int vaapi_encode_create_cpu_pool(AVCodecContext *avctx)
++{
++    VAAPIEncodeContext *ctx = avctx->priv_data;
++    AVBufferRef *device = NULL, *frames = NULL;
++    AVHWFramesContext *pool;
++    int err;
++
++    if (avctx->hw_frames_ctx || avctx->pix_fmt != AV_PIX_FMT_YUV420P)
++        return 0;
++    err = av_hwdevice_ctx_create(&device, AV_HWDEVICE_TYPE_VAAPI, NULL, NULL, 0);
++    if (err < 0)
++        return err;
++    frames = av_hwframe_ctx_alloc(device);
++    av_buffer_unref(&device);
++    if (!frames)
++        return AVERROR(ENOMEM);
++    pool = (AVHWFramesContext *)frames->data;
++    pool->format = AV_PIX_FMT_VAAPI;
++    pool->sw_format = AV_PIX_FMT_NV12;
++    pool->width = FFALIGN(avctx->width, 16);
++    pool->height = FFALIGN(avctx->height, 16);
++    pool->initial_pool_size = 8;
++    err = av_hwframe_ctx_init(frames);
++    if (err < 0) {
++        av_buffer_unref(&frames);
++        return err;
++    }
++    avctx->hw_frames_ctx = frames;
++    /* CPU submission is the low-latency path; the bridge does not encode B frames. */
++    avctx->max_b_frames = 0;
++    ctx->cpu_upload = 1;
++    av_log(avctx, AV_LOG_VERBOSE, "VAAPI: uploading I420 input through NV12 surfaces\n");
++    return 0;
++}
++
+ static const FFHWEncodePictureOperation vaapi_op = {
+     .priv_size = sizeof(VAAPIEncodePicture),
+ 
+     .init = &vaapi_encode_init,
++
++    .prepare_input = &vaapi_encode_prepare_cpu_input,
+ 
+     .issue  = &vaapi_encode_issue,
+ 
+@@ -2162,7 +2264,15 @@
+     VAStatus vas;
+     int err;
+ 
++    err = vaapi_encode_create_cpu_pool(avctx);
++    if (err < 0)
++        goto fail;
++
+     err = ff_hw_base_encode_init(avctx, base_ctx);
++    /* The base context owns a reference after initialization. Keep the caller's
++     * CPU AVCodecContext free of an implicit hardware-frame requirement. */
++    if (ctx->cpu_upload)
++        av_buffer_unref(&avctx->hw_frames_ctx);
+     if (err < 0)
+         goto fail;
+ 
+--- a/libavcodec/vaapi_encode_h264.c
++++ b/libavcodec/vaapi_encode_h264.c
+@@ -1179,7 +1179,7 @@
+     .caps_internal  = FF_CODEC_CAP_NOT_INIT_THREADSAFE |
+                       FF_CODEC_CAP_INIT_CLEANUP,
+     .defaults       = vaapi_encode_h264_defaults,
+-    CODEC_PIXFMTS(AV_PIX_FMT_VAAPI),
++    CODEC_PIXFMTS(AV_PIX_FMT_VAAPI, AV_PIX_FMT_YUV420P),
+     .color_ranges   = AVCOL_RANGE_MPEG | AVCOL_RANGE_JPEG,
+     .hw_configs     = ff_vaapi_encode_hw_configs,
+     .p.wrapper_name = "vaapi",
+--- a/libavcodec/vaapi_encode_h265.c
++++ b/libavcodec/vaapi_encode_h265.c
+@@ -1210,7 +1210,7 @@
+     .caps_internal  = FF_CODEC_CAP_NOT_INIT_THREADSAFE |
+                       FF_CODEC_CAP_INIT_CLEANUP,
+     .defaults       = vaapi_encode_h265_defaults,
+-    CODEC_PIXFMTS(AV_PIX_FMT_VAAPI),
++    CODEC_PIXFMTS(AV_PIX_FMT_VAAPI, AV_PIX_FMT_YUV420P),
+     .color_ranges   = AVCOL_RANGE_MPEG | AVCOL_RANGE_JPEG,
+     .hw_configs     = ff_vaapi_encode_hw_configs,
+     .p.wrapper_name = "vaapi",
+--- a/libavcodec/vaapi_encode_vp9.c
++++ b/libavcodec/vaapi_encode_vp9.c
+@@ -319,7 +319,7 @@
+                       FF_CODEC_CAP_INIT_CLEANUP,
+     .defaults       = vaapi_encode_vp9_defaults,
+     .color_ranges   = AVCOL_RANGE_MPEG, /* FIXME: implement tagging */
+-    CODEC_PIXFMTS(AV_PIX_FMT_VAAPI),
++    CODEC_PIXFMTS(AV_PIX_FMT_VAAPI, AV_PIX_FMT_YUV420P),
+     .hw_configs     = ff_vaapi_encode_hw_configs,
+     .p.wrapper_name = "vaapi",
+ };

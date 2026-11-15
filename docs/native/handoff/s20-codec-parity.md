@@ -51,10 +51,31 @@ Other declared features: `adaptive-playback` on every decoder, and `low-latency`
 decoder except VP9. Secure decoders (`.secure`) exist for H.264, HEVC and VP9; they serve DRM
 playback into protected buffers and are left out of parity here. Say so if you disagree.
 
-Not in the XML and **not yet known**: the profiles and bit depths (HEVC Main 10, VP9 profile 2,
-H.264 High 10) and colour formats. Android reports those only at run time, through
-`MediaCodecInfo`. The board sets a 10-bit buffer alignment and an HDR10 plugin,
-so 10-bit HEVC is likely; it has not been checked.
+### Run-time capabilities (MediaCodecInfo, read 2026-11-14)
+
+Read on the x1s with `tests/native/codec-info/CodecInfo.java`, a dex run through `app_process`
+(build and run commands in that file). Raw output: `tests/native/codec-info/x1s-2026-11-14.jsonl`.
+Where this differs from the XML above, it wins: it is what an Android app actually gets.
+
+| Codec | Profiles offered | Max size | 4K rate | 8K rate |
+| --- | --- | --- | --- | --- |
+| H.264 dec | Baseline, Main, High, Constrained Baseline, Constrained High; **no High 10** | 8192x8192 | 64 | not offered |
+| HEVC dec | Main, **Main 10**, Main 10 HDR10, Main 10 HDR10+ | 8192x8192 | 120 | 30 |
+| VP9 dec | Profile 0, **Profile 2**, Profile 2 HDR, Profile 2 HDR10+ | 8192x8192 | 70 | **not offered** (XML says 8K30) |
+| VP8 dec | Main | 8192x8192 | 120 | 30 |
+| MPEG-4 Part 2 dec | Simple, Advanced Simple | **896x896** (XML says 2048) | n/a | n/a |
+| H.263 dec | Baseline, H320, Backward-compatible, ISWV2 | **720x576** (XML says 2048x1152) | n/a | n/a |
+| H.264 enc | Baseline, Main, High, CB, CH | 8192x8192 | 64 | not offered |
+| HEVC enc | Main, **Main 10**, Main 10 HDR10 | 8192x8192 | 120 | 30 |
+| VP9 enc | Profile 0, **Profile 2**, Profile 2 HDR | 4096x8192 | 70 | not offered |
+| VP8 enc | Main | 3840x3840 | 120 | not offered |
+| MPEG-4 Part 2 enc | Simple, Advanced Simple | 896x896 | n/a | n/a |
+| H.263 enc | Baseline | 720x576 | n/a | n/a |
+
+The HEVC and VP9 codecs (the only ones with 10-bit profiles) list one extra colour format,
+2135032171 (`0x7f42016b`), a vendor value. It is presumably Samsung's 10-bit layout, which is
+not named standard P010 (format 54); what it looks like in memory has not been checked. `low-latency` holds for every decoder except VP9, as the XML says.
+All decoders offer `adaptive-playback`; no codec offers tunnelled playback.
 
 ## Where Linux programs stand
 
@@ -67,14 +88,14 @@ Firefox's FFmpeg. mpv calls MediaCodec directly through FFmpeg, so it is a separ
 | --- | --- | --- | --- |
 | H.264 | **off**: the bridge guesses a PPS field and can hang the player | passes | [decode-h264.md](decode-h264.md) |
 | HEVC 8-bit | passes up to 1080p | passes | nothing above 1080p tested |
-| HEVC 10-bit | untested; the bridge does write Main 10 into its rebuilt SPS | untested | test it; check the driver offers a P010 surface |
+| HEVC 10-bit | untested; the bridge does write Main 10 into its rebuilt SPS | **passes** (FFmpeg MediaCodec, 48/48 frames, 2026-11-14) | bridge test; the bridge offers only `HEVC_MAIN`, so a P010 surface and the Main 10 profile need adding |
 | VP9 profile 0 | passes up to 1080p | passes | nothing above 1080p tested |
-| VP9 profile 2 (10-bit) | untested | untested | test it |
-| VP8 | **not offered**: the bridge maps only H.264, HEVC, VP9 and AV1 | untested; FFmpeg has a MediaCodec VP8 decoder | add VP8 to the bridge (`tva_codec_id`, the daemon's codec table) |
-| MPEG-4 Part 2 | **not offered** | untested; FFmpeg has a MediaCodec MPEG-4 decoder | add to the bridge; VA-API has MPEG-4 profiles |
-| H.263 | **not offered** | no FFmpeg MediaCodec decoder | VA-API's MPEG-4 profiles cover H.263 baseline streams; low value |
+| VP9 profile 2 (10-bit) | **not offered**: the bridge offers only profile 0 | **passes** (FFmpeg MediaCodec, 48/48, 2026-11-14) | add profile 2 and a P010 surface to the bridge |
+| VP8 | **not offered**, and not a bridge-table fix: Mesa's gallium has no VP8 video format, no VA picture parser and no `VAProfileVP8` in its frontend. The daemon already maps `CODEC_VP8` | **decodes bit-exact** (YUV of all 48 frames equals libvpx, `OMX.Exynos.vp8.dec`), but the suite's RGB check fails: FFmpeg converts the MediaCodec frame as if full range | fix the range tag in FFmpeg's MediaCodec output (decode-native); for VA-API, add a VP8 pipe format, `picture_vp8.c` and the 3/10-byte frame-header rebuild to the Mesa fork |
+| MPEG-4 Part 2 | **not offered**: Mesa's VA frontend dropped MPEG-4 Part 2, and the daemon protocol has no id for it | **passes** (`OMX.Exynos.mpeg4.dec`, 48/48, 640x360). Android limits it to 896x896 | VA-API needs a Mesa frontend for MPEG-4 plus a new protocol id; low value |
+| H.263 | **not offered** | no FFmpeg MediaCodec decoder; Android limits it to 720x576 | VA-API's MPEG-4 profiles cover H.263 baseline streams; low value |
 | AV1 | software, which is parity | software | nothing; keep it disabled on the S20 |
-| 4K and 8K | untested | untested | measure frame rate and dropped frames; every picture is copied through ordinary memory |
+| 4K and 8K | untested | 4K HEVC: 120 frames in 2.0 s, **60 fps including start-up** (software: 30 fps), 2026-11-14; picture correctness at 4K not checked. 8K untested | 4K through the bridge; 8K fixture. Android declares 4K VP9 at 70 fps and no 8K VP9 |
 | Low-latency decoding | not requested | not requested | optional |
 
 ### Encode
@@ -84,9 +105,9 @@ Firefox's FFmpeg. mpv calls MediaCodec directly through FFmpeg, so it is a separ
 | H.264 | works with faults: no colour metadata, an extra key frame in Baseline, low bitrates overshoot | [encode-native.md](encode-native.md) |
 | HEVC | works, same colour-metadata fault | same |
 | VP9 | works for the browsers' private tests; FFmpeg's `vp9_vaapi` has not been run on its own | add VP9 to the native suite |
-| VP8 | **not offered**: the bridge maps H.264, HEVC and VP9 only | add VP8 to the bridge and daemon; FFmpeg has `vp8_vaapi` |
-| MPEG-4 Part 2, H.263 | **not offered**, and VA-API has no encode entry point for them | cannot be reached through VA-API at all. Parity would need another route, such as FFmpeg's direct MediaCodec encoders. Needs the user's decision |
-| 10-bit | untested | find out whether the encoder offers it, then test |
+| VP8 | **not offered**: the bridge maps H.264, HEVC and VP9 only | Mesa's gallium has no VP8 at all, so it needs the same Mesa work as VP8 decode plus a `CODEC_VP8_ENC` protocol id. Android caps it at 3840x3840 |
+| MPEG-4 Part 2, H.263 | **not offered**, and VA-API has no encode entry point for them | cannot be reached through VA-API at all. Android caps them at 896x896 and 720x576. Parity would need another route, such as FFmpeg's direct MediaCodec encoders. Needs the user's decision |
+| 10-bit | untested | the encoders offer it: HEVC Main 10 and VP9 profile 2 (MediaCodecInfo). Not H.264. Bridge offers neither |
 | 4K and 8K | untested; one picture at a time and every picture copied. 1080p30 was already at the limit on the Note10+ | measure; pipelining in the driver would be the fix |
 | Bitrate modes, low latency | standard CBR only; `low-latency` is refused by the encoders, so Android apps cannot use it either | [encode-native.md](encode-native.md) |
 
@@ -96,6 +117,16 @@ None of the above is reachable as installed today. The installed driver (`androi
 revision 5) cannot find the Mali GPU, the installed FFmpeg has no VA-API, and no overlay
 installs GStreamer's VA plugin. That comes first: [encode-native.md](encode-native.md). It
 affects decoding through FFmpeg and GStreamer as well.
+
+### Peer work (2026-11-14)
+
+No peer PR is open yet. Branches pushed: `fix/decode-h264`, `fix/decode-frame-sync`,
+`fix/decode-native`, `fix/decode-chromium`, `fix/decode-chrome`, `fix/decode-firefox`,
+`fix/encode-native`, `fix/encode-chromium` (as `fix/chromium-webcodecs-shmem`),
+`fix/encode-chrome`, `fix/encode-firefox`. Update the rows above as each merges.
+
+Fixtures for the new rows: `tests/browsers/make-video-fixtures.py --codecs vp8 mpeg4`, and
+`--ten-bit --codecs hevc vp9`; run them with `tests/browsers/test-native-mediacodec.py`.
 
 ## Order of work
 

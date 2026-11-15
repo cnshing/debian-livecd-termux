@@ -4,15 +4,31 @@ State on 2026-11-14. Shared rules and pass criteria: [README.md](README.md).
 
 ## Status
 
-**Off, by the user's decision of 2026-11-14. Do not spend more work on it** unless Mozilla fixes
-the two problems below or the user changes the decision.
-`media.use-remote-encoder.video.platform` stays at Firefox's default (off outside Nightly), and
-the launcher sets nothing for encoding. That one preference gates WebCodecs and WebRTC hardware
-encoding together.
+**Reopened 2026-11-14 for S20 codec parity. Fixes are on `fix/encode-firefox`; encoding stays
+opt-in, off by default. Turning it on by default is the user's call.**
 
-What this means for users: this Firefox has no software H.264 encoder (no OpenH264 plugin), so
-it cannot send H.264 in WebRTC or WebCodecs at all. An H.264 call connects with zero frames.
-VP9 calls use its software encoder and work.
+Opt in with `"firefox_encode": true` in `~/.config/livecd-native/acceleration.json`. The launcher
+then sets `media.use-remote-encoder.video.platform` in its managed `user.js` block, only on Mali
+and only when the installed `android-firefox-video` manifest lists its encoders
+(`firefox_encode_ready()` in `src/native/acceleration.py`). Without the opt-in nothing changes.
+
+Firefox 159.0.1 (Termux's current build) and Mozilla's main still have both bugs, so the branch
+builds Firefox itself:
+
+| Fix | Where |
+| --- | --- |
+| WebCodecs labels the encoder's output BT.601 (`smpte170m`), the matrix libyuv converts canvas pixels with | `packages/firefox/1101-webcodecs-bt601-label.patch` |
+| WebRTC may change a `*_vaapi` encoder's bitrate on the fly, as it already does for libx264 | `packages/firefox/1102-vaapi-bitrate-reconfigure.patch` |
+| The VA-API encoder picks up a new `bit_rate` with its next picture | `packages/android-firefox-video/0103-follow-caller-bitrate.patch` (revision 6) |
+
+`packages/firefox` is Termux's recipe at the pinned builder revision (159.0) plus those two patches.
+It builds in a CI job of its own, like Chromium. Because of the apt pin, it replaces Termux's
+Firefox until it is removed. android-firefox-video's manifest pins the Firefox binary, so the two
+always build together. Revision 6 of android-firefox-video carries the encoder work from the CI
+branch (revisions 3 to 5), and android-vaapi revision 6 carries the Mali backend and local-libdrm
+fixes (revision 8 on the CI branch).
+
+See "Verification" at the end for what was proven on the phone.
 
 ## What was made to work
 

@@ -41,7 +41,8 @@ def check(directory):
         driver = private / mali['driver_directory'] / 'termuxva_drv_video.so'
         data = driver.read_bytes()
         for marker in (b'software backend on dma-buf surfaces', b'TERMUX_VA_SYNC_END_PICTURE',
-                       b'TERMUX_VA_GALLIUM_DRIVER', b'TERMUX_VA_HEVC_REORDER_PICS'):
+                       b'TERMUX_VA_GALLIUM_DRIVER', b'TERMUX_VA_HEVC_REORDER_PICS',
+                       b'TERMUX_VA_H264_REORDER_FRAMES'):
             if marker not in data:
                 raise RuntimeError('Mali driver lacks ' + marker.decode())
         needed = subprocess.check_output(['readelf', '-d', str(driver)], text=True)

@@ -23,6 +23,7 @@ import time
 from graphics import apply_renderer, mali_usable, panvk, preferred_renderer, use_panvk
 
 PREFIX = Path('/data/data/com.termux/files/usr')
+DPKG_STATUS = PREFIX / 'var/lib/dpkg/status'
 ROOT = Path.home() / '.local/opt/livecd-native/acceleration'
 # The android-vaapi packages. A stack selected under ROOT, such as a development build, comes first.
 PACKAGED = {'bionic': PREFIX / 'lib/android-vaapi', 'glibc': PREFIX / 'lib/android-vaapi-glibc'}
@@ -188,20 +189,29 @@ def video_environment(env, selected, abi, config):
         # CPU surfaces do not disable MediaCodec hardware codec execution.
         # The KGSL/dma-buf import settings are specific to the Adreno stack.
         env['TERMUX_VA_GPU_BACKEND'] = 'sw'
+    else:
+        env.update(TERMUX_VA_GPU_BACKEND='kgsl', TERMUX_VA_X11_DRI3='1',
+                   TERMUX_VA_CONTIGUOUS_DMABUF='1')
+    decode_safeguards(env, config, mali)
+    ensure_daemon(env)
+
+
+def decode_safeguards(env, config, mali):
+    """Codec limits every VA-API program needs, whether started by the launcher or
+    from the desktop session (desktop.native_encode)."""
+    if mali:
         # Exynos's HEVC decoder holds back as many pictures as the rebuilt SPS declares:
         # more than Firefox submits before waiting for the first, and any at all fails
         # Chromium's wait for each picture. Declaring none returns each picture as it is
         # decoded. See X1S-FIREFOX-VIDEO.md.
         env['TERMUX_VA_HEVC_REORDER_PICS'] = '0'
-    else:
-        env.update(TERMUX_VA_GPU_BACKEND='kgsl', TERMUX_VA_X11_DRI3='1',
-                   TERMUX_VA_CONTIGUOUS_DMABUF='1')
+        # The same holds for H.264's max_num_reorder_frames (decode-h264.md).
+        env['TERMUX_VA_H264_REORDER_FRAMES'] = '0'
     for codec in config.get('disabled_va_codecs', ['h264', 'av1']):
         env.setdefault('TERMUX_VA_DISABLE_' + codec.upper(), '1')
-    ensure_daemon(env)
 
 
-def firefox_preferences(profile, gpu, video):
+def firefox_preferences(profile, gpu, video, encode=False):
     # Preserve user.js outside our marked block. Only the managed desktop
     # profile is edited; caller-supplied profiles retain their own preferences.
     profile.mkdir(parents=True, exist_ok=True)
@@ -215,6 +225,10 @@ def firefox_preferences(profile, gpu, video):
                   'media.ffmpeg.vaapi.enabled': video,
                   'media.hardware-video-decoding.force-enabled': video,
                   'widget.dmabuf.force-enabled': video}
+        if encode:
+            # One preference gates WebCodecs and WebRTC hardware encoding. Opt-in only
+            # (firefox_encode in acceleration.json): see docs/native/handoff/encode-firefox.md.
+            values['media.use-remote-encoder.video.platform'] = True
         block = '\n'.join(f'user_pref({json.dumps(key)}, {json.dumps(value)});' for key, value in values.items())
         temporary = path.with_name('user.js.livecd-next')
         temporary.write_text(previous.rstrip() + '\n' + start + '\n' + block + '\n' + end + '\n')
@@ -255,9 +269,43 @@ def firefox_video_runtime():
     return None, reason
 
 
+def firefox_encode_ready():
+    """Whether the user opted in and the installed runtime carries the encoders."""
+    if settings().get('firefox_encode') is not True:
+        return False
+    runtime, _ = firefox_video_runtime()
+    try:
+        encoding = json.loads((runtime[0] / 'manifest.json').read_text()).get('encoding') if runtime else None
+    except (OSError, ValueError):
+        return False
+    return isinstance(encoding, dict) and encoding.get('input') == 'i420' and 'h264' in encoding.get('codecs', ())
+
+
 def video_device():
     # Chromium opens this node for its VA-API display; android-vaapi serves either.
     return '/dev/mali0' if not os.path.exists('/dev/kgsl-3d0') and mali_usable() else '/dev/kgsl-3d0'
+
+
+def chromium_encodes_webcodecs():
+    """True when the installed Termux Chromium is revision 3 or later.
+
+    Revision 2 sends WebCodecs frames as shared memory instead of crashing the GPU process,
+    and revision 3 lets VA-API upload them (NV12). Earlier builds crash or fail every frame,
+    so AcceleratedVideoEncoder stays off for them. The package receipt has no revision field.
+    """
+    try:
+        status = DPKG_STATUS.read_text(errors='replace')
+    except OSError:
+        return False
+    for entry in status.split('\n\n'):
+        fields = dict(line.split(': ', 1) for line in entry.splitlines() if ': ' in line and not line.startswith(' '))
+        if fields.get('Package') == 'chromium' and 'installed' in fields.get('Status', '').split():
+            match = re.fullmatch(r'(?:\d+:)?([\d.]+)(?:-(\d+))?', fields.get('Version', ''))
+            if not match:
+                return False
+            version = tuple(int(part) for part in match.group(1).split('.'))
+            return (version, int(match.group(2) or 0)) >= ((156, 0, 8078, 79), 3)
+    return False
 
 
 def command_line(profile, command, abi, video, gpu, mali=False):
@@ -271,6 +319,14 @@ def command_line(profile, command, abi, video, gpu, mali=False):
                 '--hardware-video-device-path=' + video_device(),
                 '--enable-features=Vulkan,VulkanFromANGLE,DefaultANGLEVulkan,VaapiVideoDecoder,VaapiVideoDecodeLinux,PlatformHEVCDecoderSupport,AcceleratedVideoDecoder,AcceleratedVideoDecodeLinuxGL,VaapiIgnoreDriverChecks',
                 '--disable-features=VaapiVideoMinResolutionForPerformance']
+            # Exynos hardware encoding, accepted on the S20: Chromium revision 3 for WebRTC and
+            # WebCodecs; Chrome for WebRTC. Chrome's WebCodecs hardware path crashes its GPU process
+            # (unpatchable GMB input); the user chose WebRTC hardware encoding over that.
+            if video_device() == '/dev/mali0' and (
+                    (profile == 'chromium' and abi == 'bionic' and chromium_encodes_webcodecs()) or
+                    (profile == 'chrome' and abi == 'glibc')):
+                flags = [flag + ',AcceleratedVideoEncoder' if flag.startswith('--enable-features=') else flag
+                         for flag in flags]
         if abi == 'glibc':
             flags[:0] = ['--no-sandbox', '--disable-dev-shm-usage']
         if profile in ('chromium', 'ungoogled-chromium') and abi == 'glibc' and not any(
@@ -279,7 +335,7 @@ def command_line(profile, command, abi, video, gpu, mali=False):
             flags.append('--user-data-dir=' + str(Path.home() / '.config/livecd-native' / name))
     elif profile == 'firefox' and not any(arg in ('--profile', '-profile', '-P') or arg.startswith('--profile=') for arg in command[1:]):
         owned = Path.home() / '.config/livecd-native/firefox'
-        firefox_preferences(owned, gpu, video)
+        firefox_preferences(owned, gpu, video, encode=bool(video) and mali_usable() and firefox_encode_ready())
         flags = ['--profile', str(owned)]
     elif profile == 'mpv':
         flags = (['--vo=gpu-next', '--gpu-api=opengl', '--gpu-context=x11egl', '--opengl-es=yes']

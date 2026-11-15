@@ -6,7 +6,7 @@
 # daemon socket that keeps the shared daemon out of the tests.
 #
 # Usage: run-phone-tests.sh --stack DIR --daemon PATH --out NEW_DIR
-#            [--clients PREFIX]... [--only SUITE]...
+#            [--clients PREFIX]... [--only SUITE]... [--va-probe PATH]
 #   --stack     a build-native.py output (lib/va-client, lib/dri, the preload)
 #   --daemon    the patched termux-va to test
 #   --clients   a prefix holding VA-API builds of FFmpeg and GStreamer's va
@@ -14,9 +14,10 @@
 #   --only      run only this suite: daemon, render-node, gstreamer, ffmpeg or
 #               camera; repeatable. The camera suite needs android-v4l2
 #               installed, and runs when it is.
+#   --va-probe  use an already-built native va-probe instead of requiring clang
 set -u
 here=$(cd "$(dirname "$0")" && pwd)
-stack= daemon= out= clients=() only=
+stack= daemon= out= clients=() only= va_probe=
 while [ $# -gt 0 ]; do
     case $1 in
         --stack) stack=$(cd "$2" && pwd -P); shift 2 ;;
@@ -24,6 +25,7 @@ while [ $# -gt 0 ]; do
         --out) out=$2; shift 2 ;;
         --clients) clients+=("$2"); shift 2 ;;
         --only) only="$only $2"; shift 2 ;;
+        --va-probe) va_probe=$2; shift 2 ;;
         *) echo "unknown argument $1" >&2; exit 2 ;;
     esac
 done
@@ -64,8 +66,12 @@ suite() {  # suite NAME COMMAND...
     [ "$r" -eq 0 ] || status=1
 }
 
-env -u LD_PRELOAD clang -O2 -Wall "$here/va-probe.c" -o "$out/va-probe" -I"$stack/include" \
-    -I"$PREFIX/include/libdrm" -L"$stack/lib/va-client" -lva -lva-drm -ldrm || exit 1
+if [ -n "$va_probe" ]; then
+    [ -x "$va_probe" ] && cp "$va_probe" "$out/va-probe" || exit 1
+else
+    env -u LD_PRELOAD clang -O2 -Wall "$here/va-probe.c" -o "$out/va-probe" -I"$stack/include" \
+        -I"$PREFIX/include/libdrm" -L"$stack/lib/va-client" -lva -lva-drm -ldrm || exit 1
+fi
 suite daemon python "$here/test-daemon.py" --daemon "$daemon" --out "$out/daemon"
 suite render-node env LD_LIBRARY_PATH="$libraries" PATH="$path" GST_PLUGIN_PATH="$plugins" \
     GST_REGISTRY="$out/gst-registry.bin" LIBVA_DRIVERS_PATH="$stack/lib/dri" TERMUX_VA_SOCKET="$socket" \

@@ -1,6 +1,6 @@
 --- a/src/preload/hooks.c
 +++ b/src/preload/hooks.c
-@@ -568,4 +568,217 @@
+@@ -568,4 +568,218 @@
  
  __attribute__((constructor)) static void on_init(void) {
      DBG("Injection successful!\n");
@@ -39,10 +39,11 @@
 +    if (!plain.nl_groups) return r;
 +    DBG("netlink bind to groups 0x%x refused, binding without them\n", plain.nl_groups);
 +    plain.nl_groups = 0;
-+    r = real(fd, (struct sockaddr *)&plain, sizeof plain);
-+    // Already bound, or the kernel binds on the first send anyway.
-+    if (r != 0 && errno == EINVAL) r = 0;
-+    return r;
++    // Android also refuses the plain bind. The kernel binds the socket on its
++    // first send anyway, so a dump still works: report success either way.
++    if (real(fd, (struct sockaddr *)&plain, sizeof plain) != 0)
++        DBG("plain netlink bind refused too (errno=%d), relying on autobind\n", errno);
++    return 0;
 +}
 +
 +static void nl_put(char **p, char *end, struct nlmsghdr **h, unsigned short type,

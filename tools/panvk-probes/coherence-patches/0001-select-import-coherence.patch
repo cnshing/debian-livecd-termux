@@ -1,0 +1,15 @@
+diff --git a/src/panfrost/lib/kmod/kbase_kmod.c b/src/panfrost/lib/kmod/kbase_kmod.c
+index aad56a3..55a963d 100644
+--- a/src/panfrost/lib/kmod/kbase_kmod.c
++++ b/src/panfrost/lib/kmod/kbase_kmod.c
+@@ -2551,7 +2551,9 @@ kbase_kmod_import_dmabuf(struct pan_kmod_dev *dev,
+    uint64_t import_flags =
+       BASE_MEM_PROT_CPU_RD | BASE_MEM_PROT_CPU_WR |
+       BASE_MEM_PROT_GPU_RD | BASE_MEM_PROT_GPU_WR |
+-      BASE_MEM_IMPORT_SHARED | BASE_MEM_COHERENT_SYSTEM;
++      BASE_MEM_IMPORT_SHARED |
++      (dev->props.is_io_coherent ? BASE_MEM_COHERENT_SYSTEM
++                                : BASE_MEM_COHERENT_LOCAL);
+ 
+    if (kmod_flags & PAN_KMOD_BO_FLAG_GPU_UNCACHED)
+       import_flags |= BASE_MEM_UNCACHED_GPU;

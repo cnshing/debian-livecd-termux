@@ -16,6 +16,8 @@ case "${PANVK_BUILD_VARIANT:-research}" in
   workgroups) patch_dir="$here/workgroup-patches" ;;
   memory-budget) patch_dir="$here/budget-patches" ;;
   ion-cache) patch_dir="$here/ion-patches" ;;
+  import-coherence) patch_dir="$out/selected-patches"; mkdir -p "$patch_dir"
+    cp "$here/ion-patches/"*.patch "$here/coherence-patches/"*.patch "$patch_dir/" ;;
   *) echo 'Unknown PANVK_BUILD_VARIANT' >&2; exit 1 ;;
 esac
 mkdir -p "$out"

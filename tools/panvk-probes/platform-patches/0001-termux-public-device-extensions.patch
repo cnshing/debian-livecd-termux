@@ -1,0 +1,31 @@
+Keep the private Android HAL extension out of the Termux ICD profile.
+
+The android+x11 build is consumed by the generic Vulkan loader. Public AHB
+support remains tied to gralloc. Android-only HAL builds retain their private
+native-buffer contract. This patch deliberately changes the hybrid profile,
+so it must be qualified independently before promotion.
+
+--- a/src/panfrost/vulkan/meson.build
++++ b/src/panfrost/vulkan/meson.build
+@@ -71,6 +71,9 @@
+ 
+ panvk_deps = []
+ panvk_flags = []
++if with_platform_android and with_platform_x11
++  panvk_flags += '-DPANVK_TERMUX_ICD'
++endif
+ panvk_per_arch_libs = []
+ 
+ bifrost_archs = [6, 7]
+--- a/src/panfrost/vulkan/panvk_vX_physical_device.c
++++ b/src/panfrost/vulkan/panvk_vX_physical_device.c
+@@ -239,7 +239,9 @@
+       .EXT_zero_initialize_device_memory = true,
+       .EXT_inline_uniform_block = true,
+       .ANDROID_external_memory_android_hardware_buffer = has_gralloc,
++#ifndef PANVK_TERMUX_ICD
+       .ANDROID_native_buffer = has_gralloc,
++#endif
+       .GOOGLE_decorate_string = true,
+ #ifdef PANVK_USE_WSI_PLATFORM
+       .GOOGLE_display_timing = wsi_instance_supports_google_display_timing(&instance->vk, &instance->drirc.options),

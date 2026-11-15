@@ -36,8 +36,14 @@ Zink (`gpu_enabled`). On a software desktop it renders and decodes in software.
 2. **H.264**: [decode-h264.md](decode-h264.md). Firefox reports `H264 SWDEC`.
 3. **Flicker.** The user reported Firefox video flickering back and forth on Adreno in early
    November. It was never reproduced: [decode-frame-sync.md](decode-frame-sync.md).
-4. Firefox on a software desktop on Mali could use PanVK as Chromium does, with a small change
-   in `gpu_enabled`. Untested.
+4. Firefox on a software desktop on Mali could use PanVK as Chromium does. No code change is
+   needed to try it: `LIVECD_FIREFOX_GPU=1` makes `gpu_enabled` return true, and
+   `apply_renderer('zink')` then picks PanVK on Mali (`zink_driver`). To make it the default, add
+   `'firefox'` to the PanVK branch of `gpu_enabled`. A host test for that change was written and
+   fails without it (2026-11-14, decode-firefox), but the change was held back: the phone was busy
+   and the default must not change before this passes on the S20:
+   `LIVECD_FIREFOX_GPU=1 python browsers/test-acceleration.py firefox --fixtures fixtures-v2 --out f3`
+   on a software desktop.
 5. Not run: seeking, a soak, and `TERMUX_VA_SYNC_END_PICTURE` (set for Chromium only; Firefox
    passed without it).
 
@@ -70,3 +76,13 @@ python3 tests/browsers/test-video-tools.py AccelerationEvidence -v
 | Probe port and FFmpeg | `packages/android-firefox-video` (`stage.py`) |
 | Launcher | `firefox_preferences`, `video_environment` in `src/native/acceleration.py` |
 | Results and history | [X1S-FIREFOX-VIDEO.md](../X1S-FIREFOX-VIDEO.md) |
+
+## 2026-11-14 follow-up (decode-firefox)
+
+H.264 in Firefox can now be tested. android-vaapi 27.0.0~devel20261029-10 and android-vaapi-glibc -2 are built from `fix/decode-h264` (CI run 43596220676). Neither Firefox test has been run yet: the S20 was busy (Ghostty test, plus a queued soak). To run them:
+- **H.264 on the Zink desktop**, from a private config:
+  - set `disabled_va_codecs=['av1']` in the config and `TERMUX_VA_H264_REORDER_FRAMES=0` in the environment;
+  - load the render-node preload from `fix/chromium-webcodecs-shmem`;
+  - make the fixture with `make-video-fixtures.py --codecs h264-fast`;
+  - run `test-acceleration.py firefox`.
+- **PanVK on a software desktop:** the `LIVECD_FIREFOX_GPU=1` command in open problem 4.

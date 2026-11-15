@@ -4,6 +4,13 @@ State on 2026-11-14, Galaxy S20 (`x1s`, Mali-G77 MC11, architecture 9, kbase job
 For whoever raises the versions the Mali stack reports. Paths under `temp/` are local files
 that Git ignores.
 
+Latest checkpoint: the nested candidate passes 195 selected GLES compute cases,
+20 private GNOME/Ghostty cycles and a continuous 30-minute soak. Two isolated
+fixes are now on main: process-wide memory-budget accounting and correct ION
+CPU cache mode. The latter clears the earlier empty-dispatch and maximum-local-
+size failures, exposing a feature-dependent SSBO reduction failure next. The
+installed driver and reported default versions remain unchanged.
+
 ## Progress on the source-package prerequisite
 
 A side-by-side `mesa-vulkan-icd-panvk-kbase-source` recipe now packages the
@@ -238,12 +245,43 @@ the placed-mapping feature structure is added: 336 of 512 words are wrong.
 The same executable with that feature structure disabled passes all 512 words
 (`reduced-cts-placed-off-01/`). Enabling this feature
 makes ordinary host-visible allocations shareable even without a placed-map
-request. The ION allocator hardcodes cached backing while the Vulkan memory
-type advertises host coherence. The isolated `ion-cache` research build
+request. The ION allocator hardcoded cached backing while the Vulkan memory type
+advertised host coherence. The isolated `ion-cache` fix in
 [43661900884](https://github.com/cnshing/debian-livecd-termux/actions/runs/43661900884)
-changes the ION cached flag to follow `PAN_KMOD_BO_FLAG_WB_MMAP`. Its device
-result is pending; do not call it a fix yet. Evidence:
-`vk-max-local-core-filter-01/` and `reduced-cts-placed-map-01/`.
+makes the ION cached flag follow `PAN_KMOD_BO_FLAG_WB_MMAP`. Both ABIs build.
+The placed-mapping reproducer then passes all 512 words. The normal, unfiltered
+Vulkan basic-compute run now passes all four empty-workgroup cases and maximum
+local sizes X/Y/Z. It reaches a new first failure after **52 passes, eight
+unsupported cases and one failure**: `ssbo_cmd_barrier_multiple`, expected
+122,815, got 17,545. The remaining 20 selected cases were not attempted.
+This producer/consumer test uses a 11×5×7 dispatch and an SSBO atomic reduction;
+separate dispatch ordering, multidimensional group merging and global atomic
+behavior before attributing the error to a barrier alone. Evidence:
+`reduced-cts-ion-fix-01/` and `vk-basic-ion-fix-01/`. Every attempted case maps the
+intended ION-fix ICD.
+
+Matched controls on that same ION-fix binary confirm that the multiple-group
+case fails standalone with normal features, passes when optional features are
+filtered out, and the single-group case passes unfiltered. The older `0008`
+driver also passes the multiple-group case in both merge modes under the core
+feature filter; disabling merging is not established as the fix. Evidence:
+`vk-ssbo-ion-{multiple,multiple-core,single}-01/` and
+`vk-ssbo-{merged,unmerged}-core-filter-01/`. Filtered passes remain diagnostic.
+Next isolate the placed-mapping/imported-output atomic path from the other
+optional feature bits; do not treat this as proven barrier failure yet.
+
+- Android SHA-256: `e6d981b8e4bc8d56077fc90b22a782adb0b0db2c1c766007218a23a7b091b020`
+- glibc SHA-256: `3a727046e1cfe1ed484b1c1910a0a6167a304b1bdb02b2db8be8e40e59132a9f`
+
+The ION-fix Android binary also passes **20 private GNOME/GTK cycles**: 40
+captures, maximum channel error 0, stale-frame rejection and session isolation.
+Shell and Settings captures were visually checked; the Nautilus capture shows
+its window still loading and does not establish folder-content correctness.
+Evidence: `temp/panvk-qualification/evidence/ion/desktop-gtk-20-02/`. It exposes
+GL 4.2 and was not used for a Ghostty qualification. Its glibc build has not had
+the same placed-mapping runtime test. The patch and isolated variant are now on
+main under `ion-patches/`. This is a separate binary from the budget and nested
+candidates; combine and requalify the required patches before changing defaults.
 
 `tools/panvk-probes/cts/run.py` lists the requested cases and executes one at a
 time, recording QPA results, exit status, mapped libraries and binary hashes.
@@ -429,7 +467,7 @@ hardware workgroup, taken from the Mali-G76 work in
 
 | Piece | Where |
 | --- | --- |
-| The imported patches, G77 adaptation and follow-up fixes | `tools/panvk-probes/workgroup-patches/0001` to `0006` |
+| The imported patches, G77 adaptation and follow-up fixes | `tools/panvk-probes/workgroup-patches/0001` to `0007` |
 | CI build of a baseline and a patched driver, with probes | `.github/workflows/panvk-workgroups.yml` |
 | Compute probes checked against a CPU oracle | `tools/panvk-probes/workgroups/` (`run.py`, `check.c`, `check.comp`) |
 | Opt-in Ghostty launcher for the staged driver | `tools/panvk-probes/workgroups/ghostty-gpu.py` |
@@ -451,9 +489,12 @@ The pass is a working subset behind an environment variable. To ship it:
    `0005` already covers partial subgroups, keeping hardware barriers unconditional.
 2. **Variable workgroup sizes** (`ARB_compute_variable_group_size`) now pass the
    five-shape GL probe above; extend coverage with the conformance subset.
-3. **Extend the conformance subset**: the 195 GLES compute cases above pass on
-   both the release and opt-in drivers. Vulkan compute, broader coverage and
-   the Android loader information-test failure still need qualification.
+3. **Extend the conformance subset**: the 195 GLES compute cases pass on the
+   release, `0001`–`0006` and final nested drivers. The budget fix clears its
+   isolated information subset, and the ION fix clears the old compute
+   failures. Resolve the remaining SSBO reduction failure, combine the required
+   fixes with the workgroup series, and qualify that exact combined binary.
+   Broader CTS and the Android loader information-test failure remain open.
 4. **Cache identity is now covered.** `0006` hashes the architecture-9 opt-in into the
    physical device cache digest, uses that digest for both the pipeline UUID and the disk
    cache timestamp, and the phone tests confirm distinct UUIDs with correct repeated cached

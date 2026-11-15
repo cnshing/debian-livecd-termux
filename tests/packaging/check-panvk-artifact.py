@@ -16,6 +16,7 @@ LOCK = Path(__file__).resolve().parents[2] / 'packages' / NAME / 'source.lock.js
 def check_tree(root, expected, name=NAME):
     stacks = {
         NAME: ('panvk-kbase-source', 'baseline'),
+        'mesa-vulkan-icd-panvk-kbase': ('panvk-kbase', 'combined-ahb'),
         'mesa-vulkan-icd-panvk-kbase-sync-fd': ('panvk-kbase-sync-fd', 'sync-fd'),
     }
     stack_name, variant = stacks[name]
@@ -35,7 +36,7 @@ def check_tree(root, expected, name=NAME):
         # The Android build retains this relative linker-stub path. Preserve
         # baseline bytes, but reject every absolute CI path or other override.
         allowed = (['$ORIGIN/../../android_stub'] if abi == 'bionic' else
-                   ['$ORIGIN'] if variant == 'sync-fd' else [])
+                   ['$ORIGIN'] if variant in ('sync-fd', 'combined-ahb') else [])
         if search_paths and search_paths != allowed:
             raise RuntimeError('Unexpected driver runtime search path: ' + abi)
         if (root / PREFIX / 'lib/android_stub').exists():
@@ -53,7 +54,7 @@ def check_tree(root, expected, name=NAME):
     for path in (stack / 'glibc/lib').iterdir():
         if path.name in ('libc.so', 'libc.so.6', 'libdl.so', 'libm.so', 'libstdc++.so.6'):
             raise RuntimeError('Forbidden bundled library: ' + path.name)
-    if (root / PREFIX / 'lib/panvk-kbase').exists():
+    if name != 'mesa-vulkan-icd-panvk-kbase' and (root / PREFIX / 'lib/panvk-kbase').exists():
         raise RuntimeError('Candidate overwrites the installed release stack')
 
 

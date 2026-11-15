@@ -3,6 +3,8 @@ import json
 import os
 from pathlib import Path
 
+from panvk_device import qualified as qualified_mali
+
 PREFIX = Path('/data/data/com.termux/files/usr')
 GPU = Path.home() / '.local/opt/livecd-native/gpu'
 ICD = GPU / 'share/vulkan/icd.d/freedreno_icd.aarch64.json'
@@ -20,6 +22,17 @@ def panvk(abi):
     return icd if icd.is_file() and mali_usable() else None
 
 
+def qualified_desktop_stack():
+    if not qualified_mali():
+        return False
+    try:
+        manifest = json.loads((PREFIX / 'share/doc/mesa-vulkan-icd-panvk-kbase/SOURCE.json').read_text())
+        return (manifest.get('variant') == 'combined-ahb' and
+                manifest.get('mesa_tree') == 'b28956ffc095bda26bf8241badba014be178536b')
+    except (OSError, ValueError):
+        return False
+
+
 def use_panvk(env, abi):
     """Make PanVK the only Vulkan driver a process sees, with the libraries it loads."""
     icd = panvk(abi)
@@ -27,6 +40,9 @@ def use_panvk(env, abi):
         raise RuntimeError('Install mesa-vulkan-icd-panvk-kbase and check access to /dev/mali0')
     icd_library(icd, PANVK / abi)
     env.update(VK_DRIVER_FILES=str(icd), VK_ICD_FILENAMES=str(icd))
+    if qualified_desktop_stack():
+        env.setdefault('PANVK_G77_LWG', '1')
+        env.setdefault('PANVK_G77_NESTED', env['PANVK_G77_LWG'])
     # Bionic: versioned names for Termux's X11 libraries. glibc: newer xcb/Wayland
     # than Chrome bundles, so they must come first.
     key, directory = (('LD_LIBRARY_PATH', icd.parent / 'x11') if abi == 'bionic'

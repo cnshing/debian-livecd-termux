@@ -6,8 +6,13 @@ on:
       variant:
         description: Isolated driver change (baseline applies no patches)
         type: choice
-        options: [baseline, point-size, x11, workgroups, memory-budget, ion-cache, import-coherence, combined, research]
+        options: [baseline, point-size, x11, workgroups, memory-budget, ion-cache, import-coherence, combined, combined-platform, combined-ahb, combined-ahb-trace, research]
         default: baseline
+      abi:
+        description: Build only the ABI affected by the current investigation
+        type: choice
+        options: [both, android, glibc]
+        default: both
   push:
     branches: [research/panvk-kbase-probes]
     paths:
@@ -50,12 +55,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-        - kind: android
-          runner: ubuntu-24.04
-        - kind: glibc
-          runner: ubuntu-24.04-arm
-    runs-on: ${{ matrix.runner }}
+        kind: ${{ fromJSON(inputs.abi == 'android' && '["android"]' || inputs.abi == 'glibc' && '["glibc"]' || '["android","glibc"]') }}
+    runs-on: ${{ matrix.kind == 'android' && 'ubuntu-24.04' || 'ubuntu-24.04-arm' }}
     timeout-minutes: 60
     steps:
     - uses: actions/checkout@v4

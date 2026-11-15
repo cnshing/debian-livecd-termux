@@ -1,0 +1,57 @@
+Report placed mapping as unsupported on noncoherent ION.
+
+The CPU-only boundary probe reproduces BUS_ADRALN on x1s CPU 7 for all
+three uncached ION sizes when libc memset crosses the memfd/ION boundary.
+Separate-region fills, cached ION, and CPU 0 pass. Preserving uncached
+HOST_COHERENT allocations is required for GPU correctness. The backend
+therefore records this allocator limitation and PanVK consistently omits
+the optional extension and its features. Other allocator backends keep
+existing behavior. This does not claim a placed-map CTS pass or full
+conformance; the original unmodified CTS crash remains preserved.
+
+--- a/src/panfrost/lib/kmod/pan_kmod.h
++++ b/src/panfrost/lib/kmod/pan_kmod.h
+@@ -282,6 +282,8 @@
+     */
+    bool is_io_coherent;
+ 
++   bool has_unsafe_placed_mmap;
++
+    /* Bitmask encoding the available GPU page sizes */
+    uint64_t pgsize_bitmap;
+ };
+--- a/src/panfrost/lib/kmod/kbase_kmod.c
++++ b/src/panfrost/lib/kmod/kbase_kmod.c
+@@ -2264,6 +2264,9 @@
+          mesa_logi("kbase: /dev/ion unavailable: %s", strerror(errno));
+       }
+    }
++
++   kbase_dev->base.props.has_unsafe_placed_mmap =
++      kbase_dev->heap_is_ion && !kbase_dev->base.props.is_io_coherent;
+ 
+    /* A GPU without IO coherency (mode 31) does not snoop the CPU caches, and
+     * kbase drops BASE_MEM_COHERENT_SYSTEM from dma-buf imports, so CPU writes
+--- a/src/panfrost/vulkan/panvk_vX_physical_device.c
++++ b/src/panfrost/vulkan/panvk_vX_physical_device.c
+@@ -185,7 +185,7 @@
+       .EXT_legacy_dithering = true,
+       .EXT_line_rasterization = true,
+       .EXT_load_store_op_none = true,
+-      .EXT_map_memory_placed = true,
++      .EXT_map_memory_placed = !device->kmod.dev->props.has_unsafe_placed_mmap,
+       .EXT_nested_command_buffer = PAN_ARCH >= 10,
+       .EXT_memory_budget = true,
+       .EXT_memory_priority = PAN_ARCH >= 10,
+@@ -773,9 +773,9 @@
+       .nestedCommandBufferSimultaneousUse = PAN_ARCH >= 10,
+ 
+       /* VK_EXT_map_memory_placed */
+-      .memoryMapPlaced = true,
++      .memoryMapPlaced = !device->kmod.dev->props.has_unsafe_placed_mmap,
+       .memoryMapRangePlaced = false,
+-      .memoryUnmapReserve = true,
++      .memoryUnmapReserve = !device->kmod.dev->props.has_unsafe_placed_mmap,
+       .memoryPriority = PAN_ARCH >= 10,
+       .pageableDeviceLocalMemory = PAN_ARCH >= 10,
+ 

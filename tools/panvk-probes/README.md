@@ -108,3 +108,23 @@ select ANGLE under this research scope.
 
 See [the continuation results](../../docs/native/PANVK-X1S-RESEARCH.md) for
 validated short runs, the failed partial soak, and remaining acceptance.
+
+The `combined` variant selects the seven workgroup patches plus point size,
+process budget, ION CPU cache mode and import coherence (eleven patches).
+`combined-platform` adds the Termux hybrid ICD private-extension correction
+and measured noncoherent ION placed-map capability restriction (thirteen
+patches). It requires independent qualification and does not change package
+pins. See the current version-bump handoff for exact hashes and CTS results.
+
+The desktop harness creates its private XDG runtime directory under Termux's
+short `$TMPDIR` path. Evidence directories can be too deep for Unix sockets
+created by GVfs. The chosen runtime path and its removal after owned-process
+cleanup are recorded in `runtime-directory.json`; screenshots and logs remain
+under the requested evidence directory.
+
+For fix iterations, `cts/run.py --case <exact-name>` bypasses CTS listing and
+runs only explicitly named cases. Repeat `--case` for a nearby control; use
+`--pattern` when expanding coverage after the fix passes. Keep broad regressions
+for the stable candidate. The driver workflow's `abi` input selects `android`,
+`glibc`, or `both`. `combined-ahb-trace` is an Android AHB stage-logging variant
+for focused diagnostics, with no allocation or advertised-feature changes.

@@ -49,6 +49,32 @@ The CPU workload percentages above use one core as 100%. The GUI can normalize
 process percentages across the eight cores according to its existing setting.
 Per-process memory is RSS, not PSS; shared pages can appear in multiple processes.
 
+## Galaxy S20 (Exynos 990, Mali-G77)
+
+Checked on 2026-11-15 with android-procfs 1.0.0-5 and mission-center 1.2.0-4,
+installed through the phone's local `livecd` repository. Samsung's SELinux policy
+denies the shell uid (adb and Shizuku alike, `u:r:shell:s0`) every
+`/sys/class/thermal` zone, hwmon, the Mali `tmu` node and
+`/sys/devices/virtual/sec/exynos_tmu/curr_temp`, and denies apps `soc0`.
+
+| Check | Result |
+| --- | --- |
+| CPU name | Was "Unknown"; now "Samsung Exynos 990" from `ro.soc.manufacturer` and `ro.soc.model` |
+| CPU temperature | Was absent; the reader falls back to `dumpsys thermalservice` and reports `cpu-hal-AP` (42.4 °C through the installed library), shown in the GUI with its graph |
+| Thermal HAL timing | One `dumpsys` (about 16 ms on the phone) per refresh at 1 s and 0.5 s intervals; the GPU request of the same refresh reuses it |
+| GPU entry | Was absent; "Mali-G77 11 cores r0p1 0x9080" from app-readable `/sys/kernel/gpu` |
+| GPU under load | glxgears on Zink/PanVK on a private Termux:X11 server: `gpu_busy` 0% → 92–97%, `gpu_tmu` 40 → 45 °C; the GUI showed 96% and 47 °C with a moving graph |
+| GPU clock | 377 MHz current / 800 MHz table maximum; under load it stayed at Samsung's 377 MHz cap (`gpu_max_clock`); 0 when the GPU is powered down |
+| Video encode/decode row | Hidden when the GPU reports no encoder or decoder data (upstream left it visible and empty) |
+| Desktop | `livecd validate` passes 30 of 30 checks after the install |
+
+Rejected alternatives: `HardwarePropertiesManager` (`dumpsys hardware_properties`)
+reads the same HAL value and is not faster; a direct Binder call to
+`IThermalService` works but the interface is `@hide` and its transaction codes
+follow AIDL declaration order; `sec-ap-thermistor` is shell-readable but a
+different sensor, about 0.6 °C below the HAL's AP reading. OpenGL and Vulkan
+versions remain "Unknown", as on KGSL.
+
 ## Transport findings
 
 This installed Shizuku+ rish splits a command's stdout between its local stdout

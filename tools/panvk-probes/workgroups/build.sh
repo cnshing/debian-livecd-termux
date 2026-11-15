@@ -10,6 +10,8 @@ cc="$ndk/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android29-clang
   -Wno-missing-field-initializers "$here/check.c" -ldl -o "$out/check"
 "$cc" -std=gnu11 -O2 -Wall -Wextra -Werror -I"$headers" -shared -fPIC \
   -Wl,-Bsymbolic "$here/../cts/trace-loader.c" -ldl -o "$out/trace-loader.so"
+"$cc" -std=gnu11 -O2 -Wall -Wextra -Werror -fno-builtin-memset \
+  "$here/../cts/ion-map-boundary.c" -ldl -o "$out/ion-map-boundary"
 for shape in 128-1-1 256-1-1 257-1-1 511-1-1 512-1-1 513-1-1 769-1-1 1023-1-1 1024-1-1 32-30-1 8-8-16 17-19-3; do
   IFS=- read -r x y z <<< "$shape"
   glslangValidator -V --target-env vulkan1.1 -Od -DX="$x" -DY="$y" -DZ="$z" \
@@ -32,5 +34,5 @@ for version in 1.0 1.1 1.3; do
     -o "$out/cts-max-$version.spv"
   spirv-val --target-env "vulkan$version" "$out/cts-max-$version.spv"
 done
-cp "$here/run.py" "$out/"
-(cd "$out" && sha256sum check trace-loader.so *.spv > SHA256SUMS)
+cp "$here/run.py" "$here/variable-size.py" "$out/"
+(cd "$out" && sha256sum check trace-loader.so ion-map-boundary run.py variable-size.py *.spv > SHA256SUMS)

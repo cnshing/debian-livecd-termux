@@ -3,23 +3,28 @@ TERMUX_PKG_DESCRIPTION="Mesa PanVK Vulkan driver for Mali GPUs through Android's
 TERMUX_PKG_LICENSE="custom"
 TERMUX_PKG_LICENSE_FILE="COPYRIGHTS"
 TERMUX_PKG_MAINTAINER="@cnshing"
-# Zenith's release tag. driverInfo: Mesa 26.3.0-devel (git-795ca7ff3e, p0175), Mesa 5a07217f + patches.
+# Source-built p0175 plus the qualified desktop patch series.
 TERMUX_PKG_VERSION="26.3.1"
+TERMUX_PKG_REVISION=1
+TERMUX_PKG_EXCLUDED_ARCHES="arm, i686, x86_64"
 TERMUX_PKG_SKIP_SRC_EXTRACT=true
 TERMUX_PKG_BUILD_IN_SRC=true
 TERMUX_PKG_AUTO_UPDATE=false
 # The Bionic driver dlopens these X11 libraries for its surfaces.
 TERMUX_PKG_DEPENDS="libx11, libxcb, libxshmfence"
-# Upstream's release binaries are kept byte for byte, and the glibc files are not Bionic ELF.
+# Preserve the pinned CI binaries; the glibc files are not Bionic ELF.
 TERMUX_PKG_NO_STRIP=true
 TERMUX_PKG_NO_ELF_CLEANER=true
 TERMUX_PKG_UNDEF_SYMBOLS_FILES="all"
 _PANVK_SUPPORT_DIR=$(dirname "$(realpath "${BASH_SOURCE[0]}")")
 _PANVK_INSTALL_NAME=panvk-kbase
-_PANVK_ICD_API_VERSION=1.4.363
-_RELEASE=https://github.com/zenithblue-oss/panvk-kbase-android/releases/download/panvk-kbase-v$TERMUX_PKG_VERSION
-_BIONIC_SHA256=62c2b3f98ca987d5ab50b6f01e2d2c1c5b3ee995fe93666aa5da9415f65c3348
-_GLIBC_SHA256=063bcf0cacd6605458f01530e7fc4f4de43cda7d7a995d9518e1a6e38f5d0db6
+_PANVK_ICD_API_VERSION=1.3.363
+_PANVK_SOURCE_LOCK="$_PANVK_SUPPORT_DIR/source.lock.json"
+read -r _RELEASE _BIONIC_SHA256 _GLIBC_SHA256 < <(python3 -c '
+import json,sys
+p=json.load(open(sys.argv[1]))
+print(p["release"], p["bionic_sha256"], p["glibc_sha256"])
+' "$_PANVK_SOURCE_LOCK")
 _SOURCE=https://raw.githubusercontent.com/zenithblue-oss/panvk-kbase-android/cf70e02b918e1864cbcd746a7fefa57b96c673ce
 
 termux_step_post_get_source() {

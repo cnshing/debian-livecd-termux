@@ -8,9 +8,11 @@ import json
 import os
 from pathlib import Path
 import signal
+import shutil
 import shlex
 import subprocess
 import sys
+import tempfile
 import time
 import traceback
 
@@ -508,10 +510,10 @@ def parent(args):
         env['PANVK_KBASE_DRI3'] = 'raw'
     if args.server == 'xvfb':
         env['LIBGL_KOPPER_DRI2'] = '1'
-    for name in ('config', 'data', 'cache', 'runtime', 'state'):
+    for name in ('config', 'data', 'cache', 'state'):
         directory = args.out / name
         directory.mkdir(mode=0o700)
-        env['XDG_' + name.upper() + ('_DIR' if name == 'runtime' else '_HOME')] = str(directory)
+        env['XDG_' + name.upper() + '_HOME'] = str(directory)
     profile = args.out / 'dconf-profile'
     profile.write_text('user-db:user\n')
     env['DCONF_PROFILE'] = str(profile)
@@ -521,8 +523,12 @@ def parent(args):
     server_env = apply_renderer(env.copy(), 'software')
     server_env.pop('PANVK_KBASE_DRI3', None)
     session = server = None
+    runtime = None
     code = 1
     try:
+        runtime = Path(tempfile.mkdtemp(prefix='pvk-', dir=os.environ['TMPDIR']))
+        env['XDG_RUNTIME_DIR'] = server_env['XDG_RUNTIME_DIR'] = str(runtime)
+        (args.out / 'runtime-directory.json').write_text(json.dumps({'path': str(runtime)}))
         with (args.out / 'server.log').open('w') as log:
             command = [str(PAN / 'private-lorie/private-lorie'), env['DISPLAY']] if args.server == 'lorie' else [
                 'Xvfb', env['DISPLAY'], '-screen', '0', '1280x720x24', '-nolisten', 'tcp']
@@ -555,6 +561,10 @@ def parent(args):
         server_exit_before_cleanup = server.poll() if server else None
         stop(server)
         cleaned = cleanup_tagged(args.out)
+        if runtime:
+            shutil.rmtree(runtime)
+            (args.out / 'runtime-directory.json').write_text(json.dumps({
+                'path': str(runtime), 'removed_after_owned_cleanup': True}))
         for path in (f'.X11-unix/X{display}', f'.X{display}-lock'):
             (Path(os.environ['TMPDIR']) / path).unlink(missing_ok=True)
         after = fs.live_state()

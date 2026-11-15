@@ -1,0 +1,77 @@
+{
+  "format": 1,
+  "variant": "combined-ahb",
+  "release": "https://github.com/cnshing/debian-livecd-termux/releases/download/panvk-desktop-26.3.1-1",
+  "build_run": "https://github.com/cnshing/debian-livecd-termux/actions/runs/43695585757",
+  "build_commit": "32e7ebc21ae7c32acc1356c1cb420e99256b6fdf",
+  "bionic_build_run": "https://github.com/cnshing/debian-livecd-termux/actions/runs/43692804161",
+  "bionic_build_commit": "ee95158f279de84e0b60734074e4a1aeb61b4104",
+  "zenith_commit": "cf70e02b918e1864cbcd746a7fefa57b96c673ce",
+  "mesa_base": "5a07217f034b3e50d8c7c7794f97a2df1742613b",
+  "base_tree": "4a8e9a8cbb34b9fb91a9ad2040319aceb075b973",
+  "mesa_tree": "b28956ffc095bda26bf8241badba014be178536b",
+  "patch_level": "p0175",
+  "driver_patches": [
+    {
+      "file": "tools/panvk-probes/ion-patches/0001-honor-ion-cpu-cache-mode.patch",
+      "sha256": "decacbeaa5502d4891c77d3cdf5203022585dbe9fce56693dd622e18394559ef"
+    },
+    {
+      "file": "tools/panvk-probes/workgroup-patches/0001-panvk-bifrost-run-compute-workgroups-over-the-hardwa.patch",
+      "sha256": "4e2312096d2fa40e76152e0551850af3b875dc0be355e9dd3638fe015f5bdc62"
+    },
+    {
+      "file": "tools/panvk-probes/budget-patches/0001-process-wide-heap-budget.patch",
+      "sha256": "557a968886368434f22373faeea84240d613a384bf92d3d5e7df4c2bd449496c"
+    },
+    {
+      "file": "tools/panvk-probes/ahb-patches/0001-query-legacy-mali-gralloc.patch",
+      "sha256": "cf0bb64693034f838d0a43c4a9bf50cbd9774f9f501a9d5998339aa3aadf8d0a"
+    },
+    {
+      "file": "tools/panvk-probes/coherence-patches/0001-select-import-coherence.patch",
+      "sha256": "4db0681893d25f7beaa9d6174da4da301efa05d12f42018159030f169fa421c7"
+    },
+    {
+      "file": "tools/panvk-probes/platform-patches/0001-termux-public-device-extensions.patch",
+      "sha256": "d111083711f54def6b14431147c83576d62b55ee508253fb484cf28d816d8d74"
+    },
+    {
+      "file": "tools/panvk-probes/workgroup-patches/0002-panvk-v7-split-large-compute-workgroups-that-use-sub.patch",
+      "sha256": "706f8945e7f07a2b020c3f25fd01bd2c30bee2671193648b8483591bde95d65c"
+    },
+    {
+      "file": "tools/panvk-probes/platform-patches/0002-report-ion-placed-map-limit.patch",
+      "sha256": "65fa9325ad66e19aecf553bb8b697395369ba75155757c32310a91d177c51d36"
+    },
+    {
+      "file": "tools/panvk-probes/driver-patches/0002-v9-per-vertex-point-size.patch",
+      "sha256": "c507a8c53465c6930c60f4a25a75fad3f535b4d0683d218f6502ad0b7a34f5bd"
+    },
+    {
+      "file": "tools/panvk-probes/workgroup-patches/0003-panvk-large-workgroups-give-each-logical-invocation-.patch",
+      "sha256": "b33b004a09c57c53a678271741c33967ca9350a6f92ba1ef1f01c873cf7144ef"
+    },
+    {
+      "file": "tools/panvk-probes/workgroup-patches/0004-g77-experimental-opt-in-and-rejection.patch",
+      "sha256": "efb4eeeb8e00ba5df60efa5c65c52eb8c5b7eeeb079acf9c86a21d6f1871b8e8"
+    },
+    {
+      "file": "tools/panvk-probes/workgroup-patches/0005-mask-partial-subgroups.patch",
+      "sha256": "39596945e8b5214555b8892237cc7e316a99d4dd6febb4f401eb6e263292c8f9"
+    },
+    {
+      "file": "tools/panvk-probes/workgroup-patches/0006-key-caches-by-workgroup-mode.patch",
+      "sha256": "8c2fe5a7e42121e7bb446a681d6dfe90e9fb56fce2dc98db366b71f76b8f2bb2"
+    },
+    {
+      "file": "tools/panvk-probes/workgroup-patches/0007-experimental-nested-barrier-continuations.patch",
+      "sha256": "791776afe1196e9c235d94d8f27d130f9131fd3f12097c0ad1beb63b7b937df2"
+    }
+  ],
+  "glibc_postprocess": "patchelf --set-rpath '$ORIGIN'",
+  "source_archive": "prepared-source.tar.zst",
+  "source_sha256": "dfe43ef9b9914d51ac7ee845bd660301d39a3e8baa4cbb7ce466b5cb19c517f0",
+  "bionic_sha256": "134b668a988626a64f01ce8f1c93307a439cf208e47d775a17a42b60358c5758",
+  "glibc_sha256": "64f5516f608fa31db503e8c45f5442790d0afe1cf28ba2aa6a334030dd608b04"
+}

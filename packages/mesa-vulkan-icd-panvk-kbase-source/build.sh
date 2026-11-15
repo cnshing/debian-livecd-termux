@@ -1,5 +1,6 @@
 # Side-by-side candidate: no overlay selects it until desktop qualification.
 source "$(dirname "$(realpath "${BASH_SOURCE[0]}")")/../mesa-vulkan-icd-panvk-kbase/build.sh"
+TERMUX_PKG_REVISION=0
 TERMUX_PKG_DESCRIPTION="Source-built PanVK qualification driver for Bionic and glibc; selected explicitly"
 TERMUX_PKG_EXCLUDED_ARCHES="arm, i686, x86_64"
 _PANVK_INSTALL_NAME=panvk-kbase-source

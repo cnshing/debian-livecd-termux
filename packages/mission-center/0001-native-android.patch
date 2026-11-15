@@ -114,7 +114,7 @@ diff --git a/src/performance_page/gpu.rs b/src/performance_page/gpu.rs
 index b91b8e5..9dc301d 100644
 --- a/src/performance_page/gpu.rs
 +++ b/src/performance_page/gpu.rs
-@@ -589,7 +589,7 @@ mod imp {
+@@ -589,7 +589,7 @@
                      vulkan_version.patch.unwrap_or(0)
                  )
              } else {
@@ -123,7 +123,7 @@ index b91b8e5..9dc301d 100644
              };
              this.infobar_content.vulkan_version().set_text(&vk_version);
  
-@@ -704,14 +704,10 @@ mod imp {
+@@ -704,14 +704,10 @@
          }
  
          fn update_utilization(&self, gpu: &Gpu) {
@@ -142,6 +142,19 @@ index b91b8e5..9dc301d 100644
  
              self.graph_utilization
                  .add_data_point(vec![vec![overall_usage]]);
+@@ -923,6 +919,12 @@
+         }
+ 
+         fn update_video_encode_decode(&self, gpu: &Gpu) {
++            // Upstream never clears this, so GPUs without encoder/decoder data
++            // showed both labels with no values.
++            self.infobar_content.set_encode_decode_available(
++                gpu.encoder_percent.is_some() || gpu.decoder_percent.is_some(),
++            );
++
+             if let Some(encoder_percent) = gpu.encoder_percent {
+                 self.middle_graph
+                     .add_single_data_point(GRAPH_ENCODE_DATASET, vec![encoder_percent]);
 diff --git a/src/performance_page/mod.rs b/src/performance_page/mod.rs
 index 52ad4fe..4f56fee 100644
 --- a/src/performance_page/mod.rs
@@ -307,7 +320,7 @@ diff --git a/subprojects/magpie/platform-linux/src/cpu/cpu.rs b/subprojects/magp
 index 18f090f..fa5ec59 100644
 --- a/subprojects/magpie/platform-linux/src/cpu/cpu.rs
 +++ b/subprojects/magpie/platform-linux/src/cpu/cpu.rs
-@@ -28,6 +28,13 @@ use crate::read_u64;
+@@ -28,6 +28,32 @@ use crate::read_u64;
  pub fn name() -> &'static str {
      static NAME: OnceLock<String> = OnceLock::new();
      NAME.get_or_init(|| {
@@ -318,10 +331,29 @@ index 18f090f..fa5ec59 100644
 +                }
 +            }
 +        }
++        // Samsung's Exynos policy denies apps soc0; Android 12+ names the SoC in properties.
++        #[cfg(target_os = "android")]
++        {
++            unsafe extern "C" {
++                fn __system_property_get(name: *const std::ffi::c_char, value: *mut std::ffi::c_char) -> std::ffi::c_int;
++            }
++            let property = |name: &std::ffi::CStr| {
++                let mut value = [0 as std::ffi::c_char; 92]; // PROP_VALUE_MAX
++                let length = unsafe { __system_property_get(name.as_ptr(), value.as_mut_ptr()) };
++                let value = unsafe { std::ffi::CStr::from_ptr(value.as_ptr()) }.to_string_lossy().trim().to_owned();
++                (length > 0 && !value.is_empty()).then_some(value)
++            };
++            if let Some(model) = property(c"ro.soc.model") {
++                return match property(c"ro.soc.manufacturer") {
++                    Some(vendor) => format!("{vendor} {model}"),
++                    None => model,
++                };
++            }
++        }
          let s = System::new_with_specifics(
              RefreshKind::nothing().with_cpu(CpuRefreshKind::everything()),
          );
-@@ -41,6 +48,8 @@ pub fn name() -> &'static str {
+@@ -41,6 +67,8 @@ pub fn name() -> &'static str {
  }
  
  pub fn socket_count() -> Option<u32> {
@@ -330,7 +362,7 @@ index 18f090f..fa5ec59 100644
      let mut sockets = HashSet::new();
      sockets.reserve(4);
  
-@@ -77,6 +86,10 @@ pub fn socket_count() -> Option<u32> {
+@@ -77,6 +105,10 @@ pub fn socket_count() -> Option<u32> {
  }
  
  pub fn temperature() -> Option<f32> {
@@ -483,9 +515,10 @@ new file mode 100644
 index 0000000..56b6289
 --- /dev/null
 +++ b/subprojects/magpie/platform-linux/src/gpus_android.rs
-@@ -0,0 +1,33 @@
+@@ -0,0 +1,60 @@
 +// SPDX-License-Identifier: GPL-3.0-or-later
-+// Qualcomm KGSL telemetry, read by shell on demand. Missing fields stay None.
++// GPU telemetry: Samsung Mali from /sys/kernel/gpu, else Qualcomm KGSL read by shell
++// on demand. Missing fields stay None.
 +use std::collections::HashMap;
 +use magpie_platform::gpus::Gpu;
 +pub struct GpuCache(HashMap<String, Gpu>);
@@ -493,6 +526,10 @@ index 0000000..56b6289
 +    fn new() -> Self { Self(HashMap::new()) }
 +    fn refresh(&mut self) {
 +        self.0.clear();
++        if let Some(gpu) = samsung_mali() {
++            self.0.insert(gpu.id.clone(), gpu);
++            return;
++        }
 +        let Ok(snapshot) = crate::proc_stat::request("telemetry") else { return };
 +        let field = |key: &str| snapshot.lines().find_map(|line| {
 +            let (name, value) = line.split_once('\t')?;
@@ -516,6 +553,28 @@ index 0000000..56b6289
 +        self.0.insert(gpu.id.clone(), gpu);
 +    }
 +    fn cached_entries(&self) -> &HashMap<String, Gpu> { &self.0 }
++}
++// Samsung's Mali kernels publish /sys/kernel/gpu to apps, so it needs no shell.
++// gpu_busy is a percentage, gpu_clock and gpu_freq_table are kHz, gpu_tmu is °C.
++fn samsung_mali() -> Option<Gpu> {
++    let read = |name: &str| std::fs::read_to_string(format!("/sys/kernel/gpu/{name}")).ok();
++    let model = read("gpu_model")?;
++    let model = model.trim();
++    if !model.starts_with("Mali") { return None; }
++    let mut gpu = Gpu::default();
++    gpu.id = "mali0".into();
++    gpu.device_name = Some(model.into());
++    gpu.utilization_percent = read("gpu_busy")
++        .and_then(|s| s.trim().trim_end_matches('%').trim().parse::<f32>().ok())
++        .filter(|p| (0. ..=100.).contains(p));
++    gpu.clock_speed_mhz = read("gpu_clock").and_then(|s| s.trim().parse::<u64>().ok()).map(|khz| (khz / 1000) as u32);
++    gpu.max_clock_speed_mhz = read("gpu_freq_table")
++        .and_then(|s| s.split_whitespace().filter_map(|v| v.parse::<u64>().ok()).max())
++        .map(|khz| (khz / 1000) as u32);
++    gpu.temperature_c = read("gpu_tmu")
++        .and_then(|s| s.trim().parse::<f32>().ok())
++        .filter(|c| c.is_finite() && (-40. ..=150.).contains(c));
++    Some(gpu)
 +}
 diff --git a/subprojects/magpie/platform-linux/src/lib.rs b/subprojects/magpie/platform-linux/src/lib.rs
 index 8f4b5a1..ab08fd8 100644

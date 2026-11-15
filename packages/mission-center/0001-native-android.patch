@@ -307,7 +307,7 @@ diff --git a/subprojects/magpie/platform-linux/src/cpu/cpu.rs b/subprojects/magp
 index 18f090f..fa5ec59 100644
 --- a/subprojects/magpie/platform-linux/src/cpu/cpu.rs
 +++ b/subprojects/magpie/platform-linux/src/cpu/cpu.rs
-@@ -28,6 +28,13 @@ use crate::read_u64;
+@@ -28,6 +28,32 @@ use crate::read_u64;
  pub fn name() -> &'static str {
      static NAME: OnceLock<String> = OnceLock::new();
      NAME.get_or_init(|| {
@@ -318,10 +318,29 @@ index 18f090f..fa5ec59 100644
 +                }
 +            }
 +        }
++        // Samsung's Exynos policy denies apps soc0; Android 12+ names the SoC in properties.
++        #[cfg(target_os = "android")]
++        {
++            unsafe extern "C" {
++                fn __system_property_get(name: *const std::ffi::c_char, value: *mut std::ffi::c_char) -> std::ffi::c_int;
++            }
++            let property = |name: &std::ffi::CStr| {
++                let mut value = [0 as std::ffi::c_char; 92]; // PROP_VALUE_MAX
++                let length = unsafe { __system_property_get(name.as_ptr(), value.as_mut_ptr()) };
++                let value = unsafe { std::ffi::CStr::from_ptr(value.as_ptr()) }.to_string_lossy().trim().to_owned();
++                (length > 0 && !value.is_empty()).then_some(value)
++            };
++            if let Some(model) = property(c"ro.soc.model") {
++                return match property(c"ro.soc.manufacturer") {
++                    Some(vendor) => format!("{vendor} {model}"),
++                    None => model,
++                };
++            }
++        }
          let s = System::new_with_specifics(
              RefreshKind::nothing().with_cpu(CpuRefreshKind::everything()),
          );
-@@ -41,6 +48,8 @@ pub fn name() -> &'static str {
+@@ -41,6 +67,8 @@ pub fn name() -> &'static str {
  }
  
  pub fn socket_count() -> Option<u32> {
@@ -330,7 +349,7 @@ index 18f090f..fa5ec59 100644
      let mut sockets = HashSet::new();
      sockets.reserve(4);
  
-@@ -77,6 +86,10 @@ pub fn socket_count() -> Option<u32> {
+@@ -77,6 +105,10 @@ pub fn socket_count() -> Option<u32> {
  }
  
  pub fn temperature() -> Option<f32> {

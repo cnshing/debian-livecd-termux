@@ -6,12 +6,17 @@
 #include <errno.h>
 #include <dirent.h>
 #include <fcntl.h>
+#include <math.h> /* isfinite, a macro needing no libm */
+#include <poll.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
 #include <string.h>
 #include <sys/stat.h>
 #include <sys/socket.h>
+#include <sys/wait.h>
+#include <time.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
 #include <unistd.h>
@@ -163,9 +168,77 @@ static int threads(FILE *out) {
     return 0;
 }
 
+/* Samsung's Exynos policy denies the shell uid every thermal_zone, while the
+ * thermal HAL still reports the SoC through thermalservice. Run that fixed
+ * command, never anything the client names, and cache it between samples. */
+static size_t thermal_hal(char *buffer, size_t capacity) {
+    int pipe_fds[2];
+    if (pipe2(pipe_fds, O_CLOEXEC)) return 0;
+    pid_t child = fork();
+    if (child < 0) { close(pipe_fds[0]); close(pipe_fds[1]); return 0; }
+    if (!child) {
+        int null = open("/dev/null", O_RDWR | O_CLOEXEC);
+        if (null < 0 || dup2(null, STDIN_FILENO) < 0 || dup2(pipe_fds[1], STDOUT_FILENO) < 0 || dup2(null, STDERR_FILENO) < 0) _exit(127);
+        execl("/system/bin/dumpsys", "dumpsys", "thermalservice", (char *)NULL);
+        _exit(127);
+    }
+    close(pipe_fds[1]);
+    size_t length = 0;
+    struct timespec start, now;
+    clock_gettime(CLOCK_MONOTONIC, &start);
+    for (;;) {
+        struct pollfd poller = {.fd = pipe_fds[0], .events = POLLIN};
+        clock_gettime(CLOCK_MONOTONIC, &now);
+        long elapsed = (now.tv_sec - start.tv_sec) * 1000 + (now.tv_nsec - start.tv_nsec) / 1000000;
+        int ready = elapsed < 2000 ? poll(&poller, 1, (int)(2000 - elapsed)) : 0;
+        if (ready < 0 && errno == EINTR) continue;
+        if (ready <= 0) { length = 0; break; }
+        ssize_t n = read(pipe_fds[0], buffer + length, capacity - 1 - length);
+        if (n < 0 && errno == EINTR) continue;
+        if (n <= 0 || (length += (size_t)n) == capacity - 1) break;
+    }
+    close(pipe_fds[0]);
+    /* Ends a hung or oversized dump; harmless once dumpsys has exited. */
+    kill(child, SIGKILL);
+    while (waitpid(child, NULL, 0) < 0 && errno == EINTR) {}
+    buffer[length] = 0;
+    return length;
+}
+
+static void hal_temperatures(FILE *out) {
+    static char lines[4096];
+    static size_t lines_length;
+    static struct timespec sampled;
+    struct timespec now;
+    clock_gettime(CLOCK_MONOTONIC, &now);
+    if (!sampled.tv_sec || now.tv_sec - sampled.tv_sec >= 2) {
+        static char dump[65536];
+        FILE *cache = fmemopen(lines, sizeof lines, "w");
+        sampled = now; lines_length = 0;
+        if (!cache) return;
+        const char *section = thermal_hal(dump, sizeof dump) ? strstr(dump, "Current temperatures from HAL:") : NULL;
+        for (const char *line = section ? strchr(section, '\n') : NULL; line && line[1] == '\t'; line = strchr(line + 1, '\n')) {
+            /* android.os.Temperature types: CPU 0, GPU 1, battery 2, skin 3, USB port 4, NPU 9. */
+            static const char *prefixes[] = {"cpu", "gpu", "battery", "skin", "usb"};
+            float celsius; int type; char name[64];
+            if (sscanf(line + 1, "\tTemperature{mValue=%f, mType=%d, mName=%63[^,}]", &celsius, &type, name) != 3) continue;
+            if (!isfinite(celsius) || celsius < -40 || celsius > 150) continue;
+            char label[96];
+            int size = snprintf(label, sizeof label, "%s-hal-%s", type >= 0 && type < 5 ? prefixes[type] : type == 9 ? "npu" : "other", name);
+            if (size <= 0 || size >= (int)sizeof label) continue;
+            fprintf(cache, "thermal\t"); hex(cache, label, (size_t)size);
+            fprintf(cache, "\t%ld\n", (long)(celsius * 1000 + (celsius < 0 ? -0.5f : 0.5f)));
+        }
+        long written = ftell(cache);
+        if (!fclose(cache) && written > 0 && written < (long)sizeof lines) lines_length = (size_t)written;
+    }
+    fwrite(lines, 1, lines_length, out);
+}
+
 static int telemetry(FILE *out, int include_gpu) {
     DIR *thermal = opendir("/sys/class/thermal");
     struct dirent *entry;
+    int zones = 0;
     if (thermal) {
         while ((entry = readdir(thermal))) {
             if (strncmp(entry->d_name, "thermal_zone", 12)) continue;
@@ -178,9 +251,11 @@ static int telemetry(FILE *out, int include_gpu) {
             fprintf(out, "thermal\t"); hex(out, type, (size_t)n);
             fprintf(out, "\t%s", value);
             if (value[strlen(value) - 1] != '\n') fputc('\n', out);
+            zones++;
         }
         closedir(thermal);
     }
+    if (!zones) hal_temperatures(out);
     if (!include_gpu) return 0;
     const char *names[] = {"gpu_model", "gpubusy", "gpuclk", "gpu_available_frequencies"};
     for (size_t i = 0; i < sizeof names / sizeof *names; i++) {

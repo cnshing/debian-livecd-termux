@@ -71,7 +71,11 @@ does not invalidate the connection or unrelated categories.
 
 On Qualcomm devices exposing KGSL, GPU collection reads the model, busy/total
 ratio, available frequencies and GPU thermal sensors through shell. CPU
-temperature is the hottest readable CPU/CPUSS thermal sensor. Missing GPU clock,
+temperature is the hottest readable CPU/CPUSS thermal sensor. Where SELinux denies
+shell every thermal zone (Samsung Exynos, such as the Galaxy S20), the reader falls
+back to the thermal HAL's CPU-type sensors from `dumpsys thermalservice`, sampled at
+most every 2 s. The CPU name comes from `/sys/devices/soc0/machine`, or from
+`ro.soc.manufacturer` and `ro.soc.model` where soc0 is denied. Missing GPU clock,
 memory, power or utilization readings remain unavailable; `gpubusy = 0 0` is
 not treated as a measured utilization value. This is a KGSL backend, separate
 from Linux's NVTOP/udev backend. Other GPU vendors need their own source adapters.

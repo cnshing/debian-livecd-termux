@@ -1,21 +1,21 @@
 # Handoff: Vulkan 1.4 and OpenGL 4.3 on the packaged PanVK driver
 
-State on 2026-11-14, Galaxy S20 (`x1s`, Mali-G77 MC11, architecture 9, kbase job manager).
+State on 2026-11-15, Galaxy S20 (`x1s`, Mali-G77 MC11, architecture 9, kbase job manager).
 For whoever raises the versions the Mali stack reports. Paths under `temp/` are local files
 that Git ignores.
 
-Latest checkpoint: the separate corrected `combined-platform` candidate builds
-for both ABIs, passes the private-extension CTS gate, **597/597 expanded GLES**,
-**115 Pass / 9 NotSupported** Vulkan core/info/mapping cases, nested CPU-oracle
-checks and installed desktop **30/30 in both default and nested modes**. The
-original release controller has been restored and validates 30/30. CPU-only
-controls prove the ION placed-map SIGBUS is CPU/core dependent, so the corrected
-driver withdraws that unsafe optional capability (all thirteen cases report
-NotSupported). The remaining measured CTS failure is AHB image export/import:
-both old and corrected candidates give nine buffer/control passes and then
-`VK_ERROR_INVALID_EXTERNAL_HANDLE` for image allocation. Full conformance is
-not established; API defaults and package pins remain unchanged. No further
-soak minutes are requested or run; the earlier soak was interrupted by reboot.
+Latest checkpoint: the Bionic `combined-ahb` candidate fixes the measured AHB
+image allocation failure. Its exact buffer/image cases pass, the dedicated AHB
+group completes **12 Pass / 1 NotSupported**, and an imported-image GPU render
+passes Android CPU pixel readback. Installed desktop validation passes **30/30
+in default and nested modes**, with the exact driver hash checked in Shell.
+The original release controller is restored and validates 30/30. This candidate
+has not repeated the earlier broader CTS qualification: the corrected
+`combined-platform` pair separately passed **597/597 GLES**, **115 Pass /
+9 NotSupported** Vulkan core/info/mapping cases and nested CPU-oracle checks.
+The unsafe ION placed-map capability remains withdrawn; its thirteen cases
+report NotSupported. Full conformance is not established. Package pins and API
+defaults remain unchanged, and no further soak is requested or run.
 
 ## Focused iteration policy
 
@@ -54,10 +54,40 @@ to the corrected thirteen-patch candidate. Standard mapper paths retain
 priority. The fallback accepts only explicitly linear, single-layer
 RGBA/RGBX/BGRA with validated allocation bounds; it does not guess pitch or
 modify imported pixels. Its fourteen-patch content tree is
-`b28956ffc095bda26bf8241badba014be178536b`. This is an unqualified candidate,
-with no package pin or API default change. Build Bionic only, then run the
-exact buffer control and failing image case. Expand to the dedicated AHB
-group only after both pass.
+`b28956ffc095bda26bf8241badba014be178536b`. The Bionic-only
+[CI build 43692804161](https://github.com/cnshing/debian-livecd-termux/actions/runs/43692804161)
+succeeded from source `ee95158`. Its driver SHA-256 is
+`134b668a988626a64f01ce8f1c93307a439cf208e47d775a17a42b60358c5758`.
+
+The buffer control and previously failing image `bind_export_import_bind`
+case both pass, taking 0.894 seconds total. Only then was the dedicated AHB
+group expanded: all thirteen cases complete, **12 Pass / 1 NotSupported**,
+with 6.252 seconds of case execution. The remaining NotSupported case,
+`image.export_import_bind_bind`, is explicitly disallowed for Android AHB by
+CTS itself at `vktApiExternalMemoryTests.cpp:4405`; it is not another allocation
+failure. Each case maps the exact candidate, without diagnostic filtering.
+The existing CI-built `ahb_render` probe also passes import, bind, GPU rendering
+and Android CPU readback: interior RGBA `255 0 0 255`, clear `0 0 255 255`.
+
+After these affected-path checks passed, the stable Bionic candidate passed
+installed desktop validation **30/30 in both default and nested modes**.
+Shell maps the new driver and has the expected `PANVK_G77_LWG`/`PANVK_G77_NESTED`
+flags independently checked in each mode. An initial attempt could not acquire
+the shared test lock and exited before making changes; the successful run
+acquired it after the other test released it. The original controller hash
+`46eea9ffcf91ca66fd31801c725ef97b9bcb635349d0efcac9887692dec35666`
+is restored, and the release desktop again validates **30/30**. Other owners'
+processes are preserved. No repeated 597-case compute selection, private
+GTK/Ghostty cycle run or soak was used for this AHB-only change. The glibc
+artifact remains the earlier corrected candidate, not a new fourteen-patch
+build. Normal package pins and API defaults remain unchanged.
+
+Evidence is retrieved under `temp/panvk-qualification/evidence/ahb-focus/`:
+`candidate-two-cases-01/`, `candidate-dedicated-01/`, `candidate-render-01/`,
+`installed-check/` and `checkpoint.json`. The preceding diagnostic cases and
+six read-only vendor metadata controls are saved there as well. This closes
+the measured linear RGBA AHB allocation blocker, not full AHB-format coverage
+or complete Vulkan conformance.
 
 ## Combined candidate qualification, 2026-11-14
 

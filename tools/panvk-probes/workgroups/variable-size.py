@@ -14,19 +14,24 @@ def main():
     p.add_argument('--driver', type=Path, required=True)
     p.add_argument('--out', type=Path, required=True)
     p.add_argument('--large-workgroups', action='store_true')
+    p.add_argument('--nested', action='store_true')
     a = p.parse_args()
+    if a.nested and not a.large_workgroups:
+        p.error('--nested requires --large-workgroups')
     driver = a.driver.resolve(strict=True)
     a.out = a.out.resolve()
     a.out.mkdir(parents=True, exist_ok=False)
     prefix = Path(os.environ['PREFIX'])
-    for name in ('MESA_GL_VERSION_OVERRIDE', 'MESA_GLSL_VERSION_OVERRIDE', 'LIBGL_ALWAYS_SOFTWARE'):
+    for name in ('MESA_GL_VERSION_OVERRIDE', 'MESA_GLSL_VERSION_OVERRIDE', 'LIBGL_ALWAYS_SOFTWARE',
+                 'PANVK_DEBUG', 'PANVK_KBASE_IMPORT_CLEAR', 'PANVK_KBASE_IMPORT_SET',
+                 'PANVK_G77_NO_MERGE'):
         os.environ.pop(name, None)
     icd = a.out / 'icd.json'
     icd.write_text(json.dumps({'file_format_version':'1.0.1','ICD':{
         'library_path':str(driver),'api_version':'1.3.363'}}))
     os.environ.update(VK_DRIVER_FILES=str(icd), VK_ICD_FILENAMES=str(icd),
         GALLIUM_DRIVER='zink', MESA_LOADER_DRIVER_OVERRIDE='zink', EGL_PLATFORM='surfaceless',
-        PANVK_G77_LWG='1' if a.large_workgroups else '0', PANVK_G77_NESTED='0',
+        PANVK_G77_LWG='1' if a.large_workgroups else '0', PANVK_G77_NESTED='1' if a.nested else '0',
         XDG_CACHE_HOME=str(a.out/'cache'), MESA_SHADER_CACHE_DISABLE='false')
     egl = C.CDLL(str(prefix/'lib/libEGL.so.1'))
     def function(name, result, *args):
@@ -50,7 +55,7 @@ def main():
     terminate = function('eglTerminate', C.c_uint, C.c_void_p)
     context = None
     result = {'driver':str(driver),'driver_sha256':hashlib.sha256(driver.read_bytes()).hexdigest(),
-              'large_workgroups':a.large_workgroups,'cases':[],'ok':False}
+              'large_workgroups':a.large_workgroups,'nested':a.nested,'cases':[],'ok':False}
     try:
         if not initialize(display,None,None) or not bind(0x30A2):
             raise RuntimeError('Cannot initialize desktop OpenGL EGL')

@@ -34,5 +34,5 @@ for version in 1.0 1.1 1.3; do
     -o "$out/cts-max-$version.spv"
   spirv-val --target-env "vulkan$version" "$out/cts-max-$version.spv"
 done
-cp "$here/run.py" "$out/"
-(cd "$out" && sha256sum check trace-loader.so ion-map-boundary *.spv > SHA256SUMS)
+cp "$here/run.py" "$here/variable-size.py" "$out/"
+(cd "$out" && sha256sum check trace-loader.so ion-map-boundary run.py variable-size.py *.spv > SHA256SUMS)

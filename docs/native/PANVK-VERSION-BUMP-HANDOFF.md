@@ -180,9 +180,33 @@ No CTS source, allowlist, diagnostic filtering or advertised API version changes
 The private-extension-only build at source `738c1b0` was superseded by the build
 including the placed-map capability correction. The thirteen-patch tree is
 `8ab30125381fef7d545427d557b676b3f02c8523`, verified in an isolated index without
-editing the Mesa checkout. Both ABI builds are running in
+editing the Mesa checkout. Both ABI builds succeeded in
 [CI 43687729688](https://github.com/cnshing/debian-livecd-termux/actions/runs/43687729688),
-source `7974fb9`. Qualification remains pending.
+source `7974fb9`. New Bionic SHA-256:
+`526cd67e94f773c7684e4efd36f63fc41c4011d951bd2bea5f4db4380ec099ce`;
+new glibc SHA-256:
+`3fd1e8f6d93ee21afad6ea0f1ec8fc2a6d9a4cf50325b97ba3b1e35a49470526`.
+
+Both ABIs pass seven basic probe processes and graphics readback. The
+unmodified CTS platform-gate selection completes **one Pass, thirteen
+NotSupported**: `no_unknown_extensions` passes and every placed-map case
+correctly reports the withdrawn optional feature as unsupported. No trace
+loader or test filtering is used. Installed desktop checks against this separate identity pass **30/30 in both
+default and nested modes**, with exact candidate SHA and compositor flags
+recorded independently. The original controller and normal release desktop
+were restored and pass **30/30**. Bionic's full graphics image is byte-equal to
+the old combined image; glibc's graphics probe reports the same expected pixel
+counts (its launcher did not preserve the optional image-dump variable).
+Evidence is retrieved under local `evidence/combined-platform/`.
+
+The first two-cycle private GTK/Ghostty run completes rendering but fails
+isolation: another owner starts Shell/daemon processes and X84 between its
+before/after snapshots. Their processes and display are preserved; this is not
+an accepted isolated desktop pass. A post-run release validation passes 30/30.
+No soak is run. Broader mapping/compute and expanded GLES regressions are
+running under the shared lock, with the owned managed desktop temporarily
+stopped to keep more than 3 GiB free and a trap to restore/validate the release.
+Phone evidence root: `combined-platform-ci43687729688/`.
 
 The old combined candidate's dedicated public AHB control selects thirteen
 cases and stops at case ten: nine Pass, then
@@ -197,14 +221,15 @@ driver-owned AHBs. App namespaces on this vendor API cannot reach the normal
 mapper backend. This is a hypothesis, not a measured call-stage diagnosis.
 Do not disable public AHB advertising merely to clear this check or guess
 vendor image pitches. Preserve the buffer passes and image failure separately.
-The phone retains complete evidence at `combined/vk-ahb-control-01/`; local
-archive retrieval has not yet succeeded after SSH began stalling.
+Complete evidence is preserved both on the phone at `combined/vk-ahb-control-01/`
+and in the local combined evidence directory.
 
 ### Recovery checkpoint; no further soak requested
 
 x1s is back at `192.168.1.238` after a reboot (new boot ID observed). No owned
-soak/test process remains. Its stale X74 socket is not proof of a live display;
-no unknown processes or sockets were removed. The installed controller checksum
+soak/test process remained. The owned X74 socket and lock were removed only
+after checking ownership, pre-reboot mtimes and connection refusal; the other
+owner's current X84 display is preserved. No unknown processes were killed. The installed controller checksum
 still matches the restored original
 `46eea9ffcf91ca66fd31801c725ef97b9bcb635349d0efcac9887692dec35666`.
 The last soak log reaches 1,425/1,800 seconds, with no final `result.json` or

@@ -115,3 +115,9 @@ process budget, ION CPU cache mode and import coherence (eleven patches).
 and measured noncoherent ION placed-map capability restriction (thirteen
 patches). It requires independent qualification and does not change package
 pins. See the current version-bump handoff for exact hashes and CTS results.
+
+The desktop harness creates its private XDG runtime directory under Termux's
+short `$TMPDIR` path. Evidence directories can be too deep for Unix sockets
+created by GVfs. The chosen runtime path and its removal after owned-process
+cleanup are recorded in `runtime-directory.json`; screenshots and logs remain
+under the requested evidence directory.

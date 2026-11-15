@@ -4,20 +4,20 @@ State on 2026-11-14, Galaxy S20 (`x1s`, Mali-G77 MC11, architecture 9, kbase job
 For whoever raises the versions the Mali stack reports. Paths under `temp/` are local files
 that Git ignores.
 
-Latest checkpoint: the exact combined candidate builds for both ABIs, passes
-3,615,840 CPU-oracle words, 597 expanded GLES cases and installed desktop
-validation **30/30 in both default and nested modes**. The release controller
-and desktop have been restored and pass 30/30. Broader CTS exposes two remaining
-promotion blockers: placed-mapping SIGBUS and the Android private-extension
-loader boundary. Default versions and package pins remain unchanged. The exact
-combined candidate's soak stopped with the phone reboot; its last log reaches
-1,425 seconds and no final result exists. The user has cancelled further soak
-minutes. Wireless ADB and SSH have returned. CPU-only controls now reproduce
-the placed-map failure independently of Vulkan; two platform fixes are being
-built as a separate `combined-platform` candidate. A new AHB image control
-also fails on the previous combined driver; that is a third qualification gap.
+Latest checkpoint: the separate corrected `combined-platform` candidate builds
+for both ABIs, passes the private-extension CTS gate, **597/597 expanded GLES**,
+**115 Pass / 9 NotSupported** Vulkan core/info/mapping cases, nested CPU-oracle
+checks and installed desktop **30/30 in both default and nested modes**. The
+original release controller has been restored and validates 30/30. CPU-only
+controls prove the ION placed-map SIGBUS is CPU/core dependent, so the corrected
+driver withdraws that unsafe optional capability (all thirteen cases report
+NotSupported). The remaining measured CTS failure is AHB image export/import:
+both old and corrected candidates give nine buffer/control passes and then
+`VK_ERROR_INVALID_EXTERNAL_HANDLE` for image allocation. Full conformance is
+not established; API defaults and package pins remain unchanged. No further
+soak minutes are requested or run; the earlier soak was interrupted by reboot.
 
-## Combined qualification in progress, 2026-11-14
+## Combined candidate qualification, 2026-11-14
 
 The `combined` driver variant now selects eleven patches: workgroups `0001`–
 `0007`, point-size, process-wide budget, ION CPU cache mode and import coherence.
@@ -155,7 +155,7 @@ dependence without loading Vulkan or using Mali. It does not measure actual
 kernel PTE attributes. Evidence is `ion-map-boundary-readonly-cpu{0,7}.jsonl`
 and corresponding stderr under the local combined evidence directory.
 
-### Platform corrections awaiting qualification
+### Platform corrections and qualification
 
 `combined-platform` adds two patches to the eleven-patch combined candidate.
 It has a distinct binary identity and must not inherit the old candidate's
@@ -203,10 +203,39 @@ The first two-cycle private GTK/Ghostty run completes rendering but fails
 isolation: another owner starts Shell/daemon processes and X84 between its
 before/after snapshots. Their processes and display are preserved; this is not
 an accepted isolated desktop pass. A post-run release validation passes 30/30.
-No soak is run. Broader mapping/compute and expanded GLES regressions are
-running under the shared lock, with the owned managed desktop temporarily
-stopped to keep more than 3 GiB free and a trap to restore/validate the release.
+No soak is run. The broader run completes:
+
+| Corrected candidate selection | Result |
+| --- | --- |
+| Vulkan basic compute, info and ordinary 257-byte dedicated mapping | 115 Pass, 9 NotSupported; all 124 complete |
+| GLES compute, atomic counters and synchronization | 597/597 Pass |
+| Nested CPU oracle | 22 accepted decisions; 1,205,280 words including baseline controls |
+| GL variable workgroup size, nested | 206,304 words Pass |
+| Dedicated public AHB | 9 Pass, 1 Fail; stops with 3 cases unrun |
+
+The oracle checks 1,168,416 words on the corrected driver (off/on combined),
+plus 36,864 words on the earlier combined control. All executed CTS cases map
+the exact corrected Bionic binary, without diagnostic filtering or version
+overrides. Ordinary mapping includes legacy/map2, remap, flush and invalidate
+controls; both process-wide budget queries pass. The release desktop is
+restored and passes 30/30 after CTS, with the original controller hash.
+The AHB image failure matches the earlier combined control; it is not cleared
+or newly introduced by these two patches.
 Phone evidence root: `combined-platform-ci43687729688/`.
+
+The long evidence path also exceeds the Unix socket path limit for GVfs.
+The desktop harness now creates a short private XDG runtime directory under
+`$TMPDIR`, removes it after owned-process cleanup, and records the path and
+cleanup in `runtime-directory.json`. The follow-up two-cycle run confirms
+that the short runtime directory is removed after owned-process cleanup.
+Four GTK captures again have maximum channel error zero, and four Ghostty
+captures pass pixel/stale controls and normal exit. Its strict isolation check
+again rejects a new X84/Shell/daemon startup between snapshots. Both private
+runs remain **pixel diagnostics, not accepted isolated desktop passes**.
+Their unchanged isolation reports and explicit `pixel-diagnostics.json` reports
+are preserved locally. No third retry or soak is run. Installed default/nested
+30/30 remains independently accepted, and the final release restore passes
+30/30 after this check as well.
 
 The old combined candidate's dedicated public AHB control selects thirteen
 cases and stops at case ten: nine Pass, then
@@ -219,6 +248,18 @@ Source inspection finds a plausible restriction: image layout needs mapper
 metadata, while the verified linear fallback only permits explicitly tagged,
 driver-owned AHBs. App namespaces on this vendor API cannot reach the normal
 mapper backend. This is a hypothesis, not a measured call-stage diagnosis.
+A separate one-case diagnostic with the CI-built forwarding trace loader
+records a single first `AllocateMemory` call, size zero/type zero, returning
+`-1000072003` (`VK_ERROR_INVALID_EXTERNAL_HANDLE`). The failure is therefore
+already in the initial AHB-backed image export allocation, before the test
+can export its handle and reimport it into image B. Source inspection narrows
+this to the driver's internal import/layout of its newly allocated AHB:
+AHardwareBuffer allocation failure would instead report out-of-host-memory.
+The exact inner failing stage still needs instrumentation. The verified linear
+fallback requires both an explicitly driver-owned tag and CPU-read usage;
+the generic image export allocation path supplies neither for this test.
+No speculative layout or ownership change has been made. Diagnostic evidence:
+`vk-ahb-image-diagnostic-01/`; it is excluded from qualification pass counts.
 Do not disable public AHB advertising merely to clear this check or guess
 vendor image pitches. Preserve the buffer passes and image failure separately.
 Complete evidence is preserved both on the phone at `combined/vk-ahb-control-01/`
@@ -652,7 +693,12 @@ device extension list. This changes device creation, prints an explicit warning
 and sets `diagnostic_only: true` in the report. A pass in that mode is a debugging
 result and cannot clear CTS qualification. It requires `--trace-loader`.
 
-## Desktop qualification still required
+## Historical standalone nested-driver desktop qualification
+
+The records below concern the standalone nested binary. The combined and
+corrected candidates now also pass installed default/nested validation 30/30,
+as recorded above. Those identities do not inherit this standalone soak.
+The user has cancelled additional soak minutes; do not restart one.
 
 The fixed `0007` binary passed **20 private GNOME/Ghostty cycles** with caching
 enabled and both opt-ins set. Both host checkers pass: 40 GTK captures with
@@ -687,10 +733,10 @@ isolation-failed, stalled and missing-capture evidence. This is stability
 evidence; it does not establish pixel correctness for every soak frame or GPU
 throughput.
 
-The private harness can run the 20 capture cycles and 30-minute soak together:
+For a short correctness regression, run the private capture cycles without a soak:
 
 ```sh
-python panvk-desktop.py --mode shm --cycles 20 --soak-seconds 1800 \
+python panvk-desktop.py --mode shm --cycles 2 \
   --driver <qualified.so> --ghostty-probe --out <new-directory>
 ```
 
@@ -713,8 +759,8 @@ its controller, atomically install that same tested graphics module, and start
 the normal Zink session. Run `desktop.py validate` in that session, preserving
 the output and compositor maps proving the candidate actually loaded. Restore
 the saved graphics module and restart the previous renderer on failure; do not
-repin the normal package unless all 30 checks pass. The live session has not
-been interrupted for this step.
+repin the normal package unless all 30 checks pass. This reversible procedure
+has now been completed for both candidates, with the release controller restored.
 
 ## Where the versions stand
 
@@ -782,9 +828,11 @@ The pass is a working subset behind an environment variable. To ship it:
    release, `0001`–`0006` and final nested drivers. The budget fix clears its
    isolated information subset, and the ION fix clears the old compute
    failures, and the import-coherence variant clears the SSBO reduction failure
-   and completes the selected basic-compute subset. Combine the required fixes
-   with the workgroup series and qualify that exact combined binary.
-   Broader CTS and the Android loader information-test failure remain open.
+   and completes the selected basic-compute subset. The combined fixes now pass
+   597 GLES cases and installed default/nested 30/30. The corrected platform
+   candidate additionally passes 124 core/info/mapping cases and the Android
+   extension gate, and withdraws unsafe ION placed mapping. AHB image
+   export/import still fails; broader full-conformance coverage remains open.
 4. **Cache identity is now covered.** `0006` hashes the architecture-9 opt-in into the
    physical device cache digest, uses that digest for both the pipeline UUID and the disk
    cache timestamp, and the phone tests confirm distinct UUIDs with correct repeated cached
@@ -794,8 +842,10 @@ The pass is a working subset behind an environment variable. To ship it:
    cases and show heavy spilling in the nested scheduler. Measure GPU throughput
    and broader shader pressure; the 256-thread hardware cap is not a performance proof.
 6. **Then drop the opt-ins** for architecture 9 after qualification. The fixed nested
-   driver passed the private 20-cycle run and 30-minute soak. Installed 30/30
-   validation, unresolved CTS failures and performance qualification remain.
+   standalone driver passed its private 20-cycle run and historical 30-minute
+   soak. Installed 30/30 now passes on the combined and corrected candidates.
+   The AHB image failure, fuller conformance coverage and performance
+   qualification remain. No additional soak is requested.
 
 The separately qualified `ghostty-panvk-dmabuf` package now provides its own
 private driver/Mesa stack. The terminal launcher uses it when its device and

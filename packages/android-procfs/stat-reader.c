@@ -170,7 +170,10 @@ static int threads(FILE *out) {
 
 /* Samsung's Exynos policy denies the shell uid every thermal_zone, while the
  * thermal HAL still reports the SoC through thermalservice. Run that fixed
- * command, never anything the client names, and cache it between samples. */
+ * command, never anything the client names. Mission Center asks for CPU and
+ * GPU telemetry back to back on every refresh, so one HAL read serves the
+ * requests of one refresh. The window is far shorter than the fastest refresh
+ * interval (0.5 s), so each refresh sees a new reading. */
 static size_t thermal_hal(char *buffer, size_t capacity) {
     int pipe_fds[2];
     if (pipe2(pipe_fds, O_CLOEXEC)) return 0;
@@ -208,13 +211,14 @@ static size_t thermal_hal(char *buffer, size_t capacity) {
 static void hal_temperatures(FILE *out) {
     static char lines[4096];
     static size_t lines_length;
-    static struct timespec sampled;
+    static long long sampled_ms = -1;
     struct timespec now;
     clock_gettime(CLOCK_MONOTONIC, &now);
-    if (!sampled.tv_sec || now.tv_sec - sampled.tv_sec >= 2) {
+    long long now_ms = (long long)now.tv_sec * 1000 + now.tv_nsec / 1000000;
+    if (sampled_ms < 0 || now_ms - sampled_ms >= 250) {
         static char dump[65536];
         FILE *cache = fmemopen(lines, sizeof lines, "w");
-        sampled = now; lines_length = 0;
+        sampled_ms = now_ms; lines_length = 0;
         if (!cache) return;
         const char *section = thermal_hal(dump, sizeof dump) ? strstr(dump, "Current temperatures from HAL:") : NULL;
         for (const char *line = section ? strchr(section, '\n') : NULL; line && line[1] == '\t'; line = strchr(line + 1, '\n')) {

@@ -24,7 +24,10 @@ int main(int argc, char **argv)
    const int cts_max = !strcmp(argv[6], "run-cts-max") || !strcmp(argv[6], "compile-cts-max");
    const int full_core = getenv("PANVK_PROBE_CORE_FEATURES") &&
       !strcmp(getenv("PANVK_PROBE_CORE_FEATURES"), "1");
-   if (full_core && !cts_max) return 2;
+   const int placed_map = getenv("PANVK_PROBE_PLACED_MAP") &&
+      !strcmp(getenv("PANVK_PROBE_PLACED_MAP"), "1");
+   if ((full_core || placed_map) && !cts_max) return 2;
+   if (placed_map && capture_stats) return 2;
    unsigned x = strtoul(argv[3], NULL, 10), y = strtoul(argv[4], NULL, 10);
    unsigned z = strtoul(argv[5], NULL, 10), n = x * y * z;
    if (!x || !y || !z || n > 1024) return 2;
@@ -112,6 +115,24 @@ int main(int argc, char **argv)
       core13.robustImageAccess = VK_FALSE;
       di.pNext = feature_chain;
       printf("coreFeatures11_13=%u\n", full_core);
+   }
+   const char *placed_extensions[] = {VK_EXT_MAP_MEMORY_PLACED_EXTENSION_NAME,
+                                      VK_KHR_MAP_MEMORY_2_EXTENSION_NAME};
+   VkPhysicalDeviceMapMemoryPlacedFeaturesEXT placed_features = {
+      .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAP_MEMORY_PLACED_FEATURES_EXT,
+      .pNext = feature_chain};
+   if (placed_map) {
+      INST(vkGetPhysicalDeviceFeatures2);
+      VkPhysicalDeviceFeatures2 available = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2,
+         .pNext = &placed_features};
+      vkGetPhysicalDeviceFeatures2(physical, &available);
+      if (!placed_features.memoryMapPlaced) return 1;
+      core13.robustImageAccess = VK_FALSE;
+      feature_chain = &placed_features;
+      di.pNext = feature_chain;
+      di.enabledExtensionCount = 2;
+      di.ppEnabledExtensionNames = placed_extensions;
+      puts("memoryMapPlaced=1");
    }
    const char *stats_extension = VK_KHR_PIPELINE_EXECUTABLE_PROPERTIES_EXTENSION_NAME;
    VkPhysicalDevicePipelineExecutablePropertiesFeaturesKHR stats_feature = {

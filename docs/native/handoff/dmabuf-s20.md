@@ -1,174 +1,161 @@
-# Handoff: DMA-BUF support on the S20, with ION fallback
+# Handoff: `/dev/dma_heap` on top of `/dev/ion`, for kernels without DMA-BUF heaps
 
-State on 2026-11-14. Galaxy S20 (`x1s`, SM-G981B), Exynos 990, Mali-G77, Android 13, Linux
-4.19.87, stock kernel, no root. For whoever takes this on as a dedicated project. It stands on
-its own; the other pages in this folder are linked where they matter.
+State on 2026-11-14. For whoever builds this as a dedicated task. It stands on its own.
 
-## Goal
+Target phone: Galaxy S20 (`x1s`, SM-G981B), Exynos 990, Mali-G77, Android 13, Linux 4.19.87,
+stock kernel, no root. Our GPU driver there is the PanVK kbase driver from
+[zenithblue-oss/panvk-kbase-android](https://github.com/zenithblue-oss/panvk-kbase-android)
+(package `mesa-vulkan-icd-panvk-kbase`, release 26.3.1, source pinned at `cf70e02`).
 
-Every program that expects Linux DMA-BUF video and graphics buffers gets them on the S20, as it
-would on a Linux desktop. Each buffer comes from an allocator the Termux app is allowed to use,
-and the ION fallback works wherever there is no DMA-BUF heap.
+## The task
 
-"Done" means:
+Make `/dev/dma_heap/system` appear to exist on kernels that predate DMA-BUF heaps, with ION
+(`/dev/ion`) doing the actual allocating.
 
-- Programs can allocate, export, import and synchronise DMA-BUFs with each other, with no CPU copy
-  that a desktop would not make.
-- Chrome's WebCodecs hardware encode runs without a source patch.
-- Each step has a phone test that fails when the DMA-BUF path is not taken.
+- Programs and drivers written for DMA-BUF heaps then work unchanged.
+- The buffers they get are real DMA-BUFs. Only the allocator interface is emulated.
 
-## Why this is its own project
+Why this is enough:
 
-Chrome's WebCodecs hardware encode crashes on the S20 ([encode-chrome.md](encode-chrome.md)):
+- An ION allocation already returns a genuine DMA-BUF file descriptor. Import into the GPU,
+  `mmap`, `DMA_BUF_IOCTL_SYNC` and passing it to another process all work on it today; the
+  video bridge's decoded frames are ION buffers that every browser imports.
+- What 4.19 lacks is the interface, `/dev/dma_heap/<name>` with `DMA_HEAP_IOCTL_ALLOC`. That was
+  added in Linux 5.6, and Android moved to it from ION.
+- Newer GKI kernels are the reverse: DMA-BUF heaps and no ION. So "heap first, ION as the
+  fallback" is the order everything should follow. Today that order is implemented separately
+  in each component (below). This task puts it in one place.
 
-- On Linux, Chrome's encoder adapter always asks for GPU-memory-buffer input. This is compiled
-  in (`media/video/video_encode_accelerator_adapter.cc`, under `#if BUILDFLAG(IS_LINUX)`), with
-  no flag to turn it off.
-- The GPU process then `CHECK`s that each buffer is a native pixmap: a DMA-BUF that Chrome
-  allocated through GBM.
-- On Termux, Chrome has no working GBM device, so its buffers are shared memory and the check
-  aborts the GPU process.
-
-Chromium avoids this with source patches 0100 and 0101 (`packages/chromium`). Chrome is Google's
-binary and cannot be patched. The real fix is to give Chrome what it expects: GBM, native pixmaps
-and DMA-BUF import all the way down. That touches the allocator, Mesa, the X server, the GPU
-driver and the VA-API bridge, so it is a project of its own, not a bridge fix.
-
-## What the phone allows
-
-Checked on the S20 on 2026-11-14:
+What the S20 offers (checked 2026-11-14):
 
 | Node | State |
 | --- | --- |
 | `/dev/ion` | present, `crw-rw-rw- system system u:object_r:ion_device:s0` |
-| `/dev/dma_heap` | absent; Linux 4.19 predates DMA-BUF heaps |
-| `/dev/dri/*` | absent to the app; the phone's display nodes are denied by SELinux |
+| `/dev/dma_heap` | absent |
+| `/dev/dri/*` | not visible to the app (SELinux) |
 | `/dev/mali0` | read/write for the Termux app |
 
-So on the S20, **ION is the only kernel DMA-BUF allocator**, not a fallback. Phones on GKI
-5.10+ kernels have the opposite: `/dev/dma_heap/system` and no `/dev/ion`. The code must try
-the DMA-BUF heap first, then ION, everywhere it allocates.
+## Who allocates today, and how
 
-[docs/browsers/android-video-allocators.md](../../browsers/android-video-allocators.md) has the
-full permission probe from the Note10+: ION opened read-only can still allocate, `ASharedMemory`
-is not a DMA-BUF, and `AHardwareBuffer` works. That probe **has not been run on the S20**.
+| Component | Heap | ION | Other |
+| --- | --- | --- | --- |
+| VA-API bridge surfaces, `packages/android-vaapi/tva_ion_winsys.h` | first | then ION via `tva_ion.h` (system heap, `/dev/ion` opened read-only) | — |
+| glibc bridge for Chrome, `android-vaapi-glibc` | same | through a preload (`ion_fallback: preload`, `LIVECD_TVA_ION_FALLBACK` in `src/native/acceleration.py`) | — |
+| PanVK kbase shareable buffers (`kbase_kmod.c`) | `/dev/dma_heap/system`, overridable with `PANVK_KBASE_DMA_HEAP` | Zenith's later JM patch 0133 says it handles a "new-ABI ION heap" | gralloc `AHardwareBuffer` BLOB as the last resort (patch 0133); otherwise an ordinary kbase buffer that cannot be shared |
+| Zenith patch 0129 | asks for the `system-uncached` heap for HOST_COHERENT memory | — | — |
+| GBM, Chrome, GStreamer, FFmpeg DRM frames | expect a render node or a heap; nothing on the S20 | — | — |
 
-## What already exists
+**To confirm first:** which of these paths the pinned 26.3.1 release actually takes on the
+S20. The `kbase_kmod.c` in the pinned tree's `kbase-common` files opens only the DMA-BUF heap;
+the ION handling is mentioned in the later JM patches. Run the driver with Mesa debug logging
+and look for `kbase: dma-heap unavailable at ...`.
 
-| Piece | Where | State on the S20 |
-| --- | --- | --- |
-| ION allocator (system heap, opened read-only) | `packages/android-vaapi/tva_ion.h` | Used; Bionic built-in, glibc via preload (`ion_fallback` in each package's manifest, `LIVECD_TVA_ION_FALLBACK` in `src/native/acceleration.py`) |
-| Software-renderer surfaces held in DMA-BUFs (heap first, then ION) | `packages/android-vaapi/tva_ion_winsys.h` | Used; `TERMUX_VA_ION_WINSYS=0` turns it off |
-| VA surface export (`vaExportSurfaceHandle`, DRM PRIME) | the same | Works: Chromium, Chrome and Firefox import decoded VP9/HEVC frames |
-| A fake `/dev/dri/renderD128` that answers DRM version and PRIME capability queries | `packages/android-vaapi/render-node.c` | Used on Mali; reports driver name `termuxva` |
-| PanVK (kbase) memory export | `mesa-vulkan-icd-panvk-kbase` | Exports ION-backed DMA-BUFs ([MALI-GPU-STATUS.md](../MALI-GPU-STATUS.md)) |
-| Zink import of a DMA-BUF without SYNC_FD | Mesa patches 0021–0023, revision 103 | Firefox imports decoded frames |
-| SYNC_FD semaphores in PanVK | [PANVK-SYNC-FD-HANDOFF.md](../PANVK-SYNC-FD-HANDOFF.md) | Ported and qualified privately for Ghostty → GTK only; not in the general driver |
-| X11 presentation | `src/native/graphics.py` | MIT-SHM is the accepted path; raw DRI3 is a probe only |
-| GBM | Mesa is built with `-Dgbm=enabled` | **Not checked** whether `gbm_bo_create` works on Mali; probably not, since there is no kbase GBM backend |
+## Design
 
-## The gaps, by where a buffer travels
+A small preload library, built for both Bionic and glibc (glibc through Bionilux). It follows
+the same pattern as `packages/android-vaapi/render-node.c`, which already fakes
+`/dev/dri/renderD128`.
 
-1. **Decode output: one CPU copy.** The termux-va daemon gets each decoded frame from MediaCodec
-   as a byte buffer over shared memory. The bridge then copies it into an ION surface (on Mali
-   `TERMUX_VA_GPU_BACKEND=sw`). Zero copy would mean MediaCodec decoding to an `ANativeWindow`
-   (from `AImageReader`) and the bridge wrapping each `AHardwareBuffer`'s DMA-BUF as the VA
-   surface. That needs the Samsung gralloc layout (plane offsets, strides, AFBC or linear), the
-   buffer lifetime and fences. None of that has been probed on the S20.
-2. **Encode input: import not checked.** No test has confirmed that a DMA-BUF made outside the
-   bridge can be imported as a VA surface (`vaCreateSurfaces` with
-   `VA_SURFACE_ATTRIB_MEM_TYPE_DRM_PRIME_2`) and encoded. Programs that need this:
-   - Chrome (native pixmaps);
-   - FFmpeg `hwmap`/`hwupload` from DRM frames;
-   - GStreamer `va` elements with `memory:DMABuf` caps;
-   - screen capture.
-   The encode input is also copied into MediaCodec's input buffer; MediaCodec's input surface
-   (`AMediaCodec_createInputSurface`) would avoid that.
-3. **GBM on Mali.** Chrome's Ozone X11 allocates native pixmaps through GBM on the render node.
-   On the S20 that render node is the fake one above, and Mesa has no GBM backend that
-   allocates from kbase or ION. One option is a GBM backend (in Mesa or a preload) whose
-   `gbm_bo_create` allocates heap-then-ION, or an `AHardwareBuffer`, and exports its fd. Check in
-   Chrome's source which GBM entry points and formats it actually needs (`ui/gfx/linux`,
-   `ui/ozone/platform/x11`) before building anything.
-4. **X11 native pixmaps.** Chrome decides whether native pixmaps are supported partly from the
-   X server: DRI3 and its modifiers. Termux:X11 offers DRI3 on the Adreno path
-   (`TERMUX_VA_X11_DRI3`). On Mali it has only been probed.
-5. **The GPU writing and reading the same buffers.** Chrome's GPU process (ANGLE on PanVK)
-   must import the GBM buffers and draw into them. PanVK exports ION memory, but importing
-   *foreign* DMA-BUFs (from GBM or `AHardwareBuffer`) into PanVK and into Zink is not tested.
-6. **Synchronisation.** Without SYNC_FD in the general PanVK driver, every cross-process handoff
-   relies on the Zink workarounds or on `DMA_BUF_IOCTL_SYNC` CPU brackets. Moving the
-   Ghostty-qualified SYNC_FD port into the default driver is part of this work.
-7. **Making the fallback order explicit everywhere.** Each new allocator (GBM, `AHardwareBuffer`
-   wrapping, any PanVK allocation path that bypasses kbase export) must try the DMA-BUF heap
-   first, then ION, then fail clearly. It must never fall back silently to shared memory that
-   looks like success. Bionic and glibc builds need the same order (built-in and
-   `ion_fallback: preload`).
+1. **Make the device appear.**
+   - `open`/`openat` of `/dev/dma_heap/system` (and `system-uncached`) returns a descriptor on
+     `/dev/ion`, opened read-only. Read-only is what works for apps on Android, and is enough
+     to allocate.
+   - Remember which descriptors are emulated heaps.
+   - `stat`/`fstat`/`statx`/`access` and `opendir`/`readdir` of `/dev/dma_heap` report the heaps
+     as character devices.
+   - Pass everything else through.
+2. **Translate the allocation.**
+   - `ioctl(fd, DMA_HEAP_IOCTL_ALLOC, struct dma_heap_allocation_data)` on an emulated
+     descriptor becomes `ION_IOC_ALLOC`, new ABI (Linux 4.12+):
+     - `len` maps directly;
+     - `heap_id_mask` is the system heap ID;
+     - `flags` is cached for `system` and uncached for `system-uncached`.
+   - The returned fd is handed back in `fd`, with `fd_flags` (`O_CLOEXEC`/`O_RDWR`) applied to
+     it.
+   - Find the heap IDs once with `ION_IOC_HEAP_QUERY` and match them by type: system, not by
+     vendor name. Samsung's names and IDs differ from Qualcomm's. Never use carveout, CMA or
+     secure heaps.
+   - Reuse the query and allocation code in `tva_ion.h` rather than writing it again.
+3. **Report failures honestly.**
+   - If ION is missing or has no system heap, `open` fails with `ENOENT`, exactly as on a kernel
+     without heaps, so callers take their own next fallback.
+   - Kernels with ION's legacy ABI (before 4.12), and MediaTek 4.14 kernels where
+     `ION_IOC_HEAP_QUERY` returns `EINVAL`, are not handled. They also fail with `ENOENT`, so
+     PanVK's gralloc fallback still applies there.
+   - Never hand out shared memory or `memfd` that pretends to be a DMA-BUF.
+4. **Enable it only where it is needed.**
+   - The launcher loads the preload only when `/dev/dma_heap` is absent and `/dev/ion` is
+     present. On GKI phones the real heap is used.
+   - `LIVECD_DMA_HEAP_ION=0` turns it off.
+5. **Then simplify.** Once the preload is in:
+   - the bridge's own ION path (`tva_ion.h`, the `ion_fallback` preload) can be removed,
+     leaving its heap code as the only path;
+   - PanVK's shareable buffers can use the heap on the S20 with no driver change. Keep Zenith's
+     gralloc fallback for kernels the preload can't serve.
 
-## Order of work
+Known limits:
 
-Each step ends with a phone test; don't start the next step until it passes.
+- A preload only reaches programs that call through libc. Statically linked programs, and
+  programs that make raw `syscall()` calls, bypass it. The sandboxed Chrome GPU process is the
+  case to test.
+- `render-node.c` notes the libc start-up and futex rules a preload must keep; follow them.
+- Cache coherency: ION's system heap without the cached flag may differ from Linux's
+  `system-uncached`. Test CPU-write then GPU-read, and the reverse, both with and without
+  `DMA_BUF_IOCTL_SYNC`.
 
-1. **Probe the S20** with a small native program, run as the Termux app and through `adb shell`:
-   - The ION heap list and IDs, and whether a system-heap allocation can be mapped and
-     `DMA_BUF_IOCTL_SYNC`'d.
-   - `AHardwareBuffer_allocate` for NV12/YUV420 and RGBA:
-     - how many fds the native handle carries;
-     - which fd holds which plane, and the strides;
-     - whether the buffer is AFBC-compressed or linear.
-   - `gbm_create_device` on the fake render node and `gbm_bo_create` for `GBM_FORMAT_NV12`
-     and `GBM_FORMAT_ARGB8888`. Record the result, including failures.
-   - Importing an ION allocation and an `AHardwareBuffer` fd into PanVK
-     (`VK_EXT_external_memory_dma_buf`) and into Zink (`EGL_EXT_image_dma_buf_import`).
-   Write the results into this page.
-2. **VA import and encode from a DMA-BUF.** Make
-   `vaCreateSurfaces(..., VA_SURFACE_ATTRIB_MEM_TYPE_DRM_PRIME_2)` work in the bridge for
-   heap/ION buffers, then encode from them.
-   - Test: FFmpeg `-init_hw_device vaapi ... -vf hwmap` from a DRM frame, and GStreamer
-     `vah264enc` fed `video/x-raw(memory:DMABuf)`.
-   - Decode the output with software and look at the frames.
-3. **GBM for Mali.** Add a GBM backend or preload that allocates heap-then-ION, or
-   `AHardwareBuffer` if step 1 shows linear layouts. Choose which from step 1's data.
-   - Test: allocate, map, write a pattern, export, re-import in another process, and compare.
-4. **DRI3 on Termux:X11 for PanVK.** Present a DMA-BUF-backed pixmap from PanVK and from a GBM
-   buffer.
-   - Test: a numbered-frame window captured on a private Xvfb/Termux:X11 display. Look at the
-     pictures, not only checksums.
-5. **SYNC_FD in the default PanVK driver.** Land the port from
-   [PANVK-SYNC-FD-HANDOFF.md](../PANVK-SYNC-FD-HANDOFF.md).
-   - Rerun the desktop, Ghostty and all three browser tests.
-   - Drop Mesa 0021–0023 only once their crashes no longer reproduce without them.
-6. **Chrome WebCodecs hardware encode, unpatched.** Run Chrome with `AcceleratedVideoEncoder`
-   and native GPU memory buffers on.
-   - Test: the WebCodecs H.264 and VP9 runs from [encode-chromium.md](encode-chromium.md). They
-     must have no GPU-process exit and must show the encoder name `OMX.Exynos.*`. Decode the
-     stream and view frames 0, middle and last.
-   - When it passes, propose enabling `AcceleratedVideoEncoder` for Chrome; the user decides.
-7. **Zero-copy MediaCodec** (gap 1 and the input surface in gap 2), only if step 1 shows the
-   gralloc layout can be wrapped:
-   - Measure CPU use and frame time against the copying path.
-   - Keep the copying path as the fallback.
-8. **Fallback coverage.** Host tests that force each allocator:
-   - DMA-BUF heap missing;
-   - ION missing;
-   - both missing, which must report an error rather than fall back to shared memory;
-   - `TERMUX_VA_ION_WINSYS=0`.
-   Then one Adreno regression run on the Note10+, whose allocator rules differ (see
-   android-video-allocators.md).
+## Steps, each ending in a phone test
+
+1. **Probe the S20.** Record each result in this page:
+   - the ION heap list (IDs, types, names);
+   - allocation of 4 KiB, 1 MiB and 64 MiB from the system heap, cached and uncached;
+   - `mmap`, and a sync round trip;
+   - which allocation path the pinned PanVK release takes.
+2. **The preload, with host tests.** A fake ION device, built for Bionic and glibc:
+   - each path in the design;
+   - `ENOENT` when ION is missing;
+   - descriptors that are not emulated pass through unchanged.
+3. **The S20, standalone.** A test program that uses only the DMA-BUF heap API:
+   - allocates, writes a pattern, passes the fd to a second process over a Unix socket, and
+     reads the pattern back there;
+   - imports the same fd into PanVK (`VK_EXT_external_memory_dma_buf`), has the GPU write it,
+     and checks the result on the CPU.
+   - It must fail when the preload is off. That proves the test exercises it.
+4. **PanVK and the bridge through the preload.**
+   - Run PanVK with the preload and confirm from the log that shareable buffers come from the
+     heap.
+   - Remove the bridge's own ION path.
+   - Rerun the desktop check, Ghostty, and VP9/HEVC decode in Chromium, Chrome and Firefox
+     (`tests/browsers/test-acceleration.py`).
+   - Look at the decoded frames, not only the scores.
+5. **Launcher wiring and a regression run.**
+   - Load the preload in `src/native/acceleration.py` and `graphics.py` only on phones without a
+     DMA-BUF heap.
+   - Run the S20 tests once more from an installed package.
+   - Run the Note10+ suite unchanged: it has ION and no heap too, so it uses the preload as well
+     (see [android-video-allocators.md](../../browsers/android-video-allocators.md)).
+
+## Built on top of this, not part of this task
+
+These need a working heap first; each is its own follow-up:
+
+- **GBM for Mali**, allocating from the heap: what Chrome's native pixmaps need.
+- **DRI3 presentation** of heap buffers on Termux:X11.
+- **SYNC_FD** in the default PanVK driver ([PANVK-SYNC-FD-HANDOFF.md](../PANVK-SYNC-FD-HANDOFF.md)).
+- **Importing outside DMA-BUFs into the video bridge** for encoding (FFmpeg `hwmap`, GStreamer
+  `memory:DMABuf`).
+- **Chrome WebCodecs hardware encode without a source patch.** Chrome on Linux requires
+  native-pixmap (GBM) input ([encode-chrome.md](encode-chrome.md)), so it needs the three
+  items above, not just the heap.
+- **Zero-copy MediaCodec** through `AHardwareBuffer`.
 
 ## Rules for phone work
 
-- Claim `temp/PHONE-STATUS` before using the S20 and release it after. Other sessions share
-  the phone.
+- Claim `temp/PHONE-STATUS` before using the S20 and release it after. Other sessions share the
+  phone.
 - Private Xvfb or private Termux:X11 display only. Never send input to the live `:0`.
-- Never kill processes you did not start. Stage packages privately (as encode-chromium did in
+- Never kill processes you did not start. Stage packages privately (for example under
   `~/gpu-x1s/`) rather than installing, unless the user asks.
-- Granting Termux permissions in Android Settings kills all Termux processes. Use `adb shell`
-  grants, and warn first.
+- Check free memory before and between browser runs, and never loop a crashing GPU process:
+  Android's low-memory killer has taken down Termux this way before.
 - No root, no kernel changes, no SELinux changes. Everything must work for an unprivileged app.
-
-## Out of scope
-
-- Protected (secure) ION heaps and DRM-protected video.
-- Camera buffers as DMA-BUFs (android-camera); a natural follow-up once step 3 exists.
-- AV1: the S20 has no AV1 hardware.
+- Out of scope: protected (secure) heaps and DRM-protected video.

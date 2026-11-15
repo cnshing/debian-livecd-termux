@@ -48,6 +48,33 @@ vkCreateDevice(VkPhysicalDevice p, const VkDeviceCreateInfo *i,
       fprintf(stderr, "TRACE extension %s\n", i->ppEnabledExtensionNames[n]);
    for (const VkBaseInStructure *s = i->pNext; s; s = s->pNext)
       fprintf(stderr, "TRACE deviceFeatureSType=%u\n", s->sType);
+   const char *core_only = getenv("PANVK_TRACE_CORE_FEATURES_ONLY");
+   if (core_only && !strcmp(core_only, "1")) {
+      VkPhysicalDeviceFeatures2 f2 = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2};
+      VkPhysicalDeviceVulkan11Features f11 = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES};
+      VkPhysicalDeviceVulkan12Features f12 = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES};
+      VkPhysicalDeviceVulkan13Features f13 = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES};
+      if (i->pEnabledFeatures) f2.features = *i->pEnabledFeatures;
+      for (const VkBaseInStructure *s = i->pNext; s; s = s->pNext) {
+         switch (s->sType) {
+         case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2:
+            f2 = *(const VkPhysicalDeviceFeatures2 *)s; break;
+         case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES:
+            f11 = *(const VkPhysicalDeviceVulkan11Features *)s; break;
+         case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES:
+            f12 = *(const VkPhysicalDeviceVulkan12Features *)s; break;
+         case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES:
+            f13 = *(const VkPhysicalDeviceVulkan13Features *)s; break;
+         default: break;
+         }
+      }
+      f2.pNext = &f11; f11.pNext = &f12; f12.pNext = &f13; f13.pNext = NULL;
+      VkDeviceCreateInfo filtered = *i;
+      filtered.pEnabledFeatures = NULL;
+      filtered.pNext = &f2;
+      fprintf(stderr, "TRACE MODIFIED DEVICE: core features only; diagnostic, not qualification\n");
+      return next(p, &filtered, a, d);
+   }
    return next(p, i, a, d);
 }
 

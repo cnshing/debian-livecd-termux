@@ -28,7 +28,7 @@ removes the wait and reproduces the stale frames, which is the negative control.
   and H.264, destroying a fence only detached it. The pending entry stayed `in_use` and not
   `ready`, so `tva_pend_find_locked` still matched a late MediaCodec frame by unit index, and
   the reader copied it straight into the reused surface (`tva_copy_frame_direct`).
-  `packages/android-vaapi/0104-drop-late-frames-all-codecs.patch` (revision 6) sets
+  `packages/android-vaapi/0106-drop-late-frames-all-codecs.patch` (revision 6) sets
   `drop_on_fence_destroy` for every fenced entry. Fence destruction now waits up to 200 ms
   (`DMD_AV1_FENCE_WAIT_MS`), copies a staged frame, and then drops any later output.
 - Not done: the package was not built and nothing was run on a phone (x1s was busy with a

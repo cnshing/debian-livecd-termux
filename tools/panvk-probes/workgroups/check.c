@@ -149,6 +149,34 @@ int main(int argc, char **argv)
       .setLayoutCount = 1, .pSetLayouts = &sl};
    VkPipelineLayout layout;
    CHECK(vkCreatePipelineLayout(device, &pli, NULL, &layout));
+   const size_t words = cts_max ? n : (size_t)n * 6 * 16;
+   VkBufferCreateInfo bi = {.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+      .size = words * 4, .usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT};
+   VkBuffer buffer;
+   CHECK(vkCreateBuffer(device, &bi, NULL, &buffer));
+   VkMemoryRequirements req;
+   vkGetBufferMemoryRequirements(device, buffer, &req);
+   VkPhysicalDeviceMemoryProperties memory;
+   vkGetPhysicalDeviceMemoryProperties(physical, &memory);
+   unsigned type = 0;
+   VkMemoryPropertyFlags want = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+   while (type < memory.memoryTypeCount && (!(req.memoryTypeBits & (1u << type)) ||
+          (memory.memoryTypes[type].propertyFlags & want) != want)) type++;
+   if (type == memory.memoryTypeCount) return 1;
+   printf("memoryType=%u properties=0x%x allocationBytes=%llu\n", type,
+          memory.memoryTypes[type].propertyFlags, (unsigned long long)req.size);
+   VkMemoryAllocateInfo mai = {.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+      .allocationSize = req.size, .memoryTypeIndex = type};
+   VkDeviceMemory allocation;
+   CHECK(vkAllocateMemory(device, &mai, NULL, &allocation));
+   CHECK(vkBindBufferMemory(device, buffer, allocation, 0));
+   uint32_t *map;
+   CHECK(vkMapMemory(device, allocation, 0, VK_WHOLE_SIZE, 0, (void **)&map));
+   memset(map, cts_max ? 0 : 0xee, words * 4);
+   VkMappedMemoryRange mapped_range = {.sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE,
+      .memory = allocation, .size = VK_WHOLE_SIZE};
+   if (cts_max) CHECK(vkFlushMappedMemoryRanges(device, 1, &mapped_range));
+   puts("bufferBeforePipeline=1");
    VkComputePipelineCreateInfo pi = {.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO,
       .flags = capture_stats ? VK_PIPELINE_CREATE_CAPTURE_STATISTICS_BIT_KHR : 0,
       .stage = {.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
@@ -203,33 +231,6 @@ int main(int argc, char **argv)
    if (!strcmp(argv[6], "compile") || !strcmp(argv[6], "compile-cts-max")) {
       puts("PASS: pipeline creation; no dispatch"); return 0;
    }
-   const size_t words = cts_max ? n : (size_t)n * 6 * 16;
-   VkBufferCreateInfo bi = {.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
-      .size = words * 4, .usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT};
-   VkBuffer buffer;
-   CHECK(vkCreateBuffer(device, &bi, NULL, &buffer));
-   VkMemoryRequirements req;
-   vkGetBufferMemoryRequirements(device, buffer, &req);
-   VkPhysicalDeviceMemoryProperties memory;
-   vkGetPhysicalDeviceMemoryProperties(physical, &memory);
-   unsigned type = 0;
-   VkMemoryPropertyFlags want = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
-   while (type < memory.memoryTypeCount && (!(req.memoryTypeBits & (1u << type)) ||
-          (memory.memoryTypes[type].propertyFlags & want) != want)) type++;
-   if (type == memory.memoryTypeCount) return 1;
-   printf("memoryType=%u properties=0x%x allocationBytes=%llu\n", type,
-          memory.memoryTypes[type].propertyFlags, (unsigned long long)req.size);
-   VkMemoryAllocateInfo mai = {.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
-      .allocationSize = req.size, .memoryTypeIndex = type};
-   VkDeviceMemory allocation;
-   CHECK(vkAllocateMemory(device, &mai, NULL, &allocation));
-   CHECK(vkBindBufferMemory(device, buffer, allocation, 0));
-   uint32_t *map;
-   CHECK(vkMapMemory(device, allocation, 0, VK_WHOLE_SIZE, 0, (void **)&map));
-   memset(map, cts_max ? 0 : 0xee, words * 4);
-   VkMappedMemoryRange mapped_range = {.sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE,
-      .memory = allocation, .size = VK_WHOLE_SIZE};
-   if (cts_max) CHECK(vkFlushMappedMemoryRanges(device, 1, &mapped_range));
    VkDescriptorPoolSize ps = {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1};
    VkDescriptorPoolCreateInfo dpi = {.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
       .maxSets = 1, .poolSizeCount = 1, .pPoolSizes = &ps};

@@ -114,7 +114,7 @@ diff --git a/src/performance_page/gpu.rs b/src/performance_page/gpu.rs
 index b91b8e5..9dc301d 100644
 --- a/src/performance_page/gpu.rs
 +++ b/src/performance_page/gpu.rs
-@@ -589,7 +589,7 @@ mod imp {
+@@ -589,7 +589,7 @@
                      vulkan_version.patch.unwrap_or(0)
                  )
              } else {
@@ -123,7 +123,7 @@ index b91b8e5..9dc301d 100644
              };
              this.infobar_content.vulkan_version().set_text(&vk_version);
  
-@@ -704,14 +704,10 @@ mod imp {
+@@ -704,14 +704,10 @@
          }
  
          fn update_utilization(&self, gpu: &Gpu) {
@@ -142,6 +142,19 @@ index b91b8e5..9dc301d 100644
  
              self.graph_utilization
                  .add_data_point(vec![vec![overall_usage]]);
+@@ -923,6 +919,12 @@
+         }
+ 
+         fn update_video_encode_decode(&self, gpu: &Gpu) {
++            // Upstream never clears this, so GPUs without encoder/decoder data
++            // showed both labels with no values.
++            self.infobar_content.set_encode_decode_available(
++                gpu.encoder_percent.is_some() || gpu.decoder_percent.is_some(),
++            );
++
+             if let Some(encoder_percent) = gpu.encoder_percent {
+                 self.middle_graph
+                     .add_single_data_point(GRAPH_ENCODE_DATASET, vec![encoder_percent]);
 diff --git a/src/performance_page/mod.rs b/src/performance_page/mod.rs
 index 52ad4fe..4f56fee 100644
 --- a/src/performance_page/mod.rs

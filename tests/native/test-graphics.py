@@ -59,6 +59,29 @@ class Graphics(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, 'mesa-vulkan-icd-panvk-kbase'):
             graphics.apply_renderer({}, 'zink')
 
+    def test_qualified_stack_defaults_nested_and_preserves_explicit_mode(self):
+        self.install_panvk()
+        with mock.patch.object(graphics, 'qualified_desktop_stack', return_value=True):
+            env = graphics.apply_renderer({}, 'zink')
+            self.assertEqual((env['PANVK_G77_LWG'], env['PANVK_G77_NESTED']), ('1', '1'))
+            env = graphics.apply_renderer({'PANVK_G77_LWG': '0'}, 'zink')
+            self.assertEqual((env['PANVK_G77_LWG'], env['PANVK_G77_NESTED']), ('0', '0'))
+
+    def test_old_or_unqualified_driver_does_not_enable_workgroups(self):
+        self.install_panvk()
+        with mock.patch.object(graphics, 'qualified_mali', return_value=True):
+            self.assertFalse(graphics.qualified_desktop_stack())
+            env = graphics.apply_renderer({}, 'zink')
+            self.assertNotIn('PANVK_G77_LWG', env)
+        manifest = self.prefix / 'share/doc/mesa-vulkan-icd-panvk-kbase/SOURCE.json'
+        manifest.parent.mkdir(parents=True)
+        manifest.write_text(json.dumps({'variant': 'combined-ahb',
+            'mesa_tree': 'b28956ffc095bda26bf8241badba014be178536b'}))
+        with mock.patch.object(graphics, 'qualified_mali', return_value=False):
+            self.assertFalse(graphics.qualified_desktop_stack())
+        with mock.patch.object(graphics, 'qualified_mali', return_value=True):
+            self.assertTrue(graphics.qualified_desktop_stack())
+
     def test_missing_or_outside_package_library_is_rejected(self):
         icd = self.install_panvk()
         for library in (icd.parent / 'missing.so', self.root / 'outside.so'):

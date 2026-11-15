@@ -1,5 +1,6 @@
 # Side-by-side SYNC_FD candidate; selected explicitly for qualification.
 source "$(dirname "$(realpath "${BASH_SOURCE[0]}")")/../mesa-vulkan-icd-panvk-kbase/build.sh"
+TERMUX_PKG_REVISION=0
 TERMUX_PKG_DESCRIPTION="Source-built PanVK with JM SYNC_FD, for explicit Bionic/glibc qualification"
 TERMUX_PKG_EXCLUDED_ARCHES="arm, i686, x86_64"
 _PANVK_INSTALL_NAME=panvk-kbase-sync-fd

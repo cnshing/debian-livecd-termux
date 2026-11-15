@@ -116,11 +116,14 @@ jobs:
     - name: Test desktop status without a running session
       run: python3 tests/native/test-desktop-status.py
     - name: Test native Turnip and PanVK desktop selection
-      run: python3 tests/native/test-graphics.py
+      run: |
+        python3 tests/native/test-graphics.py
+        python3 tests/native/test-panvk-device.py
     - name: Test Ghostty context compatibility
       run: python3 tests/native/test-terminal-environment.py
     - name: Test automatic Mali terminal setup and offline fallback
-      run: python3 tests/packaging/test-mali-terminal-install.py
+      run: |
+        python3 tests/packaging/test-mali-terminal-install.py
     - name: Test the camera supervisor and its desktop wiring
       run: python3 tests/camera/test-camera-controller.py
     - name: Test GNOME wallpaper registration
@@ -335,6 +338,10 @@ jobs:
     - name: Check the glibc Mali video driver and ABI
       if: steps.build.outcome == 'success' && contains(format(' {0} ', matrix.packages), ' android-vaapi-glibc ')
       run: python3 tests/packaging/check-glibc-video-artifact.py termux-packages/output
+
+    - name: Check default Mali PanVK ABIs and pinned provenance
+      if: steps.build.outcome == 'success' && contains(format(' {0} ', matrix.packages), ' mesa-vulkan-icd-panvk-kbase ')
+      run: python3 tests/packaging/check-panvk-artifact.py termux-packages/output mesa-vulkan-icd-panvk-kbase
 
     - name: Check source-built PanVK ABIs and pinned provenance
       if: steps.build.outcome == 'success' && contains(format(' {0} ', matrix.packages), ' mesa-vulkan-icd-panvk-kbase-source ')

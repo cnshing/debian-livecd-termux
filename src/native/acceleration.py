@@ -319,8 +319,12 @@ def command_line(profile, command, abi, video, gpu, mali=False):
                 '--hardware-video-device-path=' + video_device(),
                 '--enable-features=Vulkan,VulkanFromANGLE,DefaultANGLEVulkan,VaapiVideoDecoder,VaapiVideoDecodeLinux,PlatformHEVCDecoderSupport,AcceleratedVideoDecoder,AcceleratedVideoDecodeLinuxGL,VaapiIgnoreDriverChecks',
                 '--disable-features=VaapiVideoMinResolutionForPerformance']
-            # Exynos hardware encoding for WebRTC and WebCodecs, accepted on the S20 with revision 3.
-            if video_device() == '/dev/mali0' and profile == 'chromium' and abi == 'bionic' and chromium_encodes_webcodecs():
+            # Exynos hardware encoding, accepted on the S20: Chromium revision 3 for WebRTC and
+            # WebCodecs; Chrome for WebRTC. Chrome's WebCodecs hardware path crashes its GPU process
+            # (unpatchable GMB input); the user chose WebRTC hardware encoding over that.
+            if video_device() == '/dev/mali0' and (
+                    (profile == 'chromium' and abi == 'bionic' and chromium_encodes_webcodecs()) or
+                    (profile == 'chrome' and abi == 'glibc')):
                 flags = [flag + ',AcceleratedVideoEncoder' if flag.startswith('--enable-features=') else flag
                          for flag in flags]
         if abi == 'glibc':

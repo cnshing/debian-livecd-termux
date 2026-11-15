@@ -5,8 +5,11 @@ patched. Shared rules and pass criteria: [README.md](README.md).
 
 ## Status
 
-**Off by default.** WebRTC now works, in software and on the Exynos encoders. WebCodecs hardware
-encoding still crashes the GPU process, and that cannot be fixed outside Chrome.
+**On by default on Mali** since 2026-11-15, by the user's decision: the launcher adds
+`AcceleratedVideoEncoder` for Chrome when the video device is `/dev/mali0` (livecd-desktop
+0.2.0-20). WebRTC encodes on the Exynos encoders. WebCodecs hardware encoding still crashes the
+GPU process, and that cannot be fixed outside Chrome (see "Consequence" below). Adreno stays off:
+never tested.
 
 Tested on the S20 (`x1s`), Chrome 157.0.8103.78, Bionilux 0.5.0-2 preload (CI 43665869060),
 private display and private `termux-va`, 640x360 loopback:
@@ -47,12 +50,13 @@ the VA driver to import them. Neither exists for Termux, so this is not a bridge
 **Consequence:** enabling `AcceleratedVideoEncoder` for Chrome gives WebRTC hardware encoding but
 makes any page that uses WebCodecs with hardware allowed (the default `no-preference` included)
 crash the GPU process; after repeated crashes Chrome disables GPU acceleration for the session.
-**Whether that trade is worth it is the user's decision.** Until then the flag stays off for Chrome.
+The user chose WebRTC hardware encoding over this on 2026-11-15. To turn it off, remove
+`AcceleratedVideoEncoder` from Chrome's branch in `command_line()`.
 
 ## Next steps
 
 1. Install Bionilux 0.5.0-2 on the phone and rerun the WebRTC loopback without `BIONILUX_PRELOAD`.
-2. User decision on `AcceleratedVideoEncoder` for Chrome (see above).
+2. Done: `AcceleratedVideoEncoder` is on for Chrome on Mali (user decision, 2026-11-15).
 3. Adreno, MediaRecorder, HEVC: not run.
 
 ## Where things are

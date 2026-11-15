@@ -170,7 +170,8 @@ class PanVKBrowsers(unittest.TestCase):
         # Without it Exynos holds HEVC pictures back and the wait above fails each one.
         self.assertEqual(env['TERMUX_VA_HEVC_REORDER_PICS'], '0')
         self.assertEqual(env['TERMUX_VA_H264_REORDER_FRAMES'], '0')
-        self.assertFalse(any('AcceleratedVideoEncoder' in arg for arg in argv))
+        # WebRTC hardware encoding on Exynos, by the user's choice despite the WebCodecs crash.
+        self.assertTrue(any('AcceleratedVideoEncoder' in arg for arg in argv))
         self.assertNotIn('--video-capture-use-gpu-memory-buffer', argv)
 
     def chromium_encode_argv(self, version):
@@ -202,6 +203,14 @@ class PanVKBrowsers(unittest.TestCase):
         # Qualcomm's decoder stops returning frames at a count of 0; it keeps the bridge's default.
         self.assertNotIn('TERMUX_VA_HEVC_REORDER_PICS', env)
         self.assertNotIn('TERMUX_VA_H264_REORDER_FRAMES', env)
+
+    def test_chrome_encodes_in_hardware_only_on_mali(self):
+        flags = acceleration.command_line('chrome', ['/chrome'], 'glibc', video=True, gpu=True)
+        self.assertTrue(any('AcceleratedVideoEncoder' in arg for arg in flags))
+        with mock.patch.object(acceleration, 'video_device', return_value='/dev/kgsl-3d0'):
+            flags = acceleration.command_line('chrome', ['/chrome'], 'glibc', video=True, gpu=True)
+        # Never tried on Adreno.
+        self.assertFalse(any('AcceleratedVideoEncoder' in arg for arg in flags))
 
     def test_completion_can_be_disabled_for_a_control_run(self):
         selected = (self.tmp / 'va', {'libraries': [], 'preloads': [], 'driver_directory': 'dri'})

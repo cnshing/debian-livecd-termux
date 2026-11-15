@@ -5,11 +5,13 @@ For whoever raises the versions the Mali stack reports. Paths under `temp/` are 
 that Git ignores.
 
 Latest checkpoint: the nested candidate passes 195 selected GLES compute cases,
-20 private GNOME/Ghostty cycles and a continuous 30-minute soak. Two isolated
-fixes are now on main: process-wide memory-budget accounting and correct ION
-CPU cache mode. The latter clears the earlier empty-dispatch and maximum-local-
-size failures, exposing a feature-dependent SSBO reduction failure next. The
-installed driver and reported default versions remain unchanged.
+20 private GNOME/Ghostty cycles and a continuous 30-minute soak. Three fixes
+are now available on main: process-wide memory-budget accounting, correct ION
+CPU cache mode and GPU-local coherence for imports on non-I/O-coherent GPUs.
+The final import-coherence candidate completes all selected Vulkan basic
+compute cases with 73 passes and eight unsupported cases, without diagnostic
+overrides. These are separate qualified components; combine and requalify the
+required patches before changing installed drivers or default versions.
 
 ## Progress on the source-package prerequisite
 
@@ -294,12 +296,34 @@ unconditionally requested system coherence even on this non-I/O-coherent GPU.
 The research `import-coherence` variant combines the ION CPU cache-mode patch
 with selecting local/system coherence according to `is_io_coherent`. Build
 [43663975090](https://github.com/cnshing/debian-livecd-termux/actions/runs/43663975090)
-is pending device verification. With the recorded override, the full selected
-basic-compute run completes with **73 passes and eight unsupported cases**,
-all requested ICD mappings checked. Those results remain diagnostic-only until
-the code-built driver repeats them without overrides. Evidence:
+now builds both ABIs. With the recorded override, the full selected
+basic-compute run first completed with **73 passes and eight unsupported cases**.
+The code-built Android candidate then repeats that complete result with no
+trace loader, feature filter or import override. Every case maps the exact
+requested ICD, and the report is not marked diagnostic-only. Evidence:
 `vk-ssbo-ion-multiple-trace-01/`, `vk-ssbo-ion-local-import-01/` and
 `vk-basic-local-import-01/`.
+
+The final `import-coherence` artifact has reconstructed Mesa content tree
+`db01c10f176b6b91e929175de79fe2a564b4c3a9` and these patched ICD identities:
+
+- Android: `0f793fe3dc3fe8d91447401c5c3ed8b11ca6da7f87ad55511f1f0df373246b7c`
+- glibc: `bd62a983339cad63a4c278dbc88d53a3a40baf144f0594fe0c7fed6fb9a8ec21`
+
+It also passes **20 private GNOME/GTK cycles**, 40 exact captures, stale-frame
+rejection and session isolation. Nautilus folder contents and Settings were
+visually checked. The same default candidate also passes **195/195 selected
+GLES compute cases**, with no skips or warnings and the intended ICD mapped
+in every case. Evidence: `vk-basic-coherence-fix-01/`,
+`gles-compute-coherence-01/` and `coherence/desktop-gtk-20-01/` under the
+qualification evidence directory.
+The GPU-local patch and `import-coherence` variant are on main under
+`coherence-patches/`; this variant includes the ION cache-mode fix but does not
+include budget, point-size or workgroup patches. No default package pins were
+changed. The glibc binary is build-verified; this Vulkan CTS run is Bionic.
+
+The preceding ION-only artifact, which still has the SSBO failure, is retained
+for comparison:
 
 - Android SHA-256: `e6d981b8e4bc8d56077fc90b22a782adb0b0db2c1c766007218a23a7b091b020`
 - glibc SHA-256: `3a727046e1cfe1ed484b1c1910a0a6167a304b1bdb02b2db8be8e40e59132a9f`
@@ -523,8 +547,9 @@ The pass is a working subset behind an environment variable. To ship it:
 3. **Extend the conformance subset**: the 195 GLES compute cases pass on the
    release, `0001`–`0006` and final nested drivers. The budget fix clears its
    isolated information subset, and the ION fix clears the old compute
-   failures. Resolve the remaining SSBO reduction failure, combine the required
-   fixes with the workgroup series, and qualify that exact combined binary.
+   failures, and the import-coherence variant clears the SSBO reduction failure
+   and completes the selected basic-compute subset. Combine the required fixes
+   with the workgroup series and qualify that exact combined binary.
    Broader CTS and the Android loader information-test failure remain open.
 4. **Cache identity is now covered.** `0006` hashes the architecture-9 opt-in into the
    physical device cache digest, uses that digest for both the pipeline UUID and the disk

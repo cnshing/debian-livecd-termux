@@ -53,10 +53,12 @@ no RUNPATH. A candidate that writes into the release stack is
 rejected.
 
 Other main driver build variants are `point-size`, `x11`, `workgroups`,
-`memory-budget`, `ion-cache` and `research`. The `memory-budget` variant applies only the
+`memory-budget`, `ion-cache`, `import-coherence` and `research`. The `memory-budget` variant applies only the
 process-wide heap-accounting patch; its Android CTS results are in the version
 bump handoff. The `ion-cache` variant applies only the ION CPU-cache-mode
-fix; it is separate from the budget and workgroup candidates.
+fix. `import-coherence` combines that fix with the GPU-local/system-coherence
+selection for imports. These remain separate from the budget and workgroup
+candidates.
 The first two apply just their named patch to the baseline. `workgroups` applies
 only the experimental workgroup series. `research` retains the previous combined
 X11/point-size series for reproducing its GTK failure. Each variant also retains

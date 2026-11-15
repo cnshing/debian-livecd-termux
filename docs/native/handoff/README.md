@@ -21,14 +21,14 @@ Two phones were used:
 
 | Feature | Adreno | Mali (S20) | On by default? | Page |
 | --- | --- | --- | --- | --- |
-| Chromium decode | VP9 hardware passes; HEVC not accepted on the source build | VP9, HEVC hardware pass | yes; H.264 and AV1 software | [decode-chromium.md](decode-chromium.md) |
+| Chromium decode | VP9 hardware passes; HEVC not accepted on the source build | VP9, HEVC hardware pass (revision 3 with the dma-heap bridge, 2026-11-15) | yes; H.264 and AV1 software | [decode-chromium.md](decode-chromium.md) |
 | Chrome decode | VP9, HEVC pass | HEVC passes; VP9 decodes in hardware but misses one SSIM check | yes; H.264 and AV1 software | [decode-chrome.md](decode-chrome.md) |
 | Firefox decode | VP9, HEVC pass | VP9, HEVC pass, on a Zink desktop only | yes; H.264 and AV1 software | [decode-firefox.md](decode-firefox.md) |
 | H.264 decode, every VA-API client | off | off | no: a bridge bug can hang the player | [decode-h264.md](decode-h264.md) |
 | Frame sync: stale frames, flicker, tearing | one stale frame in 13 runs under load | not seen | n/a | [decode-frame-sync.md](decode-frame-sync.md) |
 | Native decode: mpv, FFmpeg, GStreamer | mpv passes VP9, H.264, HEVC | mpv passes on its GLES route | mpv yes; VA-API clients see decoders | [decode-native.md](decode-native.md) |
 | Native encode: FFmpeg, GStreamer, Serein | passes | passes in private tests; not on a fresh install | yes where `android-vaapi` is installed | [encode-native.md](encode-native.md) |
-| Chromium encode | not run | WebRTC and WebCodecs (H.264, VP9) pass on hardware with revision 3 | yes, revision 3+ on Mali | [encode-chromium.md](encode-chromium.md) |
+| Chromium encode | not run | WebRTC and WebCodecs (H.264, VP9) pass on hardware with revision 3; rerun from CI 43676101303 on 2026-11-15 | yes, revision 3+ on Mali | [encode-chromium.md](encode-chromium.md) |
 | Chrome encode | not run | WebRTC H.264/VP9 passes on Exynos (Bionilux 0.5.0-2 netlink fix); WebCodecs crash cannot be patched | no, user decision | [encode-chrome.md](encode-chrome.md) |
 | Firefox encode | not run | both Firefox bugs patched on fix/encode-firefox (own Firefox build); opt-in `firefox_encode` | no (user's call) | [encode-firefox.md](encode-firefox.md) |
 | `/dev/dma_heap` emulated on `/dev/ion` for kernels without DMA-BUF heaps (the S20's 4.19) | needed too (ION, no heap) | done: the preload provides the heap; bridges use only the heap; verified installed | yes, on phones with ION and no heap | [dmabuf-s20.md](dmabuf-s20.md) |

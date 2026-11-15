@@ -519,9 +519,9 @@ return {left:r.left+(r.width-w)/2,top:r.top+(r.height-h)/2,width:w,height:h,dpr:
                 browser.sock = page_socket
             gpu = result['gpu_after_playback']['gpu']
             renderer = gpu.get('auxAttributes', {}).get('glRenderer', '')
-            if (not any(name in renderer.lower() for name in ('turnip', 'freedreno')) or
+            if (not any(name in renderer.lower() for name in ('turnip', 'freedreno', 'panvk', 'mali')) or
                     gpu.get('featureStatus', {}).get('gpu_compositing') != 'enabled'):
-                raise RuntimeError('Adreno GPU compositing was not enabled: ' + renderer)
+                raise RuntimeError('GPU compositing on Adreno or Mali was not enabled: ' + renderer)
             # The browser's own report can outlive a GPU process that fell back. Require
             # a process that actually holds the GPU device with the driver mapped.
             result['gpu_processes'] = []
@@ -530,11 +530,11 @@ return {left:r.left+(r.width-w)/2,top:r.top+(r.height-h)/2,width:w,height:h,dpr:
                 try:
                     # Chrome's mappings can have names that are not valid UTF-8.
                     drivers = {line.split()[-1] for line in (proc / 'maps').read_text(errors='replace').splitlines()
-                               if 'libvulkan_freedreno.so' in line or 'libgallium' in line}
+                               if any(name in line for name in ('libvulkan_freedreno.so', 'libvulkan_panfrost.so', 'libgallium'))}
                     devices = []
                     for path in (proc / 'fd').iterdir():
                         try:
-                            if os.readlink(path) == '/dev/kgsl-3d0':
+                            if os.readlink(path) in ('/dev/kgsl-3d0', '/dev/mali0'):
                                 devices.append(int(path.name))
                         except OSError:
                             pass
@@ -544,7 +544,7 @@ return {left:r.left+(r.width-w)/2,top:r.top+(r.height-h)/2,width:w,height:h,dpr:
                     result['gpu_processes'].append({'pid': pid, 'drivers': sorted(drivers), 'kgsl_fds': devices,
                         'command': (proc / 'cmdline').read_bytes().replace(b'\0', b' ').decode(errors='replace')[:200]})
             if not result['gpu_processes']:
-                raise RuntimeError('No browser process holds /dev/kgsl-3d0 with a GPU driver mapped')
+                raise RuntimeError('No browser process holds /dev/kgsl-3d0 or /dev/mali0 with a GPU driver mapped')
             result['gpu_verified'] = True
         if args.require_hardware_decode:
             decoders = {item['value'] for event in result['media_events'] if event.get('method') == 'Media.playerPropertiesChanged'
@@ -635,7 +635,7 @@ def main():
     parser.add_argument('--browser-command', type=lambda p: Path(p).resolve(),
                         help='Use an alternate browser launcher, preserving the isolated test profile')
     parser.add_argument('--require-gpu', action='store_true',
-                        help='Fail unless final browser status reports enabled Adreno GPU compositing')
+                        help='Fail unless final browser status reports enabled Adreno or Mali GPU compositing')
     parser.add_argument('--check-colors', action='store_true',
                         help='Fail unless a color bar clip is composited with the right colors')
     parser.add_argument('--require-hardware-decode', action='store_true',

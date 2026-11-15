@@ -33,6 +33,21 @@ Never add `--video-capture-use-gpu-memory-buffer`. WebCodecs needs `bitrateMode:
 CI: the Chromium dependency set is now looked up by the pinned builder commit when no set matches the
 recipe hash, so a source patch no longer needs the three-hour dependency bootstrap.
 
+### Rerun on 2026-11-15: revision 3 from CI 43676101303, with the dma-heap bridge
+
+Chromium staged privately (not installed) and started through the installed launcher
+(`android-vaapi` 11, `libandroid-dma-heap.so` preloaded), private display and daemon:
+
+- WebCodecs H.264: 60 in, 60 out on `OMX.Exynos.AVC.Encoder`, max colour error 12, 0 frames
+  over 16. Frames 0, 29 and 59 viewed after decoding the stream: labels, box and colours right.
+- WebCodecs VP9: 60 in, 60 out on `OMX.Exynos.VP9.Encoder`, max error 12, 0 over 16 (checked
+  in-page; the raw VP9 chunks have no container, so not viewed).
+- WebRTC H.264 and VP9 loopback: 286 and 284 frames, received at 640x360, received pictures
+  viewed and correct.
+- Encoding does not depend on the dma-heap library: with `LIVECD_DMA_HEAP_ION=0` WebCodecs H.264
+  still passes (60 of 60, max error 12), because Chromium copies each frame into the surface
+  (patch 0101). Decoding does depend on it ([decode-chromium.md](decode-chromium.md)).
+
 ## Still open
 
 - Note10+ (and any Adreno phone) has never run a browser encode test.

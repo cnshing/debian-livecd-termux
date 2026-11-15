@@ -19,7 +19,7 @@
 | 1. Probe | ION heap list recorded; system heap ID 0. Raw ION at 4 KiB, 1 MiB and 64 MiB, cached and uncached, with `mmap` and a sync round trip: pass |
 | 2. Preload with host tests | `tests/dma-heap/test-dma-heap.sh`, 9 cases against a fake ION device: pass |
 | 3. Standalone | heap-API client with a second process over `SCM_RIGHTS`: pass. Vulkan dma-buf import on PanVK, both heaps: pass. Fails without the preload, as it must |
-| 4. Bridge and browsers | FFmpeg VP9/HEVC 48 of 48 frames bit-exact. Firefox VP9/HEVC in hardware. Chrome WebRTC encode and VP9/HEVC playback through the glibc preload. With `LIVECD_DMA_HEAP_ION=0`, the bridge falls back to software, as it must |
+| 4. Bridge and browsers | FFmpeg VP9/HEVC 48 of 48 frames bit-exact. Firefox VP9/HEVC in hardware. Chrome WebRTC encode and VP9/HEVC playback through the glibc preload. Chromium revision 3 VP9/HEVC playback and WebCodecs/WebRTC encode through the Bionic preload. With `LIVECD_DMA_HEAP_ION=0`, the bridge falls back to software (Firefox, FFmpeg) and Chromium falls back to `VpxVideoDecoder`, as they must |
 | 5. Installed run | `android-vaapi` 11 and `android-vaapi-glibc` 3 installed on the S20: desktop check 30 of 30, Chrome and Firefox VP9/HEVC pass |
 
 PanVK needed no change: Zenith's JM patch 005 already falls back to ION itself.
@@ -31,7 +31,6 @@ PanVK needed no change: Zenith's JM patch 005 already falls back to ION itself.
   first, and nothing needs it today.
 - **Note10+ regression run.** It is ION-only too, so its bridge now depends on the preload. It
   has not been run there.
-- **Chromium** on the S20 waits for the revision 3 CI build.
 - `opendir("/dev/dma_heap")` listing is not emulated. Nothing found so far needs it.
 
 The follow-ups that build on the heap are listed below under "Built on top of this".

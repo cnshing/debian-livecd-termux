@@ -10,8 +10,8 @@ State on 2026-11-14. Chromium here is this project's source build (`packages/chr
 
 | Codec | Adreno (Note10+) | Mali (S20) |
 | --- | --- | --- |
-| VP9 | passes: `VaapiVideoDecoder`, browser and compositor pixels, fullscreen cycles, fresh install 2026-11-10 | passes: 200 frames out of the hardware decoder, 4 of 4 frame comparisons, through the installed launcher 2026-11-13 |
-| HEVC | not accepted on the source build (see below) | passes: 198 frames out of `OMX.Exynos.hevc.dec`, 4 of 4 |
+| VP9 | passes: `VaapiVideoDecoder`, browser and compositor pixels, fullscreen cycles, fresh install 2026-11-10 | passes: 200 frames out of the hardware decoder, 4 of 4 frame comparisons, through the installed launcher 2026-11-13. Again on 2026-11-15 with revision 3 and the dma-heap bridge (SSIM 0.909, 0 dropped frames, frames viewed; `--require-gpu` finds the GPU process holding `/dev/mali0` with PanVK mapped) |
+| HEVC | not accepted on the source build (see below) | passes: 198 frames out of `OMX.Exynos.hevc.dec`, 4 of 4. Again on 2026-11-15 with revision 3 and the dma-heap bridge (SSIM 0.911, frames viewed) |
 | H.264 | software, by default | software, by default ([decode-h264.md](decode-h264.md)) |
 | AV1 | software; no hardware decoder | software; never tried |
 
@@ -21,7 +21,7 @@ State on 2026-11-14. Chromium here is this project's source build (`packages/chr
 | --- | --- |
 | `android-vaapi` ≥ 2 | Private `libva.so.2` / `libva-drm.so.2` aliases. Chromium dlopens those names; Termux's libva has unversioned files |
 | Bounded wait at `vaEndPicture` (`TERMUX_VA_SYNC_END_PICTURE=1`, set by the launcher for Chromium) | Without it the compositor shows an older frame than the browser captured. `LIVECD_VA_DISABLE_COMPLETION=1` is the negative control |
-| `android-vaapi` ≥ 3 on Mali | ION dma-buf surfaces, so ANGLE can import decoded frames |
+| `android-vaapi` ≥ 11 on Mali: `libandroid-dma-heap.so`, loaded by the launcher | DMA-BUF surfaces, so ANGLE can import decoded frames. With `LIVECD_DMA_HEAP_ION=0` Chromium falls back to `VpxVideoDecoder` (checked 2026-11-15), so the library is required on ION-only phones |
 | `TERMUX_VA_HEVC_REORDER_PICS=0` on Mali (launcher) | Exynos's HEVC decoder holds back as many pictures as the bridge declares (3). Chromium's per-picture wait then fails and it falls back to software. At 0 the decoder returns each picture at once |
 | ANGLE on Vulkan: PanVK on Mali, Turnip on Adreno | GPU compositing |
 

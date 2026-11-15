@@ -13,6 +13,36 @@ compute cases with 73 passes and eight unsupported cases, without diagnostic
 overrides. These are separate qualified components; combine and requalify the
 required patches before changing installed drivers or default versions.
 
+## Combined qualification in progress, 2026-11-14
+
+The `combined` driver variant now selects eleven patches: workgroups `0001`–
+`0007`, point-size, process-wide budget, ION CPU cache mode and import coherence.
+It excludes the X11 soname and diagnostic NO_MERGE patches. Both workgroup modes
+remain opt-in. All eleven apply to the pinned baseline in an isolated index;
+the resulting content tree is `a4db9b7adcb014dfe30ca0bfcb72e2a77913a7b2`.
+The cache patch's include context was adjusted to compose with the budget patch.
+The first combined build failed at that include context before producing a
+candidate; [corrected build 43666745173](https://github.com/cnshing/debian-livecd-termux/actions/runs/43666745173)
+is pending qualification. Driver and probe compilation remains CI-only.
+
+Additional controls use the previously qualified import-coherence binary
+`0f793fe3dc3fe8d91447401c5c3ed8b11ca6da7f87ad55511f1f0df373246b7c`:
+
+- Vulkan built-in variables, indirect dispatch and 64-bit indexing: **35 Pass,
+  17 NotSupported**, all 52 selected cases complete.
+- Vulkan zero-initialized workgroup memory: **617 Pass, 29 NotSupported**, all
+  646 cases complete. Run 01 reached its time bound after 621 accepted cases;
+  run 02 resumed with the same identity and retained each original log path.
+- The existing installed Zink desktop passes **30/30** before any switch.
+
+Neither CTS control uses diagnostic feature filtering, import flags or a trace
+loader. Every case maps the intended ICD. Local evidence is under
+`temp/panvk-qualification/evidence/combined/control-{extended-01,zero-init-01,zero-init-02}/`;
+the installed control is `installed-baseline.json`. The exact combined binary
+still needs its own oracle, CTS, private integrated and installed-session checks.
+The controlled installed test will restore the original controller and release
+session afterward; it does not promote package pins or default feature flags.
+
 ## Progress on the source-package prerequisite
 
 A side-by-side `mesa-vulkan-icd-panvk-kbase-source` recipe now packages the

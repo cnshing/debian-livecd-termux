@@ -21,6 +21,8 @@ args = dict(arg[2:].split('=', 1) for arg in sys.argv[1:])
 assert os.environ.get('PANVK_G77_NO_MERGE') == os.environ.get('FAKE_EXPECT_NO_MERGE', '0')
 assert os.environ.get('PANVK_DEBUG', '') == os.environ.get('FAKE_EXPECT_DEBUG', '')
 assert os.environ.get('PANVK_TRACE_CORE_FEATURES_ONLY', '') == os.environ.get('FAKE_EXPECT_CORE_ONLY', '')
+assert os.environ.get('PANVK_KBASE_IMPORT_CLEAR', '') == os.environ.get('FAKE_EXPECT_IMPORT_CLEAR', '')
+assert os.environ.get('PANVK_KBASE_IMPORT_SET', '') == os.environ.get('FAKE_EXPECT_IMPORT_SET', '')
 if os.environ.get('FAKE_EXPECT_TRACE'):
     assert args['deqp-vk-library-path'].endswith('/trace.so')
     assert os.environ['PANVK_TRACE_LOADER'].endswith('/lib/libvulkan.so')
@@ -140,6 +142,21 @@ class Results(unittest.TestCase):
             self.assertEqual(code, 0)
             self.assertTrue(report['identity']['core_features_only'])
             self.assertTrue(report['diagnostic_only'])
+
+    def test_import_coherence_is_explicit(self):
+        with tempfile.TemporaryDirectory() as directory:
+            code, report = self.invoke(Path(directory), 'local-import', ['--local-coherent-imports'],
+                                       env={'FAKE_EXPECT_IMPORT_CLEAR': '0x400', 'FAKE_EXPECT_IMPORT_SET': '0x800'})
+            self.assertEqual(code, 0)
+            self.assertTrue(report['identity']['local_coherent_imports'])
+            self.assertTrue(report['diagnostic_only'])
+
+    def test_inherited_import_flags_are_cleared(self):
+        with tempfile.TemporaryDirectory() as directory:
+            code, report = self.invoke(Path(directory), 'clean-import',
+                                       env={'PANVK_KBASE_IMPORT_CLEAR': '0x400', 'PANVK_KBASE_IMPORT_SET': '0x800'})
+            self.assertEqual(code, 0)
+            self.assertFalse(report['identity']['local_coherent_imports'])
 
 
 if __name__ == '__main__':

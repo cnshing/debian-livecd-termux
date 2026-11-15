@@ -13,6 +13,43 @@ normal exit and isolation. It uses Mesa 106 and the private X11 EGL GTK 4.24.1
 revision 102 below. This does not promote the experimental workgroup driver
 or qualify general GL 4.6 conformance.
 
+**Installer default follow-up (2026-11-14):** `install.sh` now installs this
+stack automatically when its existing guard detects x1s/aarch64/Linux 4.19.87
+and kbase JM 11.35. `/dev/mali0` alone does not qualify other Mali GPUs.
+`livecd-desktop` 0.2.0-18 routes both desktop terminal requests and the Terminal
+overlay through the installed stack after a successful device/payload check.
+`LIVECD_GHOSTTY_DMABUF=0`, unsupported devices or failed checks retain the
+existing terminal path. The saved compositor renderer and browser ICD selection
+are unchanged; this promotes only the tested Ghostty path.
+
+The normal package recipe is `packages/ghostty-panvk-dmabuf`. Older online
+repository tarballs use the hash-pinned stack/controller assets from the
+[prerequisite release](https://github.com/cnshing/debian-livecd-termux/releases/tag/ghostty-panvk-dmabuf-1.0-2).
+Offline setup requires a tarball containing both packages and never fetches a
+fallback. [Controller CI 43597771119](https://github.com/cnshing/debian-livecd-termux/actions/runs/43597771119)
+passed. Its package was extracted privately on x1s: the real package guard and
+automatic command selection pass, including the explicit disable control.
+Installer transaction tests cover compatible/incompatible devices, repository
+and fallback installs, offline rejection and corrupt downloads. The earlier
+private-only/default-unchanged notes below describe the original qualification.
+
+[Publication CI 43598046878](https://github.com/cnshing/debian-livecd-termux/actions/runs/43598046878)
+passed and published the exact original stack, complete sources and controller
+as a prerelease, preserving the latest full-repository release. The controller
+SHA-256 is `11a7404f6e759fb0779d78166f5b0a692dac3b92451f8666e6868cb758b52a8e`.
+The public recipe's source preparation also passes its download/checksum/license
+check. The controller's real guard was checked on x1s with the normal software
+desktop library/preload environment, without starting a GPU workload or
+interrupting the other phone tests.
+
+[Repository-package CI 43598321204](https://github.com/cnshing/debian-livecd-termux/actions/runs/43598321204)
+passed the normal Termux recipe build and APT repository assembly. The retrieved
+`debs-ghostty-panvk-dmabuf-e69015d6c663e8b4` artifact also passes the package
+boundary, link, manifest and original-runtime-byte audit. Its rebuilt `.deb`
+SHA-256 is `c1e7e6cecafd031779833acde185bdcb151f955af5d246edd45c00fe5bc9632a`;
+package metadata/license assembly differs from the original prerequisite asset,
+while the qualified libraries and launcher remain byte-identical.
+
 The normal package still uses the upstream release. The independent port is
 `tools/panvk-probes/sync-fd-patches/0001-jm-sync-file.patch`, built for Bionic
 and arm64 glibc by `panvk-sync-fd.yml` directly on the reconstructed p0175

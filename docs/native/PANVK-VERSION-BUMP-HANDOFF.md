@@ -134,6 +134,13 @@ prototype. Retrieved evidence is in the original checkout's
 `temp/panvk-qualification/evidence/gles-{basic,shared-indirect}-{release,lwg}-01/`
 and `gles-info-fixed-01/`.
 
+The final nested binary `2b57c92c…`, with both workgroup and nested opt-ins
+enabled, now also passes those **195/195 GLES compute cases**, with no skips or
+warnings. Every case's recorded maps include that exact staged ICD. Evidence:
+`temp/panvk-qualification/evidence/gles-compute-nested-01/`. This adds the final
+nested candidate to the earlier release and `0001`–`0006` controls; it does not
+clear the Vulkan failures below.
+
 The packaged release's Vulkan `api.info.*` run stopped after two passes and one
 failure: `dEQP-VK.api.info.android.no_unknown_extensions` reports
 `Unknown extension: VK_ANDROID_native_buffer`. The Android-specific test expects
@@ -188,8 +195,10 @@ encoding and `memcpy` alone do not explain the failure. This separately built
 baseline has its own identity; it is not the earlier `db0bf89a…` control.
 Evidence: `reduced-cts-legacy-01/`, `vk-max-local-source-trace-01/` and
 `vk-max-local-lavapipe-trace-01/` under the qualification evidence directory.
-The next reduced fixture moves buffer allocation before pipeline creation,
-matching CTS; its device result is still pending.
+Moving buffer allocation before pipeline creation, matching CTS, also passes
+with the exact captured shader and copied readback. Evidence:
+`reduced-cts-buffer-first-01/`. Device extension/features outside Vulkan 1.1–1.3
+core and multi-instance setup remain differences to investigate.
 
 A separate release `dEQP-VK.info.*` run stopped after nine passes, one unsupported
 case and `device_memory_budget_multi_instance` failing. Its QPA reports that

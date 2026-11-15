@@ -3,6 +3,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <inttypes.h>
+#include <linux/dma-buf.h>
 #include <linux/memfd.h>
 #include <sched.h>
 #include <signal.h>
@@ -91,6 +92,9 @@ static void child(int ion, uint32_t heap, size_t size, uint32_t flags,
    if (mapped != placed)
       fail();
    stage = 3;
+   struct dma_buf_sync sync = {.flags = DMA_BUF_SYNC_START | DMA_BUF_SYNC_RW};
+   if (ioctl((int)allocation.fd, DMA_BUF_IOCTL_SYNC, &sync))
+      fail();
    for (size_t i = 0; i < file_size; i++)
       ((volatile unsigned char *)reservation)[i] = 0x6b;
    stage = 4;
@@ -110,6 +114,10 @@ static void child(int ion, uint32_t heap, size_t size, uint32_t flags,
          fail();
       }
    }
+   stage = 6;
+   sync.flags = DMA_BUF_SYNC_END | DMA_BUF_SYNC_RW;
+   if (ioctl((int)allocation.fd, DMA_BUF_IOCTL_SYNC, &sync))
+      fail();
    struct observation result = {stage, 0, 0, 0, 0};
    ssize_t written = write(result_fd, &result, sizeof(result));
    _exit(written == (ssize_t)sizeof(result) ? 0 : 1);

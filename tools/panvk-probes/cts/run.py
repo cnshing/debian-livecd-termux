@@ -58,7 +58,9 @@ def main():
     parser.add_argument('--suite', choices=('vk', 'gles31'), required=True)
     parser.add_argument('--cts', type=Path, required=True, help='Extracted CTS out directory')
     parser.add_argument('--driver', type=Path, required=True)
-    parser.add_argument('--pattern', action='append', required=True)
+    selection = parser.add_mutually_exclusive_group(required=True)
+    selection.add_argument('--pattern', action='append', help='List and run matching CTS cases')
+    selection.add_argument('--case', action='append', help='Run an exact case without listing the suite')
     parser.add_argument('--out', type=Path, required=True)
     parser.add_argument('--large-workgroups', action='store_true')
     parser.add_argument('--nested', action='store_true')
@@ -85,15 +87,23 @@ def main():
         parser.error('--core-features-only requires --trace-loader')
     if min(args.case_timeout, args.max_seconds) < 1 or args.max_cases < 0:
         parser.error('Invalid run bounds')
+    if args.case:
+        suite_prefix = 'dEQP-VK.' if args.suite == 'vk' else 'dEQP-GLES31.'
+        for case in args.case:
+            if not re.fullmatch(re.escape(suite_prefix) + r'[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*', case):
+                parser.error('--case requires an exact name from the selected suite, without wildcards')
+        args.case = list(dict.fromkeys(args.case))
     prefix = Path(os.environ['PREFIX'])
     cts, driver = args.cts.resolve(strict=True), args.driver.resolve(strict=True)
     executable = cts / ('deqp-vk' if args.suite == 'vk' else 'deqp-gles31')
     identity = {'suite': args.suite, 'cts_sha256': digest(executable),
-                'driver_sha256': digest(driver), 'patterns': args.pattern,
+                'driver_sha256': digest(driver), 'patterns': args.pattern or [],
                 'large_workgroups': args.large_workgroups, 'nested': args.nested,
                 'unmerged_compute': args.unmerged_compute,
                 'uncached_host_memory': args.uncached_host_memory,
                 'local_coherent_imports': args.local_coherent_imports}
+    if args.case:
+        identity['cases'] = args.case
     if args.trace_loader:
         args.trace_loader = args.trace_loader.resolve(strict=True)
         identity['trace_loader_sha256'] = digest(args.trace_loader)
@@ -142,8 +152,8 @@ def run(args, prefix, cts, driver, executable, identity):
             if args.core_features_only:
                 env['PANVK_TRACE_CORE_FEATURES_ONLY'] = '1'
         command.append('--deqp-vk-library-path=' + str(args.trace_loader or loader))
-    selected = []
-    for index, pattern in enumerate(args.pattern):
+    selected = list(args.case or [])
+    for index, pattern in enumerate(args.pattern or []):
         listing = args.out / f'cases-{index}.txt'
         completed = subprocess.run([*command, '--deqp-case=' + pattern,
             '--deqp-runmode=txt-caselist', '--deqp-caselist-export-file=' + str(listing)],

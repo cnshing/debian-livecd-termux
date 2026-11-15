@@ -17,6 +17,28 @@ both old and corrected candidates give nine buffer/control passes and then
 not established; API defaults and package pins remain unchanged. No further
 soak minutes are requested or run; the earlier soak was interrupted by reboot.
 
+## Focused iteration policy
+
+Per the user's 2026-11-14 request, do not rerun the broad CTS selections for
+every proposed fix. During AHB development, run the exact failing image case
+and one relevant buffer control. Once those pass, expand to the affected AHB
+group. Run broader compute/desktop regressions once for the stable candidate,
+or when a change affects those paths. No soak is requested.
+
+The runner accepts repeated `--case <exact-name>` instead of `--pattern` and
+skips CTS case enumeration. It retains driver/CTS hashes, mapped-library
+evidence, bounds, stop-on-failure behavior and strict QPA case matching.
+Unknown/empty results cannot count as a pass. Fifteen host tests pass.
+`panvk-driver.yml` now accepts `abi=android|glibc|both`, defaulting to both;
+Android-only AHB diagnostics build only Bionic.
+
+The `combined-ahb-trace` variant adds stage logging to the corrected candidate,
+without changing allocation behavior or extensions. Its fourteen-patch tree is
+`2c8edc10363dfe002f832b478200ee51962e0065`. It logs AHB description, dma-buf
+selection, mapper/layout, image requirements and underlying import results.
+Use it for diagnosis only; do not rerun broad qualification on this logging
+variant or count its results as the stable candidate's qualification.
+
 ## Combined candidate qualification, 2026-11-14
 
 The `combined` driver variant now selects eleven patches: workgroups `0001`–

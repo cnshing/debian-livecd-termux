@@ -31,10 +31,13 @@ else:
     assert 'PANVK_TRACE_LOADER' not in os.environ
     assert 'PANVK_TRACE_SPIRV_DIR' not in os.environ
 if args.get('deqp-runmode') == 'txt-caselist':
+    assert not os.environ.get('FAKE_FORBID_LISTING'), 'Unexpected case listing'
     Path(args['deqp-caselist-export-file']).write_text(
         'GROUP: dEQP-VK.compute\\nTEST: dEQP-VK.compute.a\\nTEST: dEQP-VK.compute.b\\n')
 else:
     case = args['deqp-case']
+    if case == os.environ.get('FAKE_MISSING_CASE'):
+        sys.exit(0)
     status = os.environ.get('FAKE_STATUS', 'Pass')
     Path(args['deqp-log-filename']).write_text(
         '<TestCaseResult CasePath="'+case+'"><Result StatusCode="'+status+'">result</Result></TestCaseResult>')
@@ -48,7 +51,7 @@ class Results(unittest.TestCase):
         self.assertEqual(runner.qpa_results(text + '<TestCaseResult'),
                          [{'case': 'a', 'status': 'NotSupported', 'detail': 'skip'}])
 
-    def invoke(self, root, name, extra=(), env=None):
+    def invoke(self, root, name, extra=(), env=None, selection=None):
         cts = root / 'cts'
         cts.mkdir(exist_ok=True)
         exe = cts / 'deqp-vk'
@@ -58,12 +61,39 @@ class Results(unittest.TestCase):
         driver.write_bytes(b'fake ICD')
         output = root / name
         argv = ['run.py', '--suite', 'vk', '--cts', str(cts), '--driver', str(driver),
-                '--pattern', 'dEQP-VK.compute.*', '--out', str(output), *extra]
+                *(selection or ['--pattern', 'dEQP-VK.compute.*']), '--out', str(output), *extra]
         with patch.object(sys, 'argv', argv), patch.dict(os.environ, {
                 'PREFIX': str(root), 'TMPDIR': str(root), **(env or {})}), \
                 patch.object(runner, 'memory_available', return_value=4_000_000):
             code = runner.main()
         return code, json.loads((output / 'results.json').read_text())
+
+    def test_exact_cases_bypass_listing_and_deduplicate(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            code, report = self.invoke(root, 'exact',
+                selection=['--case', 'dEQP-VK.compute.a', '--case', 'dEQP-VK.compute.b',
+                           '--case', 'dEQP-VK.compute.a'], env={'FAKE_FORBID_LISTING': '1'})
+            self.assertEqual(code, 0)
+            self.assertEqual(report['counts'], {'Pass': 2})
+            self.assertEqual(report['identity']['cases'], ['dEQP-VK.compute.a', 'dEQP-VK.compute.b'])
+            self.assertFalse(list((root / 'exact').glob('listing-*.log')))
+
+    def test_unknown_exact_case_cannot_count_as_pass(self):
+        with tempfile.TemporaryDirectory() as directory:
+            code, report = self.invoke(Path(directory), 'unknown',
+                selection=['--case', 'dEQP-VK.compute.missing'],
+                env={'FAKE_MISSING_CASE': 'dEQP-VK.compute.missing', 'FAKE_FORBID_LISTING': '1'})
+            self.assertEqual(code, 1)
+            self.assertEqual(report['counts'], {'Incomplete': 1})
+
+    def test_exact_selection_rejects_wildcards_and_wrong_suite(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for name in ['dEQP-VK.compute.*', 'dEQP-GLES31.compute.a']:
+                with self.assertRaises(SystemExit) as error:
+                    self.invoke(root, 'invalid', selection=['--case', name])
+                self.assertEqual(error.exception.code, 2)
 
     def test_bounded_run_resumes_to_completion(self):
         with tempfile.TemporaryDirectory() as directory:

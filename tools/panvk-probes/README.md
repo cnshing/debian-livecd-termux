@@ -121,3 +121,10 @@ short `$TMPDIR` path. Evidence directories can be too deep for Unix sockets
 created by GVfs. The chosen runtime path and its removal after owned-process
 cleanup are recorded in `runtime-directory.json`; screenshots and logs remain
 under the requested evidence directory.
+
+For fix iterations, `cts/run.py --case <exact-name>` bypasses CTS listing and
+runs only explicitly named cases. Repeat `--case` for a nearby control; use
+`--pattern` when expanding coverage after the fix passes. Keep broad regressions
+for the stable candidate. The driver workflow's `abi` input selects `android`,
+`glibc`, or `both`. `combined-ahb-trace` is an Android AHB stage-logging variant
+for focused diagnostics, with no allocation or advertised-feature changes.

@@ -1,0 +1,97 @@
+Diagnostic AHB import stages; no allocation or feature behavior changes.
+
+--- a/src/panfrost/vulkan/panvk_android.c
++++ b/src/panfrost/vulkan/panvk_android.c
+@@ -3,6 +3,7 @@
+  * SPDX-License-Identifier: MIT
+  */
+ 
++#include <inttypes.h>
+ #include <sys/stat.h>
+ #include <unistd.h>
+ 
+@@ -14,6 +15,7 @@
+ #include "vndk/hardware_buffer.h"
+ #include "vulkan/vk_android_native_buffer.h"
+ 
++#include "util/log.h"
+ #include "vk_alloc.h"
+ #include "vk_android.h"
+ #include "vk_device_memory.h"
+@@ -234,6 +236,7 @@
+    VkSubresourceLayout layouts[PANVK_MAX_PLANES];
+    result =
+       vk_android_get_ahb_layout(ahb, &mod_info, layouts, PANVK_MAX_PLANES);
++   mesa_logi("PANVK_AHB_STAGE image_layout result=%d", result);
+    if (result != VK_SUCCESS)
+       return result;
+    __vk_append_struct(img->vk.android_deferred_create_info, &mod_info);
+@@ -245,6 +248,7 @@
+    __vk_append_struct(img->vk.android_deferred_create_info, &external_info);
+ 
+    result = panvk_image_init(img, img->vk.android_deferred_create_info);
++   mesa_logi("PANVK_AHB_STAGE image_init result=%d", result);
+    if (result != VK_SUCCESS)
+       return result;
+ 
+@@ -301,6 +305,8 @@
+    assert(handle && handle->numFds > 0);
+    uint64_t dma_buf_size = 0;
+    int dma_buf_fd = panvk_android_find_dma_buf_fd(device, handle, &dma_buf_size);
++   mesa_logi("PANVK_AHB_STAGE dma_buf fd=%d size=%" PRIu64 " nfds=%d",
++             dma_buf_fd, dma_buf_size, handle->numFds);
+    if (dma_buf_fd < 0)
+       return VK_ERROR_INVALID_EXTERNAL_HANDLE;
+    VkResult result;
+@@ -319,6 +325,7 @@
+       if (result == VK_SUCCESS) {
+          result = panvk_android_get_image_mem_reqs(device, img_handle,
+                                                    dma_buf_fd, &mem_reqs);
++         mesa_logi("PANVK_AHB_STAGE image_requirements result=%d", result);
+       }
+    } else if (dedicated_info && dedicated_info->buffer != VK_NULL_HANDLE) {
+       buf_handle = dedicated_info->buffer;
+@@ -378,6 +385,8 @@
+    };
+    result = dev->dispatch_table.AllocateMemory(device, &alloc_info, pAllocator,
+                                                pMemory);
++   mesa_logi("PANVK_AHB_STAGE import_fd result=%d bytes=%" PRIu64 " type=%u",
++             result, mem_reqs.size, mem_type_index);
+    if (result != VK_SUCCESS)
+       close(dup_fd);
+ 
+@@ -422,6 +431,11 @@
+          return panvk_error(device, VK_ERROR_OUT_OF_HOST_MEMORY);
+    }
+ 
++   AHardwareBuffer_Desc description;
++   AHardwareBuffer_describe(ahb, &description);
++   mesa_logi("PANVK_AHB_STAGE begin mode=%s width=%u height=%u format=%u stride=%u usage=0x%" PRIx64,
++             ahb_info ? "import" : "export", description.width, description.height,
++             description.format, description.stride, description.usage);
+    result = panvk_android_import_ahb_memory(device, pAllocateInfo, ahb,
+                                             pAllocator, pMemory);
+    if (result != VK_SUCCESS) {
+--- a/src/vulkan/runtime/vk_android.c
++++ b/src/vulkan/runtime/vk_android.c
+@@ -695,8 +695,10 @@
+                             VkImageDrmFormatModifierExplicitCreateInfoEXT *out,
+                             VkSubresourceLayout *out_layouts, int max_planes)
+ {
+-   if (!ahb || ahb != vk_android_owned_ahb)
++   if (!ahb || ahb != vk_android_owned_ahb) {
++      mesa_logi("PANVK_AHB_STAGE linear_probe rejected_not_owned");
+       return VK_ERROR_INVALID_EXTERNAL_HANDLE;
++   }
+ 
+    const char *why = NULL;
+    const uint64_t pitch = (uint64_t)d->stride * 4;
+@@ -792,6 +794,8 @@
+ 
+    VkResult result = vk_gralloc_to_drm_explicit_layout(&gr_handle, out,
+                                                        out_layouts, max_planes);
++   mesa_logi("PANVK_AHB_STAGE mapper result=%d owned=%d",
++             result, ahardware_buffer == vk_android_owned_ahb);
+    if (result == VK_ERROR_INVALID_EXTERNAL_HANDLE)
+       result = vk_android_probe_linear_ahb(ahardware_buffer, &description,
+                                            handle, out, out_layouts, max_planes);

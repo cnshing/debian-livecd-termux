@@ -14,6 +14,7 @@ case "${PANVK_BUILD_VARIANT:-research}" in
   point-size) patch_dir="$out/selected-patches"; mkdir -p "$patch_dir"
     cp "$here/driver-patches/0002-v9-per-vertex-point-size.patch" "$patch_dir/" ;;
   workgroups) patch_dir="$here/workgroup-patches" ;;
+  memory-budget) patch_dir="$here/budget-patches" ;;
   *) echo 'Unknown PANVK_BUILD_VARIANT' >&2; exit 1 ;;
 esac
 mkdir -p "$out"

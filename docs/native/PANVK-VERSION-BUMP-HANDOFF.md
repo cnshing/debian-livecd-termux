@@ -17,6 +17,11 @@ The unsafe ION placed-map capability remains withdrawn; its thirteen cases
 report NotSupported. Full conformance is not established. Package pins and API
 defaults remain unchanged, and no further soak is requested or run.
 
+For the daily-desktop acceptance policy, upstream CTS evidence and optional
+broader test plan, see
+[PANVK-CTS-AND-DAILY-DESKTOP-HANDOFF.md](PANVK-CTS-AND-DAILY-DESKTOP-HANDOFF.md).
+Full CTS passage is not the user's daily-desktop release requirement.
+
 ## Focused iteration policy
 
 Per the user's 2026-11-14 request, do not rerun the broad CTS selections for

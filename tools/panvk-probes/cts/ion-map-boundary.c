@@ -143,7 +143,7 @@ int main(int argc, char **argv)
       }
       pinned_cpu = (int)cpu;
    }
-   int ion = open("/dev/ion", O_RDWR | O_CLOEXEC);
+   int ion = open("/dev/ion", O_RDONLY | O_CLOEXEC);
    struct ion_heap heaps[64] = {0};
    struct ion_query query = {.count = 64, .heaps = (uintptr_t)heaps};
    if (ion < 0 || ioctl(ion, ION_QUERY, &query)) {

@@ -190,7 +190,8 @@ that exact shader and the reduced legacy SSBO fixture both pass 512 words with
 direct and copied readback, enabling supported Vulkan 1.1–1.3 core features.
 Yet the same binary fails traced CTS: immediately after invalidate, 288 mapped
 words equal 1 and 224 equal 0, first non-one at index 96. CTS reports the same
-index. Thus the missing writes precede its CPU verification copy; shader
+index. Thus the stale CPU-visible values precede its verification copy; this
+does not distinguish absent GPU writes from incoherent CPU visibility. Shader
 encoding and `memcpy` alone do not explain the failure. This separately built
 baseline has its own identity; it is not the earlier `db0bf89a…` control.
 Evidence: `reduced-cts-legacy-01/`, `vk-max-local-source-trace-01/` and
@@ -216,15 +217,19 @@ for the same kernel device node, with reference-counted registry lifetime,
 while retaining the local counters used for internal trimming. Actions
 [43660659573](https://github.com/cnshing/debian-livecd-termux/actions/runs/43660659573)
 built both ABIs. The Android driver passes both budget cases, then completes
-`dEQP-VK.info.*` with **22 passes and one unsupported case**. No test was edited
-or filtered. Evidence: `vk-budget-fix-01/` and `vk-info-budget-fix-01/`.
+`dEQP-VK.info.*` with **22 passes and one unsupported case**. The unsupported
+peer-memory case requires a group of at least two physical GPUs. Every case
+maps the intended ICD. No test was edited or filtered. Evidence: `vk-budget-fix-01/` and `vk-info-budget-fix-01/`.
 
 - Android SHA-256: `ce9fef7506cabf99f8299f3e15895542b023dfb670be24f8a345eed0eb0cb999`
 - glibc SHA-256: `fee10abad5f97f18e9cf0a438b44fd407d9486656a87286254b832bf101e2b66`
 
 The patch and isolated CI variant are on main under `budget-patches/`; the
-package pins and installed drivers are unchanged. The glibc build is not yet a
-glibc runtime qualification.
+package pins and installed drivers are unchanged. Both ABIs also pass seven
+basic processes (enumeration, compute, three triangle paths and synchronization
+controls), stopping on error; the SYNC_FD probe still reports its expected
+baseline unavailability. Evidence: `budget-basic-01/`. A glibc CTS budget test
+has not been run.
 
 The compute failure is now narrowed to a device-feature-controlled allocation
 path. Traced CTS passes when optional features are removed, but that filtered

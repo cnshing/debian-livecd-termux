@@ -57,8 +57,9 @@ Other main driver build variants are `point-size`, `x11`, `workgroups`,
 process-wide heap-accounting patch; its Android CTS results are in the version
 bump handoff. The `ion-cache` variant applies only the ION CPU-cache-mode
 fix. `import-coherence` combines that fix with the GPU-local/system-coherence
-selection for imports. These remain separate from the budget and workgroup
-candidates.
+selection for imports. The `combined` variant adds the process-wide budget, point-size and seven
+workgroup patches to both import-coherence fixes. It excludes the X11 soname
+patch and the diagnostic NO_MERGE patch. Its workgroup features remain opt-in.
 The first two apply just their named patch to the baseline. `workgroups` applies
 only the experimental workgroup series. `research` retains the previous combined
 X11/point-size series for reproducing its GTK failure. Each variant also retains

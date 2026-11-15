@@ -18,6 +18,10 @@ case "${PANVK_BUILD_VARIANT:-research}" in
   ion-cache) patch_dir="$here/ion-patches" ;;
   import-coherence) patch_dir="$out/selected-patches"; mkdir -p "$patch_dir"
     cp "$here/ion-patches/"*.patch "$here/coherence-patches/"*.patch "$patch_dir/" ;;
+  combined) patch_dir="$out/selected-patches"; mkdir -p "$patch_dir"
+    cp "$here/workgroup-patches/"*.patch "$here/budget-patches/"*.patch \
+      "$here/ion-patches/"*.patch "$here/coherence-patches/"*.patch \
+      "$here/driver-patches/0002-v9-per-vertex-point-size.patch" "$patch_dir/" ;;
   *) echo 'Unknown PANVK_BUILD_VARIANT' >&2; exit 1 ;;
 esac
 mkdir -p "$out"

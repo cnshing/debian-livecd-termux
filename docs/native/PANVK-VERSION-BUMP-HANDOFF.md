@@ -14,7 +14,8 @@ combined candidate's soak stopped with the phone reboot; its last log reaches
 1,425 seconds and no final result exists. The user has cancelled further soak
 minutes. Wireless ADB and SSH have returned. CPU-only controls now reproduce
 the placed-map failure independently of Vulkan; two platform fixes are being
-built as a separate `combined-platform` candidate.
+built as a separate `combined-platform` candidate. A new AHB image control
+also fails on the previous combined driver; that is a third qualification gap.
 
 ## Combined qualification in progress, 2026-11-14
 
@@ -177,7 +178,27 @@ passes automatically:
 
 No CTS source, allowlist, diagnostic filtering or advertised API version changes.
 The private-extension-only build at source `738c1b0` was superseded by the build
-including the placed-map capability correction. Qualification remains pending.
+including the placed-map capability correction. The thirteen-patch tree is
+`8ab30125381fef7d545427d557b676b3f02c8523`, verified in an isolated index without
+editing the Mesa checkout. Both ABI builds are running in
+[CI 43687729688](https://github.com/cnshing/debian-livecd-termux/actions/runs/43687729688),
+source `7974fb9`. Qualification remains pending.
+
+The old combined candidate's dedicated public AHB control selects thirteen
+cases and stops at case ten: nine Pass, then
+`dEQP-VK.api.external.memory.android_hardware_buffer.dedicated.image.bind_export_import_bind`
+fails `VK_ERROR_INVALID_EXTERNAL_HANDLE` from AllocateMemory; the remaining
+three cases are unrun. This is a pre-existing AHB image export/import failure,
+not a regression established against the new platform candidate. Earlier
+release AHB image probes also failed AllocateMemory with the same error.
+Source inspection finds a plausible restriction: image layout needs mapper
+metadata, while the verified linear fallback only permits explicitly tagged,
+driver-owned AHBs. App namespaces on this vendor API cannot reach the normal
+mapper backend. This is a hypothesis, not a measured call-stage diagnosis.
+Do not disable public AHB advertising merely to clear this check or guess
+vendor image pitches. Preserve the buffer passes and image failure separately.
+The phone retains complete evidence at `combined/vk-ahb-control-01/`; local
+archive retrieval has not yet succeeded after SSH began stalling.
 
 ### Recovery checkpoint; no further soak requested
 
@@ -191,9 +212,10 @@ The last soak log reaches 1,425/1,800 seconds, with no final `result.json` or
 extend it, per the user's request.
 
 The probes artifact also includes `variable-size.py --large-workgroups`, with
-optional `--nested`. Exact-combined GL variable-size runs remain pending; each
-mode should verify 206,304 output words in fresh directories under the shared
-lock. Prior installed 30/30 and 20-cycle private checks remain valid for their
+optional `--nested`. Exact-combined GL variable-size runs now pass all five
+shapes and 206,304 output words in each mode (412,608 total), with exact driver
+hash and library mapping recorded in `variable-gl-{straight,nested}-01/`.
+Both report GL 4.6 without a version override. Evidence has been retrieved. Prior installed 30/30 and 20-cycle private checks remain valid for their
 recorded binary. New platform corrections need their own short regressions.
 
 ## Progress on the source-package prerequisite

@@ -108,3 +108,10 @@ select ANGLE under this research scope.
 
 See [the continuation results](../../docs/native/PANVK-X1S-RESEARCH.md) for
 validated short runs, the failed partial soak, and remaining acceptance.
+
+The `combined` variant selects the seven workgroup patches plus point size,
+process budget, ION CPU cache mode and import coherence (eleven patches).
+`combined-platform` adds the Termux hybrid ICD private-extension correction
+and measured noncoherent ION placed-map capability restriction (thirteen
+patches). It requires independent qualification and does not change package
+pins. See the current version-bump handoff for exact hashes and CTS results.

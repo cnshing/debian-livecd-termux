@@ -6,13 +6,54 @@ directly. Shared rules and pass criteria: [README.md](README.md).
 
 ## Status
 
-**Off by default everywhere.** `disabled_va_codecs` defaults to `['h264', 'av1']`, and the
+**Off by default everywhere** (fix on `fix/decode-h264`; see Outcome below). `disabled_va_codecs` defaults to `['h264', 'av1']`, and the
 launcher turns each entry into `TERMUX_VA_DISABLE_H264=1` (`src/native/acceleration.py`). Every
 browser decodes H.264 in software. H.264 is still the most common format on the web, so this
 fix is worth the most of any decode work left.
 
 Hardware H.264 decode does work when the stream suits the bridge's guess. FFmpeg through the
 bridge decoded 1080p30 frame-exact against software (300 of 300 frames, Adreno, 2026-11-03).
+
+## Outcome on 2026-11-14 (branch `fix/decode-h264`)
+
+**Fixed in the driver, still off by default.** `packages/android-vaapi/0107-h264-pps-defaults.patch`
+(android-vaapi revision 10, android-vaapi-glibc 2):
+
+- The bridge reads `num_ref_idx_active_override_flag` from each slice header in the access unit.
+  A P or B slice without an override uses the PPS defaults, so its active counts from the VA slice
+  parameters are the defaults. The PPS is rebuilt with them and resent when they change. The
+  parser matched FFmpeg's `trace_headers` on 594 of 594 slices (presets fast and medium, and a
+  four-slice, five-reference, three-B-frame stream).
+- With readable headers the old "bootstrap hold" (up to eight pictures held back for streams with
+  five or more references) is skipped. **That hold was a second H.264 hang**: FFmpeg waits for its
+  first picture before sending more, so every five-reference stream hung on the S20, with the old
+  driver as well.
+- `TERMUX_VA_H264_REORDER_FRAMES` sets the rebuilt SPS's `max_num_reorder_frames`; the launcher
+  sets it to 0 on Mali, as for HEVC.
+- New fixture `chart-h264-fast.mp4` (`make-video-fixtures.py --codecs h264-fast`: x264 `-preset
+  fast`, weighted prediction, PPS default 2 against the old guess of 3).
+- New check `tests/browsers/test-va-decode.py`: FFmpeg `-hwaccel vaapi`, every frame's MD5 against
+  software, a timeout counts as a hang, and frames 12 and 36 saved to look at.
+
+**S20 results** (private daemon, Xvfb, the CI driver, this project's FFmpeg 9.0.2-100, and the
+Mali-aware render-node preload from `fix/chromium-webcodecs-shmem`, which main's revision lacks):
+
+| Stream | revision 5 (main) | revision 10 |
+| --- | --- | --- |
+| `chart-h264.mp4`, `chart-h264-fast.mp4`, 640x360 x264 fast | 48/48, 48/48, 120/120 identical | same |
+| x264 five references (1 or 4 slices, with or without B frames or weighted prediction) | **hangs** (4 of 4 streams) | 90/90 identical, each of 5 streams |
+| x264 three references, 4 slices | 90/90 | 90/90 |
+| `chart-hevc.mp4` (regression) | 48/48 | 48/48 |
+
+The decoded pictures were looked at (frame numbers and patterns right). The old guess did *not*
+make `chart-h264-fast.mp4` fail on Exynos: its decoder tolerates the wrong default where
+Qualcomm's dropped frames (proven on the Note10+ on 2026-11-03). The Note10+ has not been rerun.
+
+**Still open before H.264 can be on by default:** run the browser harnesses (Chromium, Chrome,
+Firefox) with `disabled_va_codecs: ['av1']` on both phones with revision 10, the new fixture
+included; rerun the Note10+ with `test-va-decode.py` as the control for the PPS guess; then drop
+`h264` from the default in `src/native/acceleration.py`. On a fresh S20, FFmpeg also needs the
+render-node fix from `fix/chromium-webcodecs-shmem`.
 
 ## The bug
 

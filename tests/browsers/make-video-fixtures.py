@@ -47,7 +47,8 @@ def chart(width, height, number):
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('out', type=Path)
-    p.add_argument('--codecs', nargs='+', choices=('vp9', 'h264', 'hevc', 'av1'), default=['vp9', 'h264', 'hevc'])
+    p.add_argument('--codecs', nargs='+', choices=('vp9', 'h264', 'h264-fast', 'hevc', 'av1'),
+                   default=['vp9', 'h264', 'h264-fast', 'hevc'])
     p.add_argument('--size', default='640x360')
     p.add_argument('--frames', type=int, default=48)
     p.add_argument('--matrix', choices=('bt709', 'smpte170m'), default='bt709')
@@ -57,7 +58,7 @@ def main():
     width, height = map(int, args.size.split('x'))
     if min(width, height) < 128 or width % 2 or height % 2 or not 2 <= args.frames <= 256:
         p.error('Use even dimensions >=128 and 2..256 frames')
-    if args.ten_bit and 'h264' in args.codecs:
+    if args.ten_bit and {'h264', 'h264-fast'} & set(args.codecs):
         p.error('10-bit H.264 is outside the hardware test scope; select vp9/hevc/av1')
     args.out.mkdir(parents=True, exist_ok=False)
     commands = []
@@ -77,6 +78,10 @@ def main():
             name = f'chart-{codec}.{ext}'
             encoder = {'vp9': ['libvpx-vp9', '-deadline', 'good', '-cpu-used', '4', '-crf', '18', '-b:v', '0'],
                        'h264': ['libx264', '-preset', 'medium', '-crf', '18', '-bf', '3'],
+                       # Two references and weighted prediction: the PPS default
+                       # differs from the bridge's old guess (see decode-h264.md).
+                       'h264-fast': ['libx264', '-preset', 'fast', '-crf', '18', '-bf', '3',
+                                     '-x264-params', 'weightp=2'],
                        'hevc': ['libx265', '-preset', 'fast', '-crf', '18', '-x265-params', 'pools=none:frame-threads=1'],
                        'av1': ['libaom-av1', '-cpu-used', '8', '-crf', '18', '-b:v', '0']}[codec]
             matrix = 'bt601' if args.matrix == 'smpte170m' else args.matrix
@@ -106,7 +111,7 @@ def main():
             for i, image in enumerate(frames):
                 if frame_number(rgb(image), width, height) != i:
                     raise RuntimeError('Reference barcode is not readable: ' + str(image))
-            manifest['fixtures'].append({'name': name, 'codec': codec, 'width': width, 'height': height,
+            manifest['fixtures'].append({'name': name, 'codec': codec.split('-')[0], 'width': width, 'height': height,
                 'frames': args.frames, 'matrix': args.matrix, 'range': args.range, 'bit_depth': 10 if args.ten_bit else 8,
                 'sha256': sha256(args.out / name), 'metadata': metadata, 'references': reference.name,
                 'reference_sha256': [sha256(f) for f in frames]})

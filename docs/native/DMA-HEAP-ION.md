@@ -1,13 +1,29 @@
 # `/dev/dma_heap` on top of `/dev/ion`
 
 Progress on the handoff `docs/native/handoff/dmabuf-s20.md` (on `feat/s20-video-parity`,
-PR #12). State on 2026-11-15.
+PR #12). State on 2026-11-15 (second pass: bridge refactor and phone checks).
 
 ## What exists
 
-- `packages/android-vaapi/dma-heap.c` builds `libandroid-dma-heap.so` (android-vaapi 27.0.0~devel20261029-6),
-  shipped beside `libandroid-vaapi-render-node.so` in the private directory. It is **not loaded
-  by the launcher yet**.
+- `packages/android-vaapi/dma-heap.c` builds `libandroid-dma-heap.so`:
+  - for Bionic in android-vaapi (27.0.0~devel20261029-6);
+  - for glibc in android-vaapi-glibc (27.0.0~devel20261025-2, `lib/`).
+- Each package's manifest names it as `dma_heap_preload`.
+- `acceleration.video_environment` adds it to the video preloads (`LD_PRELOAD` or
+  `BIONILUX_EXTRA_PRELOAD`) only when `/dev/dma_heap` is absent, `/dev/ion` is present and
+  `LIVECD_DMA_HEAP_ION` is not `0`.
+- **The bridge refactor.** Both VA bridges (`tva_ion_winsys.h`, `configure-bridge.py`) allocate
+  only through `/dev/dma_heap/system`. They no longer have their own ION code:
+  - `tva_ion.h` is removed;
+  - the glibc `ion-dma-heap.c` preload is removed, and so is `LIVECD_TVA_ION_FALLBACK` in the
+    shared launcher.
+- **Not changed:**
+  - the older standalone Chrome wrapper path in `overlays/Browser+Chromium/browsers/google-chrome`
+    keeps its own adapter;
+  - `prebuilt/native-video` keeps its own copy;
+  - the desktop session (`graphics.py`) does not load the preload. PanVK already falls back to
+    ION by itself, and loading the preload there would change its HOST_COHERENT memory (see
+    below).
 - It presents `/dev/dma_heap/system` and `/dev/dma_heap/system-uncached`, which are character
   devices to `stat`/`access`. `DMA_HEAP_IOCTL_ALLOC` turns into ION's 4.12+ `ION_IOC_ALLOC`.
 - Heap choice follows Android's
@@ -48,6 +64,33 @@ ION heaps from `tests/dma-heap/ion-probe.c`:
   its next definition on first use. The first build resolved them in the constructor and
   segfaulted on start-up, even with emulation disabled.
 
+## Through the bridge and in Firefox (S20, CI run 43672564405, staged privately)
+
+Nothing was installed for these checks. The packages were unpacked under `~/gpu-x1s/dma-heap/vaapi-6`, and
+private copies of `src/native` were used.
+
+- **FFmpeg VA-API decode against a private daemon** (`~/gpu-x1s/dma-heap/decode-check.py`, a
+  copy of `hevc-latency.py`): VP9 and HEVC each give 48 of 48 frames bit-identical to software
+  decoding.
+  - With the preload, the bridge logs `tva: software backend on dma-buf surfaces`.
+  - With `LIVECD_DMA_HEAP_ION=0`, it falls back to the null winsys, with plain memory and no
+    export. So ION is now reached only through the preload.
+- **Firefox on Zink/PanVK, private Termux:X11 `:84`** (`firefox-dmaheap-race.py`):
+
+  | Run | VA-API frames | Browser PSNR (frames 12, 36) | Result |
+  | --- | --- | --- | --- |
+  | VP9, preload | 59 | 47.96 / 48.00 dB | ok |
+  | HEVC, preload | 61 | 48.01 / 47.98 dB | ok (the first try timed out starting the private display; the retry passed) |
+  | VP9, `LIVECD_DMA_HEAP_ION=0` | 0, software decode | 39.98 / 39.95 dB | fails as it should |
+
+  The frame captures are in `~/gpu-x1s/browser-tests/race-dh-*` on the phone. The FFmpeg check
+  is the frame-exact one.
+- **Vulkan import** (`tests/dma-heap/vk-import.c`), PanVK on the Mali-G77, for both `system`
+  and `system-uncached`:
+  - a heap buffer is imported with `VK_EXT_external_memory_dma_buf`;
+  - the GPU reads data the CPU wrote, and the CPU reads the GPU's fill and copy;
+  - without the preload, the test fails at `open`.
+
 ## PanVK's own ION fallback
 
 Zenith's `patches/jm-v7/005-kbase-ion-fallback-for-placed-map-dma-buf.patch` already does
@@ -70,9 +113,10 @@ IO-coherent, so PanVK asks for `/dev/dma_heap/system-uncached` for HOST_COHERENT
 
 ## Left
 
-- Handoff step 3, GPU half: import a heap buffer into PanVK with
-  `VK_EXT_external_memory_dma_buf`, have the GPU write it, and check the result on the CPU.
-- Steps 4–5: PanVK and the bridge through the preload, removing the bridge's own ION path, and
-  launcher wiring in `acceleration.py`/`graphics.py`.
-- A glibc build through Bionilux. The host test already builds and passes it on glibc.
+- **Chromium and Chrome** (glibc, so the glibc build of the preload) have not run on a phone
+  yet. They need the packages installed, or the phone suite pointed at a private glibc stack.
+- **Note10+ regression run.** It is also ION-only, so its bridge now depends on the preload.
+  It was not run: sshd was not running there.
+- **The desktop session through the preload**, which changes PanVK's HOST_COHERENT memory to
+  uncached ION. It needs the desktop and Ghostty checks before `graphics.py` loads it.
 - `opendir("/dev/dma_heap")` listing is not emulated yet.

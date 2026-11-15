@@ -310,6 +310,10 @@ jobs:
       if: steps.earlier.outputs.built != 'true' && matrix.large
       working-directory: termux-packages
       run: ./scripts/free-space.sh
+    - name: Restore Python after freeing space
+      # free-space.sh removes the runner's python3, which the artifact checks below need.
+      if: steps.earlier.outputs.built != 'true' && matrix.large
+      run: command -v python3 >/dev/null || { sudo apt-get update -q && sudo apt-get install -yq python3; }
     - name: Restore completed Chromium dependency packages
       if: steps.earlier.outputs.built != 'true' && matrix.name == 'chromium' && inputs.chromium_dependencies_only != true
       env:

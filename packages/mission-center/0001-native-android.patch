@@ -502,9 +502,10 @@ new file mode 100644
 index 0000000..56b6289
 --- /dev/null
 +++ b/subprojects/magpie/platform-linux/src/gpus_android.rs
-@@ -0,0 +1,33 @@
+@@ -0,0 +1,60 @@
 +// SPDX-License-Identifier: GPL-3.0-or-later
-+// Qualcomm KGSL telemetry, read by shell on demand. Missing fields stay None.
++// GPU telemetry: Samsung Mali from /sys/kernel/gpu, else Qualcomm KGSL read by shell
++// on demand. Missing fields stay None.
 +use std::collections::HashMap;
 +use magpie_platform::gpus::Gpu;
 +pub struct GpuCache(HashMap<String, Gpu>);
@@ -512,6 +513,10 @@ index 0000000..56b6289
 +    fn new() -> Self { Self(HashMap::new()) }
 +    fn refresh(&mut self) {
 +        self.0.clear();
++        if let Some(gpu) = samsung_mali() {
++            self.0.insert(gpu.id.clone(), gpu);
++            return;
++        }
 +        let Ok(snapshot) = crate::proc_stat::request("telemetry") else { return };
 +        let field = |key: &str| snapshot.lines().find_map(|line| {
 +            let (name, value) = line.split_once('\t')?;
@@ -535,6 +540,28 @@ index 0000000..56b6289
 +        self.0.insert(gpu.id.clone(), gpu);
 +    }
 +    fn cached_entries(&self) -> &HashMap<String, Gpu> { &self.0 }
++}
++// Samsung's Mali kernels publish /sys/kernel/gpu to apps, so it needs no shell.
++// gpu_busy is a percentage, gpu_clock and gpu_freq_table are kHz, gpu_tmu is °C.
++fn samsung_mali() -> Option<Gpu> {
++    let read = |name: &str| std::fs::read_to_string(format!("/sys/kernel/gpu/{name}")).ok();
++    let model = read("gpu_model")?;
++    let model = model.trim();
++    if !model.starts_with("Mali") { return None; }
++    let mut gpu = Gpu::default();
++    gpu.id = "mali0".into();
++    gpu.device_name = Some(model.into());
++    gpu.utilization_percent = read("gpu_busy")
++        .and_then(|s| s.trim().trim_end_matches('%').trim().parse::<f32>().ok())
++        .filter(|p| (0. ..=100.).contains(p));
++    gpu.clock_speed_mhz = read("gpu_clock").and_then(|s| s.trim().parse::<u64>().ok()).map(|khz| (khz / 1000) as u32);
++    gpu.max_clock_speed_mhz = read("gpu_freq_table")
++        .and_then(|s| s.split_whitespace().filter_map(|v| v.parse::<u64>().ok()).max())
++        .map(|khz| (khz / 1000) as u32);
++    gpu.temperature_c = read("gpu_tmu")
++        .and_then(|s| s.trim().parse::<f32>().ok())
++        .filter(|c| c.is_finite() && (-40. ..=150.).contains(c));
++    Some(gpu)
 +}
 diff --git a/subprojects/magpie/platform-linux/src/lib.rs b/subprojects/magpie/platform-linux/src/lib.rs
 index 8f4b5a1..ab08fd8 100644

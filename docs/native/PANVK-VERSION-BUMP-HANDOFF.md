@@ -198,7 +198,10 @@ Evidence: `reduced-cts-legacy-01/`, `vk-max-local-source-trace-01/` and
 Moving buffer allocation before pipeline creation, matching CTS, also passes
 with the exact captured shader and copied readback. Evidence:
 `reduced-cts-buffer-first-01/`. Device extension/features outside Vulkan 1.1–1.3
-core and multi-instance setup remain differences to investigate.
+core remain differences to investigate. The features2 creation form and a
+second live instance also pass the reduced exact-shader test
+(`reduced-cts-features2-01/`). The updated probe build additionally passes the
+full 22-decision uncached nested matrix in `nested-slices/current-probe-uncached-01/`.
 
 A separate release `dEQP-VK.info.*` run stopped after nine passes, one unsupported
 case and `device_memory_budget_multi_instance` failing. Its QPA reports that
@@ -212,7 +215,7 @@ time, recording QPA results, exit status, mapped libraries and binary hashes.
 It stops at the first failure/crash/timeout, enforces a 3 GB available-memory
 floor and a run time limit, and never counts an empty or all-skipped run as a
 pass. Bounded successful chunks can resume only with matching binary identities
-and selection. Resumed results retain their original QPA/log directory. Nine
+and selection. Resumed results retain their original QPA/log directory. Ten
 host tests cover parsing, resume, failure stopping, process exit failures,
 all-skipped runs, explicit merge/host-memory modes and trace isolation. Use only the X11 dependency directory in
 `LD_LIBRARY_PATH`; the Vulkan suite loads Termux's Vulkan **loader**, not the raw
@@ -282,6 +285,12 @@ trace settings. For example, repeat only the first failing case with this flag,
 then run the exact saved SPIR-V through `check ... run-cts-max`. Additional CPU
 logging/reads can affect timing, so a traced pass alone cannot clear the original
 failure. Keep untraced controls and both logs.
+
+`--core-features-only` additionally filters optional device feature structures
+through the trace loader while retaining CTS's core 1.0–1.3 feature values and
+device extension list. This changes device creation, prints an explicit warning
+and sets `diagnostic_only: true` in the report. A pass in that mode is a debugging
+result and cannot clear CTS qualification. It requires `--trace-loader`.
 
 ## Desktop qualification still required
 
@@ -422,12 +431,12 @@ The pass is a working subset behind an environment variable. To ship it:
    driver passed the private 20-cycle run and 30-minute soak. Installed 30/30
    validation, unresolved CTS failures and performance qualification remain.
 
-When the installed driver reports 4.3, nothing else needs changing for Ghostty:
-`src/native/terminal.py` asks `glxinfo` for the core version and keeps the GPU when it is at
-least 4.3. Its test is `tests/native/test-terminal-environment.py`.
-
-Ghostty will then present through its CPU readback, because the driver has no SYNC_FD
-semaphores. That is the subject of [PANVK-SYNC-FD-HANDOFF.md](PANVK-SYNC-FD-HANDOFF.md).
+The separately qualified `ghostty-panvk-dmabuf` package now provides its own
+private driver/Mesa stack. The terminal launcher uses it when its device and
+payload guard passes; see [PANVK-SYNC-FD-HANDOFF.md](PANVK-SYNC-FD-HANDOFF.md).
+That path does not depend on promoting this candidate to the general desktop
+driver. Without that package, the fallback Ghostty path still requires GL 4.3
+and selects software rendering when the desktop driver exposes only GL 4.2.
 
 ## Vulkan 1.4
 

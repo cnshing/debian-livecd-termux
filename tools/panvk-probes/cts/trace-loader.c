@@ -1,4 +1,4 @@
-/* Diagnostic forwarding loader. No Vulkan calls or input structures are changed. */
+/* Forwarding loader; device-feature filtering requires explicit diagnostic opt-in. */
 #define VK_NO_PROTOTYPES
 #include <vulkan/vulkan.h>
 #include <dlfcn.h>

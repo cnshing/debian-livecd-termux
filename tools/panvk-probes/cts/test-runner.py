@@ -139,6 +139,7 @@ class Results(unittest.TestCase):
                                        env={'FAKE_EXPECT_TRACE': '1', 'FAKE_EXPECT_CORE_ONLY': '1'})
             self.assertEqual(code, 0)
             self.assertTrue(report['identity']['core_features_only'])
+            self.assertTrue(report['diagnostic_only'])
 
 
 if __name__ == '__main__':

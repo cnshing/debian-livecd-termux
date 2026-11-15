@@ -153,7 +153,8 @@ def run(args, prefix, cts, driver, executable, identity):
         raise RuntimeError('No tests matched; refusing an empty qualification run')
     (args.out / 'selected.txt').write_text('\n'.join(selected) + '\n')
     report = {'identity': identity, 'driver': str(driver), 'selected': len(selected),
-              'results': [], 'complete': False, 'ok': False}
+              'results': [], 'complete': False, 'ok': False,
+              'diagnostic_only': args.core_features_only}
     for filename in ('BUILD.txt', 'PLATFORM.patch'):
         metadata = cts / filename
         if metadata.is_file():

@@ -1,0 +1,148 @@
+Read legacy Mali gralloc image metadata through its vendor query API.
+
+Prefer the existing standard mapper paths. On older Mali gralloc, load the
+HAL through SPHAL and query its immutable format, dimensions, dma-buf, offset,
+byte stride, size and layer count. Accept only single-layer RGBA/RGBX/BGRA
+with an explicitly unmodified internal format and validated allocation bounds.
+Compressed, multi-plane and unknown layouts remain rejected. No imported
+contents are modified and no pitch is inferred from the public descriptor.
+
+API definitions: Android device/amlogic/yukawa ddb3cd9,
+gralloc/mali_gralloc_private_interface.h and .cpp (Arm/AOSP Apache-2.0).
+The x1s vendor library exposes and validates this interface; its metadata was
+cross-checked on controlled AHardwareBuffer allocations before this patch.
+
+--- a/src/util/u_gralloc/u_gralloc_fallback.c
++++ b/src/util/u_gralloc/u_gralloc_fallback.c
+@@ -164,7 +164,22 @@
+ 
+ static pthread_once_t panvk_v19_once = PTHREAD_ONCE_INIT;
+ static struct panvk_v19_mapper *panvk_v19_mapper_ptr;
+-static int panvk_v19_backend; /* 5: AIMapper stable-C, 4: HIDL IMapper@4.0, 0: none */
++static int panvk_v19_backend;
++typedef void *(*panvk_mali_get_function)(int32_t);
++typedef int32_t (*panvk_mali_get_u64)(void *, const native_handle_t *, uint64_t *);
++typedef int32_t (*panvk_mali_get_i64)(void *, const native_handle_t *, int64_t *);
++typedef int32_t (*panvk_mali_get_int)(void *, const native_handle_t *, int *);
++typedef int32_t (*panvk_mali_get_dims)(void *, const native_handle_t *, int *, int *);
++typedef int32_t (*panvk_mali_get_layers)(const native_handle_t *, uint32_t *);
++static struct {
++   panvk_mali_get_u64 format;
++   panvk_mali_get_int fd;
++   panvk_mali_get_dims dimensions;
++   panvk_mali_get_i64 offset;
++   panvk_mali_get_int stride;
++   panvk_mali_get_int size;
++   panvk_mali_get_layers layers;
++} panvk_mali_metadata;
+ 
+ #define PANVK_V19_MAX_NAMES 16
+ static const char *const panvk_v19_hw_dirs[] = { "/vendor/lib64/hw", "/odm/lib64/hw" };
+@@ -218,6 +233,8 @@
+ #ifdef __ANDROID__
+    char prop[PROP_VALUE_MAX] = "";
+    if (__system_property_get("ro.hardware.gralloc", prop) > 0)
++      panvk_v19_add_name(names, &n, prop, strlen(prop));
++   if (__system_property_get("ro.hardware", prop) > 0)
+       panvk_v19_add_name(names, &n, prop, strlen(prop));
+ #endif
+    panvk_v19_add_name(names, &n, "mediatek", 8);
+@@ -301,6 +318,37 @@
+       }
+    }
+ #endif
++   for (int i = 0; i < n; i++) {
++      for (unsigned d = 0; d < ARRAY_SIZE(panvk_v19_hw_dirs); d++) {
++         const char *how = "NONE";
++         snprintf(path, sizeof(path), "%s/gralloc.%s.so", panvk_v19_hw_dirs[d], names[i]);
++         void *so = panvk_v19_dlopen(load_sphal, path, &how);
++         if (!so) continue;
++         panvk_mali_get_function get = (panvk_mali_get_function)dlsym(
++            so, "_Z42mali_gralloc_private_interface_getFunctioni");
++         panvk_mali_get_layers layers = (panvk_mali_get_layers)dlsym(
++            so, "_Z37mali_gralloc_get_layer_count_internalPK13native_handlePj");
++         if (!get || !layers) {
++            dlclose(so);
++            continue;
++         }
++         panvk_mali_metadata.format = (panvk_mali_get_u64)get(125);
++         panvk_mali_metadata.fd = (panvk_mali_get_int)get(126);
++         panvk_mali_metadata.dimensions = (panvk_mali_get_dims)get(127);
++         panvk_mali_metadata.offset = (panvk_mali_get_i64)get(128);
++         panvk_mali_metadata.stride = (panvk_mali_get_int)get(129);
++         panvk_mali_metadata.size = (panvk_mali_get_int)get(131);
++         panvk_mali_metadata.layers = layers;
++         if (panvk_mali_metadata.format && panvk_mali_metadata.fd &&
++             panvk_mali_metadata.dimensions && panvk_mali_metadata.offset &&
++             panvk_mali_metadata.stride && panvk_mali_metadata.size) {
++            panvk_v19_backend = 1;
++            mesa_logi("gralloc: using Mali private metadata from %s (%s)", path, how);
++            return;
++         }
++         dlclose(so);
++      }
++   }
+    mesa_logw("[P0A-V19-FULLPLANE] mapper load failed (%d candidate names, first=%s); "
+              "PANVK_MAPPER_NAMES=<suffix> overrides", n, n ? names[0] : "-");
+ }
+@@ -504,9 +552,60 @@
+ }
+ 
+ static int
++panvk_mali_query_metadata(const native_handle_t *raw,
++                          struct u_gralloc_buffer_basic_info *out)
++{
++   uint64_t format = 0;
++   int64_t offset = -1;
++   int fd = -1, stride = 0, allocation = 0, width = 0, height = 0;
++   uint32_t layers = 0;
++   if (raw->numFds < 1 || raw->numFds > 5 ||
++       panvk_mali_metadata.format(NULL, raw, &format) ||
++       panvk_mali_metadata.fd(NULL, raw, &fd) ||
++       panvk_mali_metadata.dimensions(NULL, raw, &width, &height) ||
++       panvk_mali_metadata.offset(NULL, raw, &offset) ||
++       panvk_mali_metadata.stride(NULL, raw, &stride) ||
++       panvk_mali_metadata.size(NULL, raw, &allocation) ||
++       panvk_mali_metadata.layers(raw, &layers))
++      return -EINVAL;
++
++   if (format != HAL_PIXEL_FORMAT_RGBA_8888 &&
++       format != HAL_PIXEL_FORMAT_RGBX_8888 &&
++       format != HAL_PIXEL_FORMAT_BGRA_8888)
++      return -ENOTSUP;
++
++   bool fd_present = false;
++   for (int i = 0; i < raw->numFds; i++)
++      fd_present |= raw->data[i] == fd;
++   if (!fd_present || fd < 0 || layers != 1 || width <= 0 || height <= 0 ||
++       stride <= 0 || (uint64_t)stride < (uint64_t)width * 4 ||
++       offset < 0 || offset > INT_MAX || allocation <= 0)
++      return -EINVAL;
++
++   off_t fd_size = lseek(fd, 0, SEEK_END);
++   uint64_t end = (uint64_t)offset + (uint64_t)stride * height;
++   if (fd_size <= 0 || end > (uint64_t)allocation ||
++       (uint64_t)allocation > (uint64_t)fd_size)
++      return -EINVAL;
++
++   int fourcc = get_fourcc_from_hal_format((int)format);
++   if (fourcc == -1)
++      return -EINVAL;
++   out->drm_fourcc = fourcc;
++   out->modifier = DRM_FORMAT_MOD_LINEAR;
++   out->num_planes = 1;
++   out->fds[0] = fd;
++   out->strides[0] = stride;
++   out->offsets[0] = (int)offset;
++   return 0;
++}
++
++static int
+ panvk_v19_query_mapper(const native_handle_t *raw, struct u_gralloc_buffer_basic_info *out)
+ {
+    if (!raw || !out || panvk_v19_init_mapper()) return -ENOTSUP;
++   if (panvk_v19_backend == 1)
++      return panvk_mali_query_metadata(raw, out);
+    panvk_v19_buffer_handle_t imported = NULL;
+    int32_t ir = panvk_v19_import(raw, &imported);
+    if (ir || !imported) {

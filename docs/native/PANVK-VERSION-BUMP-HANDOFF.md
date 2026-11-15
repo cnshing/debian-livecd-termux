@@ -39,6 +39,26 @@ selection, mapper/layout, image requirements and underlying import results.
 Use it for diagnosis only; do not rerun broad qualification on this logging
 variant or count its results as the stable candidate's qualification.
 
+## AHB focused investigation, 2026-11-15
+
+The diagnostic build 43690902199 confirms that the first image allocation
+fails at gralloc metadata lookup, before Vulkan image initialization. The
+buffer control passes. These are exact-case runs, not another broad CTS run.
+The phone provides mapper 2.1, while the existing metadata paths try mapper
+4/5. Read-only vendor queries, loaded through SPHAL, successfully return the
+actual linear format, dma-buf, dimensions, stride, offset, size and layer count
+for six controlled RGBA AHardwareBuffers, including non-aligned dimensions.
+
+The experimental `combined-ahb` variant adds a legacy Mali metadata fallback
+to the corrected thirteen-patch candidate. Standard mapper paths retain
+priority. The fallback accepts only explicitly linear, single-layer
+RGBA/RGBX/BGRA with validated allocation bounds; it does not guess pitch or
+modify imported pixels. Its fourteen-patch content tree is
+`b28956ffc095bda26bf8241badba014be178536b`. This is an unqualified candidate,
+with no package pin or API default change. Build Bionic only, then run the
+exact buffer control and failing image case. Expand to the dedicated AHB
+group only after both pass.
+
 ## Combined candidate qualification, 2026-11-14
 
 The `combined` driver variant now selects eleven patches: workgroups `0001`–

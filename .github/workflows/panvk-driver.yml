@@ -6,7 +6,7 @@ on:
       variant:
         description: Isolated driver change (baseline applies no patches)
         type: choice
-        options: [baseline, point-size, x11, workgroups, memory-budget, ion-cache, import-coherence, combined, combined-platform, combined-ahb-trace, research]
+        options: [baseline, point-size, x11, workgroups, memory-budget, ion-cache, import-coherence, combined, combined-platform, combined-ahb, combined-ahb-trace, research]
         default: baseline
       abi:
         description: Build only the ABI affected by the current investigation

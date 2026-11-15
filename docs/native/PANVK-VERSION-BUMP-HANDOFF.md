@@ -156,6 +156,14 @@ Khronos loader. Preserve this failure as a platform/loader qualification issue;
 do not edit the CTS test or count the remaining 10,487 cases as passed. Evidence:
 `temp/panvk-qualification/evidence/vk-info-fixed-01/`.
 
+There is a concrete Android-loader boundary to check here: AOSP's
+[`EnumerateDeviceExtensionProperties`](https://android.googlesource.com/platform/frameworks/native/+/18fa257ea2/vulkan/libvulkan/driver.cpp)
+translates the private `VK_ANDROID_native_buffer` entry into `VK_KHR_swapchain`
+before returning it to applications. The observed Termux-loader result differs
+from that path. Preserve the failing CTS result and investigate the intended
+Termux ICD/loader contract; changing the CTS allowlist would not qualify that
+contract. Changes to extension advertisement also need WSI/AHB regression checks.
+
 Vulkan compute also found failures in the controls, independent of the nested
 prototype. The release's `compute.pipeline.basic.*` run stopped with 13 passes,
 one unsupported case and one failure: `empty_workgroup_y` returned 0 rather than
@@ -286,8 +294,12 @@ unconditionally requested system coherence even on this non-I/O-coherent GPU.
 The research `import-coherence` variant combines the ION CPU cache-mode patch
 with selecting local/system coherence according to `is_io_coherent`. Build
 [43663975090](https://github.com/cnshing/debian-livecd-termux/actions/runs/43663975090)
-is pending device verification. Evidence:
-`vk-ssbo-ion-multiple-trace-01/` and `vk-ssbo-ion-local-import-01/`.
+is pending device verification. With the recorded override, the full selected
+basic-compute run completes with **73 passes and eight unsupported cases**,
+all requested ICD mappings checked. Those results remain diagnostic-only until
+the code-built driver repeats them without overrides. Evidence:
+`vk-ssbo-ion-multiple-trace-01/`, `vk-ssbo-ion-local-import-01/` and
+`vk-basic-local-import-01/`.
 
 - Android SHA-256: `e6d981b8e4bc8d56077fc90b22a782adb0b0db2c1c766007218a23a7b091b020`
 - glibc SHA-256: `3a727046e1cfe1ed484b1c1910a0a6167a304b1bdb02b2db8be8e40e59132a9f`

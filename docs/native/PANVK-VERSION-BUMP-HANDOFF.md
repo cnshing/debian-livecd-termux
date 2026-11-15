@@ -10,8 +10,11 @@ validation **30/30 in both default and nested modes**. The release controller
 and desktop have been restored and pass 30/30. Broader CTS exposes two remaining
 promotion blockers: placed-mapping SIGBUS and the Android private-extension
 loader boundary. Default versions and package pins remain unchanged. The exact
-combined candidate's soak was last observed at 1,334 seconds before x1s left
-the LAN; final completion and cleanup are not yet verified.
+combined candidate's soak stopped with the phone reboot; its last log reaches
+1,425 seconds and no final result exists. The user has cancelled further soak
+minutes. Wireless ADB and SSH have returned. CPU-only controls now reproduce
+the placed-map failure independently of Vulkan; two platform fixes are being
+built as a separate `combined-platform` candidate.
 
 ## Combined qualification in progress, 2026-11-14
 
@@ -130,50 +133,68 @@ mapping against memset across its file-backed guard boundaries. Twelve finite
 child controls catch SIGBUS/SIGSEGV and report the fault stage/address through a
 pipe; caught faults still make the diagnostic exit nonzero. CPU accesses are
 bracketed by `DMA_BUF_IOCTL_SYNC`, and `--cpu N` pins the parent and its children.
-The final diagnostic/helper artifact is
-[CI 43685967022](https://github.com/cnshing/debian-livecd-termux/actions/runs/43685967022),
-source `243a1cd`; the CPU binary SHA-256 is
-`0a032ff7555aad5756adce10a10bc3c183dfefa315e3929f0350c6fcb3b8ebd1`.
-It is staged on x1s, with default and CPU 0/7 commands queued behind the shared
-lock. Their runtime results are unverified while the phone is offline. Keep
-these diagnostic outcomes separate from CTS qualification counts.
+The original diagnostic opened ION read/write and failed with EACCES after
+reboot, before any allocation. The allocator-compatible read-only correction
+is source `17c5864`, [CI 43687514748](https://github.com/cnshing/debian-livecd-termux/actions/runs/43687514748).
+The verified binary SHA-256 is
+`13a95c22705812ff5a1f569625e6b9d4f8f90e5ae148d36cae068b3a91545e96`.
 
-The observed `stp` spans the file-backed guard and first placed page. Arm
-[documents alignment faults associated with crossing memory-attribute boundaries](https://support.arm.com/documentation/ddi0487/md/-Part-D-The-AArch64-System-Level-Architecture/-Chapter-D8-The-AArch64-Virtual-Memory-System-Architecture/-D8-15-Memory-aborts/-D8-15-5-MMU-fault-prioritization-from-a-single-address-translation-stage?lang=en).
-That is a hypothesis to test with the CPU-only controls, not proof of the
-kernel's actual page attributes or a driver-versus-CTS verdict. Keep the
-accepted coherence fixes and the unchanged CTS results while diagnosing it.
+The corrected CPU-only controls complete all twelve cases on each pinned CPU:
 
-### Resume after device connectivity returns
+| Control | CPU 0 | CPU 7 |
+| --- | --- | --- |
+| Uncached ION, libc memset confined to ION | 3 Pass | 3 Pass |
+| Uncached ION, libc memset spans memfd/ION boundary | 3 Pass | 3 caught SIGBUS |
+| Cached ION, isolated or mixed-boundary fill | 6 Pass | 6 Pass |
 
-x1s disappeared from both ADB and SSH at `192.168.1.238`. The remaining ADB
-endpoint, `192.168.1.177`, identifies a Note10+ (`d2q`) and is not this test phone.
-The last observed `soak-integrated-30min-01` sample was 1,334 seconds; prior
-samples retained Shell 12626, cube 13361 and gears 13373, with FD counts 33/10/10.
-The largest wall-clock capture gap checked through sample 31 was 30.47 seconds.
-The on-device command has a 2,400-second timeout, but do not infer completion or
-cleanup from the failed network connection. Its partial interval is not a
-30-minute pass.
+Every caught fault occurs at stage 4 (libc memset), signal 7, si_code 1
+(BUS_ADRALN), for 4 KiB, 64 KiB and 1 MiB. The preceding volatile byte fill
+and DMA_BUF_SYNC_START succeed. This establishes CPU/core and allocator-mode
+dependence without loading Vulkan or using Mali. It does not measure actual
+kernel PTE attributes. Evidence is `ion-map-boundary-readonly-cpu{0,7}.jsonl`
+and corresponding stderr under the local combined evidence directory.
 
-First retrieve existing `result.json`, `soak-progress.json`, `isolation.json`,
-PNG captures and workload logs instead of restarting a possibly active test.
-Run all three host checkers, then additionally verify capture mtimes have no
-wall-clock gap over 90 seconds and cover the requested interval. Confirm only
-`X0` remains and the restored controller still has its recorded hash. Stop only
-processes carrying this exact owned test tag if cleanup is incomplete.
+### Platform corrections awaiting qualification
 
-Retrieve `ion-map-boundary*.jsonl` and stderr files if the queued diagnostics
-finished. If they did not run, execute the hashed probe with the shared lock,
-first normally and then with `--cpu 0` and `--cpu 7`. Signals are caught in
-isolated child controls, not retried CTS crashes.
+`combined-platform` adds two patches to the eleven-patch combined candidate.
+It has a distinct binary identity and must not inherit the old candidate's
+passes automatically:
 
-The final CI artifact also includes `variable-size.py --large-workgroups`, now
-with optional `--nested`. Run both modes against the combined ICD, with fresh
-output directories and the shared lock. Each should verify 206,304 GL output
-words; these exact-combined GL variable-size runs remain pending. The previous
-206,304-word result later in this document belongs to the older workgroup pair.
-The already accepted 20-cycle private and installed 30/30 runs above need no
-repeat just to recover the remaining evidence.
+- The hybrid Android/X11 Termux ICD profile omits private
+  `VK_ANDROID_native_buffer`; Android-only HAL builds retain it, and public
+  `VK_ANDROID_external_memory_android_hardware_buffer` remains tied to gralloc.
+  The generic Termux loader does not perform the private-to-public extension
+  translation used by the [AOSP loader](https://android.googlesource.com/platform/frameworks/native/+/18fa257ea2/vulkan/libvulkan/driver.cpp).
+  Qualify the unmodified no-unknown-extensions case, public AHB paths and X11.
+- The kmod backend records unsafe placed mapping for noncoherent ION and
+  consistently omits `VK_EXT_map_memory_placed`, `memoryMapPlaced` and
+  `memoryUnmapReserve` on that allocator. Other allocators retain their existing
+  behavior. This withdraws an optional capability that fails on this platform;
+  it does not repair the kernel/libc boundary interaction or turn the archived
+  placed-map crash into a pass. Keep uncached HOST_COHERENT allocations and
+  the accepted CPU/GPU coherence fixes. Qualify ordinary mapping, import/export,
+  compute and desktop behavior on the new binary.
+
+No CTS source, allowlist, diagnostic filtering or advertised API version changes.
+The private-extension-only build at source `738c1b0` was superseded by the build
+including the placed-map capability correction. Qualification remains pending.
+
+### Recovery checkpoint; no further soak requested
+
+x1s is back at `192.168.1.238` after a reboot (new boot ID observed). No owned
+soak/test process remains. Its stale X74 socket is not proof of a live display;
+no unknown processes or sockets were removed. The installed controller checksum
+still matches the restored original
+`46eea9ffcf91ca66fd31801c725ef97b9bcb635349d0efcac9887692dec35666`.
+The last soak log reaches 1,425/1,800 seconds, with no final `result.json` or
+`isolation.json`. Record it as interrupted, not a soak pass. Do not restart or
+extend it, per the user's request.
+
+The probes artifact also includes `variable-size.py --large-workgroups`, with
+optional `--nested`. Exact-combined GL variable-size runs remain pending; each
+mode should verify 206,304 output words in fresh directories under the shared
+lock. Prior installed 30/30 and 20-cycle private checks remain valid for their
+recorded binary. New platform corrections need their own short regressions.
 
 ## Progress on the source-package prerequisite
 

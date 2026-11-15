@@ -270,6 +270,25 @@ feature filter; disabling merging is not established as the fix. Evidence:
 Next isolate the placed-mapping/imported-output atomic path from the other
 optional feature bits; do not treat this as proven barrier failure yet.
 
+An additional same-driver control keeps both the forwarding loader and normal
+features enabled and still fails (expected 122,815, got 26,620), whereas the
+same loader with the core-feature filter passes. Both failing sums are exactly
+one 11×5 Z-plane's contribution, not the full seven-plane sum. This is an
+observation, not yet a diagnosis.
+
+The existing import-flag escape hatch gives a positive control: clearing
+`BASE_MEM_COHERENT_SYSTEM` (`0x400`) and setting `BASE_MEM_COHERENT_LOCAL`
+(`0x800`) makes the multiple-group SSBO case pass with normal CTS features.
+`--local-coherent-imports` records this configuration and marks it diagnostic
+only; inherited import overrides are cleared by default. The ordinary kbase
+allocation path already requests local coherence, whereas imported buffers
+unconditionally requested system coherence even on this non-I/O-coherent GPU.
+The research `import-coherence` variant combines the ION CPU cache-mode patch
+with selecting local/system coherence according to `is_io_coherent`. Build
+[43663975090](https://github.com/cnshing/debian-livecd-termux/actions/runs/43663975090)
+is pending device verification. Evidence:
+`vk-ssbo-ion-multiple-trace-01/` and `vk-ssbo-ion-local-import-01/`.
+
 - Android SHA-256: `e6d981b8e4bc8d56077fc90b22a782adb0b0db2c1c766007218a23a7b091b020`
 - glibc SHA-256: `3a727046e1cfe1ed484b1c1910a0a6167a304b1bdb02b2db8be8e40e59132a9f`
 
@@ -288,7 +307,7 @@ time, recording QPA results, exit status, mapped libraries and binary hashes.
 It stops at the first failure/crash/timeout, enforces a 3 GB available-memory
 floor and a run time limit, and never counts an empty or all-skipped run as a
 pass. Bounded successful chunks can resume only with matching binary identities
-and selection. Resumed results retain their original QPA/log directory. Ten
+and selection. Resumed results retain their original QPA/log directory. Twelve
 host tests cover parsing, resume, failure stopping, process exit failures,
 all-skipped runs, explicit merge/host-memory modes and trace isolation. Use only the X11 dependency directory in
 `LD_LIBRARY_PATH`; the Vulkan suite loads Termux's Vulkan **loader**, not the raw

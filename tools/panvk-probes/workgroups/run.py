@@ -44,7 +44,8 @@ for variant, driver, enabled in (
                      "MESA_GLSL_VERSION_OVERRIDE", "PANVK_LWG_PRINT", "PANVK_PROBE_ROBUST",
                      "PANVK_PROBE_CORE_FEATURES", "PANVK_PROBE_COPY_READBACK", "PANVK_PROBE_STATS",
                      "PANVK_PROBE_SECOND_INSTANCE", "PANVK_PROBE_PLACED_MAP",
-                     "PANVK_G77_NO_MERGE"):
+                     "PANVK_G77_NO_MERGE", "PANVK_KBASE_IMPORT_CLEAR", "PANVK_KBASE_IMPORT_SET",
+                     "PANVK_DEBUG"):
             env.pop(name, None)
         env["PANVK_G77_LWG"] = "1" if enabled else "0"
         env["PANVK_G77_NESTED"] = "1" if enabled and args.nested else "0"

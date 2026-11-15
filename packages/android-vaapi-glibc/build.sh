@@ -4,7 +4,7 @@ TERMUX_PKG_LICENSE="custom"
 TERMUX_PKG_LICENSE_FILE="COPYRIGHTS"
 TERMUX_PKG_MAINTAINER="@cnshing"
 TERMUX_PKG_VERSION="27.0.0~devel20261025"
-TERMUX_PKG_REVISION=1
+TERMUX_PKG_REVISION=2
 TERMUX_PKG_EXCLUDED_ARCHES="arm, i686, x86_64"
 TERMUX_PKG_SKIP_SRC_EXTRACT=true
 TERMUX_PKG_BUILD_IN_SRC=true
@@ -55,7 +55,7 @@ termux_step_post_get_source() {
 	for change in "$bridge"/01[0-9][0-9]-*.patch; do
 		patch --batch -d mesa-mali -p1 < "$change"
 	done
-	cp "$bridge/tva_ion.h" "$bridge/tva_ion_winsys.h" mesa-mali/src/gallium/frontends/va/
+	cp "$bridge/tva_ion_winsys.h" mesa-mali/src/gallium/frontends/va/
 	python3 "$bridge/configure-bridge.py" mesa-mali/src/gallium/frontends/va/tva_bridge.c
 	printf '\n===== mesa-for-android-container =====\n' >> COPYRIGHTS
 	cat mesa-mali/docs/license.rst >> COPYRIGHTS
@@ -68,9 +68,12 @@ termux_step_make() {
 	# glibc shared objects, built with Clang's own linker and no C library: they only call into
 	# the process's glibc.
 	local name
-	for name in ion-dma-heap va-completion; do
+	local source
+	for source in "$TERMUX_PKG_BUILDER_DIR/../android-vaapi/dma-heap.c" "$TERMUX_PKG_BUILDER_DIR/va-completion.c"; do
+		name=$(basename "$source" .c)
+		test "$name" = dma-heap || name=vaapi-$name
 		$CC --target=aarch64-linux-gnu --sysroot="$PWD/sysroot" -fuse-ld=lld -nostdlib -shared -fPIC \
-			-O2 -Wall -Wextra -Werror "$TERMUX_PKG_BUILDER_DIR/$name.c" -o "libandroid-vaapi-$name.so"
+			-O2 -Wall -Wextra -Werror "$source" -o "libandroid-$name.so"
 	done
 }
 
@@ -81,7 +84,7 @@ termux_step_make_install() {
 	install -d "$private/lib"
 	cp -a mesa "$private/mesa"
 	cp -P libraries/* "$private/lib/"
-	install -m755 libandroid-vaapi-ion-dma-heap.so libandroid-vaapi-va-completion.so "$private/lib/"
+	install -m755 libandroid-dma-heap.so libandroid-vaapi-va-completion.so "$private/lib/"
 	# Mali uses the patched softpipe bridge. Keep lfdevs' Turnip stack beside it.
 	install -d "$private/mali/dri"
 	cp -P mali-stage/usr/lib/aarch64-linux-gnu/libgallium*.so* "$private/mali/"
@@ -106,8 +109,8 @@ termux_step_make_install() {
 		(private / 'manifest.json').write_text(json.dumps({
 		    'format': 1, 'abi': 'glibc', 'libraries': [mesa, 'lib'], 'driver_directory': mesa + '/dri',
 		    'mesa_library_directory': mesa, 'vulkan_icd': 'freedreno_icd.json',
-		    'preloads': [mesa + '/libtva_drm_shim_wayland.so', 'lib/libandroid-vaapi-ion-dma-heap.so'],
-		    'completion_preload': 'lib/libandroid-vaapi-va-completion.so', 'ion_fallback': 'preload',
+		    'preloads': [mesa + '/libtva_drm_shim_wayland.so'], 'dma_heap_preload': 'lib/libandroid-dma-heap.so',
+		    'completion_preload': 'lib/libandroid-vaapi-va-completion.so',
 		    'mali': {'libraries': ['mali'], 'driver_directory': 'mali/dri'}}, indent=2) + '\n')
 	PY
 }

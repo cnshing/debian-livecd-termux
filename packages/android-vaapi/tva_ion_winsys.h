@@ -7,19 +7,23 @@
  * The bridge's software backend used the null winsys, so its surfaces were
  * plain malloc'd memory: vaExportSurfaceHandle failed and browsers, which
  * import every decoded frame as a dma-buf, fell back to software decoding.
- * Here softpipe's display targets live in dma-bufs from the system dma-heap
- * or, on Android 11 and older kernels, ION.  Softpipe already routes shared
+ * Here softpipe's display targets live in dma-bufs from the system dma-heap.
+ * On kernels with ION and no heaps (Android 11 and older), libandroid-dma-heap.so
+ * (dma-heap.c, preloaded by the launcher) serves that heap from ION.  Softpipe already routes shared
  * resources, imports, exports and CPU maps through the winsys, so the bridge's
  * contiguous NV12 surfaces, its DMA_BUF_IOCTL_SYNC write brackets and the VA
  * export all work unchanged on top of it.
  *
- * Include after tva_ion.h.  TERMUX_VA_ION_WINSYS=0 restores the null winsys.
+ * TERMUX_VA_ION_WINSYS=0 restores the null winsys.
  */
 #ifndef LIVECD_TVA_ION_WINSYS_H
 #define LIVECD_TVA_ION_WINSYS_H
 
+#include <fcntl.h>
+#include <linux/dma-heap.h>
 #include <stdbool.h>
 #include <stdint.h>
+#include <sys/ioctl.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
@@ -46,19 +50,15 @@ struct tva_ion_dt {
 static int
 tva_ion_ws_alloc(size_t size)
 {
-#ifdef __linux__
    int heap = open("/dev/dma_heap/system", O_RDONLY | O_CLOEXEC);
-   if (heap >= 0) {
-      struct dma_heap_allocation_data alloc = {
-         .len = size, .fd_flags = O_RDWR | O_CLOEXEC,
-      };
-      int ret = ioctl(heap, DMA_HEAP_IOCTL_ALLOC, &alloc);
-      close(heap);
-      if (ret == 0)
-         return (int)alloc.fd;
-   }
-#endif
-   return android_vaapi_tva_alloc_ion(size);
+   if (heap < 0)
+      return -1;
+   struct dma_heap_allocation_data alloc = {
+      .len = size, .fd_flags = O_RDWR | O_CLOEXEC,
+   };
+   int ret = ioctl(heap, DMA_HEAP_IOCTL_ALLOC, &alloc);
+   close(heap);
+   return ret == 0 ? (int)alloc.fd : -1;
 }
 
 static struct sw_displaytarget *

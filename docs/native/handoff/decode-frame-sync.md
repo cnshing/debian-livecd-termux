@@ -22,6 +22,21 @@ the picture complete before that copy was visible to Chromium's implicit DRM syn
 So the compositor could present the surface's previous content. `LIVECD_VA_DISABLE_COMPLETION=1`
 removes the wait and reproduces the stale frames, which is the negative control.
 
+## Outcome 2026-11-14 (fix/decode-frame-sync)
+
+- **Cause 1 confirmed in the code and patched, not yet verified on the phone.** For VP9, HEVC
+  and H.264, destroying a fence only detached it. The pending entry stayed `in_use` and not
+  `ready`, so `tva_pend_find_locked` still matched a late MediaCodec frame by unit index, and
+  the reader copied it straight into the reused surface (`tva_copy_frame_direct`).
+  `packages/android-vaapi/0104-drop-late-frames-all-codecs.patch` (revision 6) sets
+  `drop_on_fence_destroy` for every fenced entry. Fence destruction now waits up to 200 ms
+  (`DMD_AV1_FENCE_WAIT_MS`), copies a staged frame, and then drops any later output.
+- Not done: the package was not built and nothing was run on a phone (x1s was busy with a
+  peer the whole session). Still to do: the recorder repro under MediaCodec load, before and
+  after. Also check for missing frames and fence-destroy stalls (`DMD_VA_TRACE`, look for
+  "recycled fence").
+- Cause 2 (tearing) is untouched.
+
 ## Candidate causes still open
 
 Both are in `tva_bridge.c` (see [decode-h264.md](decode-h264.md) for where it is):

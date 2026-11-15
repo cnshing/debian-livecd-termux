@@ -4,10 +4,12 @@
 #include <fcntl.h>
 #include <inttypes.h>
 #include <linux/memfd.h>
+#include <sched.h>
 #include <signal.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
 #include <sys/wait.h>
@@ -113,8 +115,26 @@ static void child(int ion, uint32_t heap, size_t size, uint32_t flags,
    _exit(written == (ssize_t)sizeof(result) ? 0 : 1);
 }
 
-int main(void)
+int main(int argc, char **argv)
 {
+   int pinned_cpu = -1;
+   if (argc != 1) {
+      char *end = NULL;
+      long cpu = argc == 3 ? strtol(argv[2], &end, 10) : -1;
+      if (argc != 3 || strcmp(argv[1], "--cpu") || !end || *end ||
+          cpu < 0 || cpu >= CPU_SETSIZE) {
+         fprintf(stderr, "usage: %s [--cpu N]\n", argv[0]);
+         return 2;
+      }
+      cpu_set_t cpus;
+      CPU_ZERO(&cpus);
+      CPU_SET(cpu, &cpus);
+      if (sched_setaffinity(0, sizeof(cpus), &cpus)) {
+         perror("CPU affinity");
+         return 2;
+      }
+      pinned_cpu = (int)cpu;
+   }
    int ion = open("/dev/ion", O_RDWR | O_CLOEXEC);
    struct ion_heap heaps[64] = {0};
    struct ion_query query = {.count = 64, .heaps = (uintptr_t)heaps};
@@ -157,11 +177,11 @@ int main(void)
                return 2;
             const char *outcome = result.signal ? "caught_signal" :
                                   result.error ? "error" : "Pass";
-            printf("{\"cpu_only\":true,\"ion_flags\":%u,\"bytes\":%zu,"
+            printf("{\"cpu_only\":true,\"pinned_cpu\":%d,\"ion_flags\":%u,\"bytes\":%zu,"
                    "\"whole_reservation\":%s,\"outcome\":\"%s\","
                    "\"stage\":%d,\"signal\":%d,\"si_code\":%d,"
                    "\"errno\":%d,\"fault_address\":\"0x%" PRIxPTR "\"}\n",
-                   cached, sizes[i], entire ? "true" : "false", outcome,
+                   pinned_cpu, cached, sizes[i], entire ? "true" : "false", outcome,
                    result.stage, result.signal, result.code, result.error,
                    result.address);
             fflush(stdout);

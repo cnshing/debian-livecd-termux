@@ -1,11 +1,40 @@
 # Handoff: `/dev/dma_heap` on top of `/dev/ion`, for kernels without DMA-BUF heaps
 
-State on 2026-11-14. For whoever builds this as a dedicated task. It stands on its own.
+**Completed 2026-11-15.** Merged to main in PRs #13 and #14. The full results are in
+[DMA-HEAP-ION.md](../DMA-HEAP-ION.md). The plan below is kept as the record of what was asked.
 
-Target phone: Galaxy S20 (`x1s`, SM-G981B), Exynos 990, Mali-G77, Android 13, Linux 4.19.87,
-stock kernel, no root. Our GPU driver there is the PanVK kbase driver from
-[zenithblue-oss/panvk-kbase-android](https://github.com/zenithblue-oss/panvk-kbase-android)
-(package `mesa-vulkan-icd-panvk-kbase`, release 26.3.1, source pinned at `cf70e02`).
+## Outcome
+
+- `packages/android-vaapi/dma-heap.c` builds `libandroid-dma-heap.so`, for Bionic in
+  `android-vaapi` and for glibc in `android-vaapi-glibc`. It presents `/dev/dma_heap/system`
+  and `/dev/dma_heap/system-uncached` and turns `DMA_HEAP_IOCTL_ALLOC` into ION's
+  `ION_IOC_ALLOC`. Heaps are chosen the way Android's libdmabufheap chooses them.
+- `src/native/acceleration.py` loads it only when `/dev/dma_heap` is absent and `/dev/ion` is
+  present. `LIVECD_DMA_HEAP_ION=0` turns it off. It replaced `LIVECD_TVA_ION_FALLBACK`.
+- Both VA-API bridges now allocate only through the heap. `tva_ion.h` and the glibc
+  `ion-dma-heap.c` preload are removed.
+
+| Step | Result on the S20 |
+| --- | --- |
+| 1. Probe | ION heap list recorded; system heap ID 0. Raw ION at 4 KiB, 1 MiB and 64 MiB, cached and uncached, with `mmap` and a sync round trip: pass |
+| 2. Preload with host tests | `tests/dma-heap/test-dma-heap.sh`, 9 cases against a fake ION device: pass |
+| 3. Standalone | heap-API client with a second process over `SCM_RIGHTS`: pass. Vulkan dma-buf import on PanVK, both heaps: pass. Fails without the preload, as it must |
+| 4. Bridge and browsers | FFmpeg VP9/HEVC 48 of 48 frames bit-exact. Firefox VP9/HEVC in hardware. Chrome WebRTC encode and VP9/HEVC playback through the glibc preload. With `LIVECD_DMA_HEAP_ION=0`, the bridge falls back to software, as it must |
+| 5. Installed run | `android-vaapi` 11 and `android-vaapi-glibc` 3 installed on the S20: desktop check 30 of 30, Chrome and Firefox VP9/HEVC pass |
+
+PanVK needed no change: Zenith's JM patch 005 already falls back to ION itself.
+
+## Not done, by decision or for lack of a phone
+
+- **The desktop session (`graphics.py`) does not load the preload.** With it, PanVK's
+  HOST_COHERENT memory would become uncached ION. That needs the desktop and Ghostty checks
+  first, and nothing needs it today.
+- **Note10+ regression run.** It is ION-only too, so its bridge now depends on the preload. It
+  has not been run there.
+- **Chromium** on the S20 waits for the revision 3 CI build.
+- `opendir("/dev/dma_heap")` listing is not emulated. Nothing found so far needs it.
+
+The follow-ups that build on the heap are listed below under "Built on top of this".
 
 ## The task
 
@@ -35,7 +64,7 @@ What the S20 offers (checked 2026-11-14):
 | `/dev/dri/*` | not visible to the app (SELinux) |
 | `/dev/mali0` | read/write for the Termux app |
 
-## Who allocates today, and how
+## Who allocated before this work (2026-11-14)
 
 | Component | Heap | ION | Other |
 | --- | --- | --- | --- |

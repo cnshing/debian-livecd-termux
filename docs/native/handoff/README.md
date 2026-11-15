@@ -31,7 +31,7 @@ Two phones were used:
 | Chromium encode | not run | WebRTC and WebCodecs (H.264, VP9) pass on hardware with revision 3 | yes, revision 3+ on Mali | [encode-chromium.md](encode-chromium.md) |
 | Chrome encode | not run | WebRTC H.264/VP9 passes on Exynos (Bionilux 0.5.0-2 netlink fix); WebCodecs crash cannot be patched | no, user decision | [encode-chrome.md](encode-chrome.md) |
 | Firefox encode | not run | both Firefox bugs patched on fix/encode-firefox (own Firefox build); opt-in `firefox_encode` | no (user's call) | [encode-firefox.md](encode-firefox.md) |
-| `/dev/dma_heap` emulated on `/dev/ion` for kernels without DMA-BUF heaps (the S20's 4.19) | needed too (ION, no heap) | ION used separately by the bridge and PanVK; no heap interface | n/a | [dmabuf-s20.md](dmabuf-s20.md) |
+| `/dev/dma_heap` emulated on `/dev/ion` for kernels without DMA-BUF heaps (the S20's 4.19) | needed too (ION, no heap) | done: the preload provides the heap; bridges use only the heap; verified installed | yes, on phones with ION and no heap | [dmabuf-s20.md](dmabuf-s20.md) |
 | **Parity with the S20's codecs** | n/a | not met: H.264 decode off; VP8, MPEG-4 and H.263 not offered; 10-bit, 4K and 8K untested; nothing on a fresh install | n/a | [s20-codec-parity.md](s20-codec-parity.md) |
 
 AV1 is disabled on every phone. Neither the Snapdragon 855 nor the S20 has an AV1 decoder, so

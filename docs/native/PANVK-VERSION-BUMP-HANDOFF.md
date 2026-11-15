@@ -10,7 +10,8 @@ validation **30/30 in both default and nested modes**. The release controller
 and desktop have been restored and pass 30/30. Broader CTS exposes two remaining
 promotion blockers: placed-mapping SIGBUS and the Android private-extension
 loader boundary. Default versions and package pins remain unchanged. The exact
-combined candidate's continuous 30-minute soak is running.
+combined candidate's soak was last observed at 1,334 seconds before x1s left
+the LAN; final completion and cleanup are not yet verified.
 
 ## Combined qualification in progress, 2026-11-14
 
@@ -56,8 +57,8 @@ Additional controls use the previously qualified import-coherence binary
 - GLES atomic counters and synchronization: **402/402 Pass**.
 - The existing installed Zink desktop passes **30/30** before any switch.
 
-Neither CTS control uses diagnostic feature filtering, import flags or a trace
-loader. Every case maps the intended ICD. Local evidence is under
+These passing CTS controls use no diagnostic feature filtering, import flags
+or trace loader. Every case maps the intended ICD. Local evidence is under
 `temp/panvk-qualification/evidence/combined/control-{extended-01,zero-init-01,zero-init-02}/`;
 the installed control is `installed-baseline.json`. Combined evidence is in
 `oracle-{uncached,cache-cold,cache-warm}/`, `basic/`, `basic-glibc/`,
@@ -127,8 +128,52 @@ It opens ION and memfd mappings without Vulkan or Mali, compares cached and
 uncached allocations at three sizes, and compares libc memset within the ION
 mapping against memset across its file-backed guard boundaries. Twelve finite
 child controls catch SIGBUS/SIGSEGV and report the fault stage/address through a
-pipe; caught faults still make the diagnostic exit nonzero. It has not yet run
-on x1s. Keep it separate from qualification counts and run it after the soak.
+pipe; caught faults still make the diagnostic exit nonzero. CPU accesses are
+bracketed by `DMA_BUF_IOCTL_SYNC`, and `--cpu N` pins the parent and its children.
+The final diagnostic/helper artifact is
+[CI 43685967022](https://github.com/cnshing/debian-livecd-termux/actions/runs/43685967022),
+source `243a1cd`; the CPU binary SHA-256 is
+`0a032ff7555aad5756adce10a10bc3c183dfefa315e3929f0350c6fcb3b8ebd1`.
+It is staged on x1s, with default and CPU 0/7 commands queued behind the shared
+lock. Their runtime results are unverified while the phone is offline. Keep
+these diagnostic outcomes separate from CTS qualification counts.
+
+The observed `stp` spans the file-backed guard and first placed page. Arm
+[documents alignment faults associated with crossing memory-attribute boundaries](https://support.arm.com/documentation/ddi0487/md/-Part-D-The-AArch64-System-Level-Architecture/-Chapter-D8-The-AArch64-Virtual-Memory-System-Architecture/-D8-15-Memory-aborts/-D8-15-5-MMU-fault-prioritization-from-a-single-address-translation-stage?lang=en).
+That is a hypothesis to test with the CPU-only controls, not proof of the
+kernel's actual page attributes or a driver-versus-CTS verdict. Keep the
+accepted coherence fixes and the unchanged CTS results while diagnosing it.
+
+### Resume after device connectivity returns
+
+x1s disappeared from both ADB and SSH at `192.168.1.238`. The remaining ADB
+endpoint, `192.168.1.177`, identifies a Note10+ (`d2q`) and is not this test phone.
+The last observed `soak-integrated-30min-01` sample was 1,334 seconds; prior
+samples retained Shell 12626, cube 13361 and gears 13373, with FD counts 33/10/10.
+The largest wall-clock capture gap checked through sample 31 was 30.47 seconds.
+The on-device command has a 2,400-second timeout, but do not infer completion or
+cleanup from the failed network connection. Its partial interval is not a
+30-minute pass.
+
+First retrieve existing `result.json`, `soak-progress.json`, `isolation.json`,
+PNG captures and workload logs instead of restarting a possibly active test.
+Run all three host checkers, then additionally verify capture mtimes have no
+wall-clock gap over 90 seconds and cover the requested interval. Confirm only
+`X0` remains and the restored controller still has its recorded hash. Stop only
+processes carrying this exact owned test tag if cleanup is incomplete.
+
+Retrieve `ion-map-boundary*.jsonl` and stderr files if the queued diagnostics
+finished. If they did not run, execute the hashed probe with the shared lock,
+first normally and then with `--cpu 0` and `--cpu 7`. Signals are caught in
+isolated child controls, not retried CTS crashes.
+
+The final CI artifact also includes `variable-size.py --large-workgroups`, now
+with optional `--nested`. Run both modes against the combined ICD, with fresh
+output directories and the shared lock. Each should verify 206,304 GL output
+words; these exact-combined GL variable-size runs remain pending. The previous
+206,304-word result later in this document belongs to the older workgroup pair.
+The already accepted 20-cycle private and installed 30/30 runs above need no
+repeat just to recover the remaining evidence.
 
 ## Progress on the source-package prerequisite
 

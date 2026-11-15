@@ -1,0 +1,27 @@
+From: LiveCD Termux maintainers
+Subject: [PATCH] Upload NV12 shared-memory frames to VA-API encoders
+
+With 0100 the WebCodecs adapter sends NV12 shared memory, but
+UploadVideoFrameToSurface only copied I420 and failed every frame with
+"Unsupported pixel format: PIXEL_FORMAT_NV12". Copy NV12 planes directly.
+
+--- a/media/gpu/vaapi/vaapi_wrapper.cc	2026-11-14 06:42:55.436011546 -0800
++++ b/media/gpu/vaapi/vaapi_wrapper.cc	2026-11-14 06:42:55.464011683 -0800
+@@ -3051,6 +3051,17 @@
+           UNSAFE_TODO(image_ptr + image.offsets[0]), image.pitches[0],
+           UNSAFE_TODO(image_ptr + image.offsets[1]), image.pitches[1],
+           visible_size.width(), visible_size.height());
++    } else if (frame.format() == PIXEL_FORMAT_NV12) {
++      // WebCodecs on Termux sends shared-memory NV12 frames (see
++      // 0100-termux-webcodecs-shmem.patch); copy both planes as they are.
++      ret = libyuv::NV12Copy(
++          frame.data(VideoFrame::Plane::kY),
++          frame.stride(VideoFrame::Plane::kY),
++          frame.data(VideoFrame::Plane::kUV),
++          frame.stride(VideoFrame::Plane::kUV),
++          UNSAFE_TODO(image_ptr + image.offsets[0]), image.pitches[0],
++          UNSAFE_TODO(image_ptr + image.offsets[1]), image.pitches[1],
++          visible_size.width(), visible_size.height());
+     } else {
+       LOG(ERROR) << "Unsupported pixel format: "
+                  << VideoPixelFormatToString(frame.format());

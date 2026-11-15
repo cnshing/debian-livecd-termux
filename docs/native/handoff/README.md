@@ -30,7 +30,7 @@ Two phones were used:
 | Native encode: FFmpeg, GStreamer, Serein | passes | passes in private tests; not on a fresh install | yes where `android-vaapi` is installed | [encode-native.md](encode-native.md) |
 | Chromium encode | not run | WebRTC works behind a flag; WebCodecs crashes; patch in CI | no | [encode-chromium.md](encode-chromium.md) |
 | Chrome encode | not run | WebRTC has no network; WebCodecs crash cannot be patched | no | [encode-chrome.md](encode-chrome.md) |
-| Firefox encode | not run | off by the user's decision; two Firefox bugs | no | [encode-firefox.md](encode-firefox.md) |
+| Firefox encode | not run | both Firefox bugs patched on fix/encode-firefox (own Firefox build); opt-in `firefox_encode` | no (user's call) | [encode-firefox.md](encode-firefox.md) |
 | **Parity with the S20's codecs** | n/a | not met: H.264 decode off; VP8, MPEG-4 and H.263 not offered; 10-bit, 4K and 8K untested; nothing on a fresh install | n/a | [s20-codec-parity.md](s20-codec-parity.md) |
 
 AV1 is disabled on every phone. Neither the Snapdragon 855 nor the S20 has an AV1 decoder, so

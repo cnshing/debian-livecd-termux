@@ -1,0 +1,17 @@
+--- a/dom/media/platforms/ffmpeg/FFmpegDataEncoder.cpp
++++ b/dom/media/platforms/ffmpeg/FFmpegDataEncoder.cpp
+@@ -293,8 +293,12 @@
+         [&](const DisplayDimensionsChange& aChange) -> bool { return false; },
+         [&](const BitrateModeChange& aChange) -> bool { return false; },
+         [&](const BitrateChange& aChange) -> bool {
+-          // Verified on x264
+-          if (!strcmp(mCodecContext->codec->name, "libx264")) {
++          // Verified on x264. FFmpeg's VA-API encoders apply a changed
++          // bit_rate with their next picture.
++          const char* name = mCodecContext->codec->name;
++          size_t length = strlen(name);
++          if (!strcmp(name, "libx264") ||
++              (length > 6 && !strcmp(name + length - 6, "_vaapi"))) {
+             if (aChange.get().isNothing()) {
+               return false;
+             }

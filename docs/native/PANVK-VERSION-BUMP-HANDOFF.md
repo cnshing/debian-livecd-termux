@@ -210,6 +210,36 @@ Vulkan instances. The single-instance budget case passed. Evidence:
 `temp/panvk-qualification/evidence/vk-general-info-release-01/`. This is another
 baseline blocker, separate from workgroup lowering.
 
+The isolated `memory-budget` variant now fixes this accounting failure. It
+shares an atomic application-allocation counter between physical-device objects
+for the same kernel device node, with reference-counted registry lifetime,
+while retaining the local counters used for internal trimming. Actions
+[43660659573](https://github.com/cnshing/debian-livecd-termux/actions/runs/43660659573)
+built both ABIs. The Android driver passes both budget cases, then completes
+`dEQP-VK.info.*` with **22 passes and one unsupported case**. No test was edited
+or filtered. Evidence: `vk-budget-fix-01/` and `vk-info-budget-fix-01/`.
+
+- Android SHA-256: `ce9fef7506cabf99f8299f3e15895542b023dfb670be24f8a345eed0eb0cb999`
+- glibc SHA-256: `fee10abad5f97f18e9cf0a438b44fd407d9486656a87286254b832bf101e2b66`
+
+The patch and isolated CI variant are on main under `budget-patches/`; the
+package pins and installed drivers are unchanged. The glibc build is not yet a
+glibc runtime qualification.
+
+The compute failure is now narrowed to a device-feature-controlled allocation
+path. Traced CTS passes when optional features are removed, but that filtered
+run is diagnostic only. More decisively, the exact reduced shader fails when
+the placed-mapping feature structure is added: 336 of 512 words are wrong.
+The same executable with that feature structure disabled passes all 512 words
+(`reduced-cts-placed-off-01/`). Enabling this feature
+makes ordinary host-visible allocations shareable even without a placed-map
+request. The ION allocator hardcodes cached backing while the Vulkan memory
+type advertises host coherence. The isolated `ion-cache` research build
+[43661900884](https://github.com/cnshing/debian-livecd-termux/actions/runs/43661900884)
+changes the ION cached flag to follow `PAN_KMOD_BO_FLAG_WB_MMAP`. Its device
+result is pending; do not call it a fix yet. Evidence:
+`vk-max-local-core-filter-01/` and `reduced-cts-placed-map-01/`.
+
 `tools/panvk-probes/cts/run.py` lists the requested cases and executes one at a
 time, recording QPA results, exit status, mapped libraries and binary hashes.
 It stops at the first failure/crash/timeout, enforces a 3 GB available-memory

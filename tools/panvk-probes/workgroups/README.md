@@ -76,6 +76,10 @@ encoding used by CTS; newer targets use `StorageBuffer`. Compare the saved
 shader from `--trace-loader` too, rather than assuming the reduced shader has
 identical SPIR-V.
 
+`PANVK_PROBE_PLACED_MAP=1` enables `VK_EXT_map_memory_placed` while the test
+still uses ordinary buffer mapping. This isolates its effect on allocation
+backing and host coherence; it is separate from the compiler-statistics mode.
+
 The check executable can load either a raw ICD or a Vulkan loader. For a loader,
 set `VK_DRIVER_FILES` to a private ICD JSON selecting the intended driver.
 

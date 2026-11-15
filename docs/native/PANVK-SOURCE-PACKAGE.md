@@ -52,7 +52,10 @@ stub directory or any other search override is rejected. The glibc driver has
 no RUNPATH. A candidate that writes into the release stack is
 rejected.
 
-Other driver build variants are `point-size`, `x11`, `workgroups` and `research`.
+Other main driver build variants are `point-size`, `x11`, `workgroups`,
+`memory-budget` and `research`. The `memory-budget` variant applies only the
+process-wide heap-accounting patch; its Android CTS results are in the version
+bump handoff.
 The first two apply just their named patch to the baseline. `workgroups` applies
 only the experimental workgroup series. `research` retains the previous combined
 X11/point-size series for reproducing its GTK failure. Each variant also retains

@@ -176,6 +176,21 @@ alone. Retain the failing CTS result; these reduced passes cannot replace it.
 The `bare-*` and `cts-max-*` probes and their controls are documented in
 `tools/panvk-probes/workgroups/README.md`.
 
+The diagnostic forwarding loader passes a one-case lavapipe CPU control and
+captures CTS's exact 732-byte SPIR-V 1.0 shader. On source baseline Android hash
+`18373403292ec998ae55679b4a486e215d21692d7e6d39054a58b7f4790fb97f`,
+that exact shader and the reduced legacy SSBO fixture both pass 512 words with
+direct and copied readback, enabling supported Vulkan 1.1–1.3 core features.
+Yet the same binary fails traced CTS: immediately after invalidate, 288 mapped
+words equal 1 and 224 equal 0, first non-one at index 96. CTS reports the same
+index. Thus the missing writes precede its CPU verification copy; shader
+encoding and `memcpy` alone do not explain the failure. This separately built
+baseline has its own identity; it is not the earlier `db0bf89a…` control.
+Evidence: `reduced-cts-legacy-01/`, `vk-max-local-source-trace-01/` and
+`vk-max-local-lavapipe-trace-01/` under the qualification evidence directory.
+The next reduced fixture moves buffer allocation before pipeline creation,
+matching CTS; its device result is still pending.
+
 A separate release `dEQP-VK.info.*` run stopped after nine passes, one unsupported
 case and `device_memory_budget_multi_instance` failing. Its QPA reports that
 heap 0 usage did not increase when allocation and budget query used different
@@ -268,13 +283,20 @@ normal Ghostty exit and preserved session isolation. Presentation uses CPU
 readback. Evidence:
 `temp/panvk-qualification/evidence/nested-slices/desktop-20-01/`.
 
-The first 30-minute attempt stopped after six samples through 151.5 seconds
-because another owner's private X93 display appeared. None of the monitored
-workloads exited, but isolation failed; this is not a completed soak. Evidence:
-`temp/panvk-qualification/evidence/nested-slices/soak-30min-01/`. Retry 02 was
-stopped deliberately to yield the shared lock to a previously queued short
-package test. Neither partial interval counts toward the required continuous
-1,800 seconds.
+The fixed nested driver now also passes the **continuous 30-minute private
+soak**: 1,800.000 seconds, 60 samples, stable Shell/vkcube/glxgears PIDs, the
+same PanVK mapping and Mali FDs throughout, GL frame progress, and preserved
+session isolation. Both pixel checkers also pass its four GTK and four Ghostty
+captures, including stale-frame rejection and normal terminal exit. Shell RSS
+changed from 337,816 to 335,200 KiB, cube stayed at 36,944 KiB, and gears changed
+from 175,000 to 177,000 KiB; FD counts stayed at 31/10/10. These endpoints do not
+establish a general leak bound. Evidence and the independent soak report:
+`temp/panvk-qualification/evidence/nested-slices/soak-30min-03/`.
+
+The first attempt stopped after six samples through 151.5 seconds because
+another owner's private X93 display appeared. Retry 02 was stopped deliberately
+to yield the shared lock to a previously queued short package test. Neither
+partial interval was added to retry 03's continuous 1,800 seconds.
 
 After a soak, run `tests/native/check-panvk-soak.py <evidence-directory>` as
 well as both pixel checkers. It requires at least 1,800 continuous seconds,
@@ -388,8 +410,8 @@ The pass is a working subset behind an environment variable. To ship it:
    cases and show heavy spilling in the nested scheduler. Measure GPU throughput
    and broader shader pressure; the 256-thread hardware cap is not a performance proof.
 6. **Then drop the opt-ins** for architecture 9 after qualification. The fixed nested
-   driver passed the private 20-cycle run. The 30-minute soak and installed 30/30
-   validation still remain.
+   driver passed the private 20-cycle run and 30-minute soak. Installed 30/30
+   validation, unresolved CTS failures and performance qualification remain.
 
 When the installed driver reports 4.3, nothing else needs changing for Ghostty:
 `src/native/terminal.py` asks `glxinfo` for the core version and keeps the GPU when it is at

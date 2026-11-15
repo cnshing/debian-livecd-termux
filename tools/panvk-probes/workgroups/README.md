@@ -65,7 +65,9 @@ PANVK_PROBE_ROBUST=0 workgroups/check /private/driver.so \
 ```
 
 `PANVK_PROBE_CORE_FEATURES=1` enables the supported Vulkan 1.1–1.3 core
-features for this fixture. `PANVK_PROBE_COPY_READBACK=1` copies the mapped
+features through the `VkPhysicalDeviceFeatures2` device-creation form for this
+fixture. `PANVK_PROBE_SECOND_INSTANCE=1` also enumerates the same GPU through a
+second live Vulkan instance. `PANVK_PROBE_COPY_READBACK=1` copies the mapped
 output through `memcpy` before checking, matching the CTS readback operation.
 The executable logs the selected memory type and allocation size.
 

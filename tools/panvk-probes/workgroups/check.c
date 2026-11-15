@@ -60,6 +60,19 @@ int main(int argc, char **argv)
       return !strcmp(argv[6], "skip") ? 0 : 1;
    }
    if (!strcmp(argv[6], "skip")) { puts("FAIL: expected a limit rejection"); return 1; }
+   const char *second_mode = getenv("PANVK_PROBE_SECOND_INSTANCE");
+   if (second_mode && !strcmp(second_mode, "1")) {
+      VkInstance companion;
+      CHECK(vkCreateInstance(&ici, NULL, &companion));
+      VkPhysicalDevice other;
+      uint32_t other_count = 1;
+      CHECK(vkEnumeratePhysicalDevices(companion, &other_count, &other));
+      VkPhysicalDeviceProperties other_props;
+      vkGetPhysicalDeviceProperties(other, &other_props);
+      if (other_count != 1 || other_props.vendorID != props.vendorID ||
+          other_props.deviceID != props.deviceID) return 1;
+      puts("secondInstance=1");
+   }
    VkPhysicalDeviceFeatures features;
    vkGetPhysicalDeviceFeatures(physical, &features);
    const char *robust_mode = getenv("PANVK_PROBE_ROBUST");
@@ -115,6 +128,13 @@ int main(int argc, char **argv)
       di.pNext = &stats_feature;
       di.enabledExtensionCount = 1;
       di.ppEnabledExtensionNames = &stats_extension;
+   }
+   VkPhysicalDeviceFeatures2 create_features = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2,
+      .pNext = (void *)di.pNext, .features = features};
+   if (full_core) {
+      di.pEnabledFeatures = NULL;
+      di.pNext = &create_features;
+      puts("createDeviceFeatures2=1");
    }
    VkDevice device;
    CHECK(vkCreateDevice(physical, &di, NULL, &device));

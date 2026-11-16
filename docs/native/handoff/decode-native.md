@@ -9,18 +9,16 @@ criteria: [README.md](README.md).
 | --- | --- | --- |
 | mpv, through its launcher | passes VP9, H.264 and HEVC: hardware decode plus numbered-frame pixels, Vulkan `gpu-next` rendering | passes VP9, H.264 and HEVC on its own route: VirGL on the vendor GLES driver for rendering, MediaCodec for decoding |
 | FFmpeg `-hwaccel vaapi` | frame-exact VP9, HEVC, H.264 in development tests (2026-11-03) | HEVC frame-exact on three clips with `TERMUX_VA_HEVC_REORDER_PICS=0`; hangs without it |
-| GStreamer `va` decoders | not tested | not tested; `gst-plugins-va` is not installed by any overlay |
+| GStreamer `va` decoders | not tested | not tested; the Video Player overlay now installs `gst-plugins-va` |
 
 **mpv is the one that works for users.** It does not use VA-API: the launcher passes
 `--hwdec=mediacodec-copy --vd-lavc-o=ndk_codec=1` (`src/native/acceleration.py`), so FFmpeg
 inside mpv calls MediaCodec directly. That is why H.264 works in mpv but not in the browsers.
 mpv also opens SMB shares through a GIO bridge in the launcher, because there is no FUSE.
 
-## Gaps for VA-API programs
+## Gaps for VA-API programs (all three fixed on main, none rerun on a phone)
 
-These come from reading the code; none has been run on a phone.
-
-1. **Programs started from the desktop session get the decoders, without the browser
+1. **Programs started from the desktop session got the decoders, without the browser
    safeguards.** The session preload (`native_encode` in `src/native/desktop.py`) points libva
    at the bridge, and hides its decoders only when `native_decode` is `false` in
    `acceleration.json`. It does not set `TERMUX_VA_DISABLE_H264`, `TERMUX_VA_DISABLE_AV1` or, on
@@ -28,35 +26,33 @@ These come from reading the code; none has been run on a phone.
    launcher (`video_environment`). So FFmpeg run from a terminal with `-hwaccel vaapi` can hit
    the H.264 hang ([decode-h264.md](decode-h264.md)), and on Mali the HEVC stall. (ENCODING.md
    said the opposite until 2026-11-14; the code is as described here.)
-2. **FFmpeg on a fresh S20 has no VA-API at all.** The phone has Termux's FFmpeg `9.0.2-1`; this
-   project's `ffmpeg` `9.0.2-100` was not offered by its package source. See
+2. **FFmpeg on a fresh S20 had no VA-API at all.** The phone has Termux's FFmpeg `9.0.2-1`; this
+   project's `ffmpeg` was missing from the release because of a build-order bug, now fixed. See
    [encode-native.md](encode-native.md).
-3. **The installed driver on the S20 cannot find the Mali GPU** for programs that scan
-   `/dev/dri`: `android-vaapi` revision 5 presents only the Snapdragon GPU. Revisions 7 and 8
-   present `/dev/mali0` but are not released ([encode-native.md](encode-native.md)).
+3. **The driver on the S20 could not find the Mali GPU** for programs that scan
+   `/dev/dri`: `android-vaapi` revision 5 presented only the Snapdragon GPU. Revision 7 and
+   later (on main) present `/dev/mali0` ([encode-native.md](encode-native.md)).
 
 ## Outcome (2026-11-14, decode-native)
 
-Gap 1 is fixed in code on `fix/decode-native`: `decode_safeguards()` in
+Gap 1 is fixed on main: `decode_safeguards()` in
 `src/native/acceleration.py` sets the codec list (`disabled_va_codecs`, default H.264 and AV1)
 and, on Mali, `TERMUX_VA_HEVC_REORDER_PICS=0`. Both `video_environment` and the session's
 `native_encode()` call it. `tests/packaging/test-session-decode.py` covers it, and it fails
 without the fix. Not yet run on a phone (the S20 was claimed by another agent); the check is to
 log in to the desktop, open a terminal and run `env | grep TERMUX_VA_`, then decode an HEVC
-clip with `-hwaccel vaapi` against `-f framemd5`. Gaps 2 and 3 belong to encode-native. Next
-steps 2 and 3 below are still open.
+clip with `-hwaccel vaapi` against `-f framemd5`. Gaps 2 and 3 belong to encode-native.
 
 ## Next steps
 
 These serve the parity criterion; [s20-codec-parity.md](s20-codec-parity.md) adds VP8, MPEG-4,
 10-bit and 4K/8K work on top of them.
 
-1. Decide what the session should offer, then make it match the launcher. The simplest fix is
-   to apply the same codec list and Mali variables in `native_encode()` as `video_environment`
-   does, sharing the code. Add a host test beside the existing desktop tests.
+1. On a phone, log in to the desktop and check `env | grep TERMUX_VA_`, then decode an HEVC clip
+   with `-hwaccel vaapi` against `-f framemd5` (gap 1).
 2. Move mpv on Mali from VirGL to PanVK. It passed direct Vulkan rendering on PanVK in the
    desktop acceptance; the change is in `src/native/mali.py` and the mpv profile.
-3. Install `gst-plugins-va` in the Video Player overlay and test GStreamer decoding.
+3. Test GStreamer decoding with the overlay's `gst-plugins-va`.
 
 ## How to test
 
@@ -88,5 +84,5 @@ transfer tag differs, which does not affect RGB conversion).
 Fix: `packages/ffmpeg/libavcodec-mediacodecdec_common.c.patch` forces BT.601 for VP8 (revision
 101). `tests/browsers/test-native-mediacodec.py` now fails a case whose MediaCodec range or
 matrix differs from the software decoder; it fails on the S20's current FFmpeg. The patched
-build has not yet been installed on a phone, and the S20 runs Termux's 9.0.2-1 (gap 2), so the
-fix reaches it only once this project's FFmpeg is installed there.
+build has not yet been installed on a phone; the S20 still ran Termux's 9.0.2-1 when this was
+written.

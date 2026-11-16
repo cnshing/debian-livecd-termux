@@ -127,7 +127,7 @@ one saved screenshot (`temp/docs/evidence/browsers/native-gpu-video/e2-youtube/y
 
 ## What was actually wrong before
 
-The [earlier report](chrome-native-source-and-proot.md) blamed descriptor ownership violations and treated them as a
+An earlier report blamed descriptor ownership violations and treated them as a
 likely PRoot or glibc incompatibility. Changing one thing at a time showed otherwise:
 
 | libpci | `--disable-crashpad-for-testing` | Result |

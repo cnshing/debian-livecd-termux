@@ -221,8 +221,8 @@ No separate verification report was kept for this port. The device test is
 ## Test
 
 [GPU rendering and hardware video](native-gpu-and-video.md) has the results for the native GPU path
-and how to repeat them. The earlier [source check and PRoot attempt](chrome-native-source-and-proot.md)
-records why a rebuild of Google's Chrome is not possible. Its PRoot launcher was never needed.
+and how to repeat them. Google's Chrome cannot be rebuilt from source here, so it runs as the
+prebuilt binary.
 
 For fullscreen playback that exits GNOME Shell, see the
 [isolated crash investigation](fullscreen-investigation.md). It found an out-of-bounds Cogl pixmap read

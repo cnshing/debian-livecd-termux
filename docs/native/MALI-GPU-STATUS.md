@@ -1,6 +1,6 @@
 # Mali GPU and hardware video: one stack, and where each piece stands
 
-State on 2026-11-12, Galaxy S20 (SM-G981B `x1s`, Exynos 990, Mali-G77 MC11, Android 13, stock
+State on 2026-11-12 (encoding updated 2026-11-15), Galaxy S20 (SM-G981B `x1s`, Exynos 990, Mali-G77 MC11, Android 13, stock
 kernel, no root). This page is the entry point for the Mali work; the pages it links hold the
 evidence. Everything below is on `main`: the work that was spread over the PanVK research, Zink,
 VA-API, Firefox and browser-video branches was merged on this date.
@@ -16,9 +16,9 @@ Android's MediaCodec. What differs is only the layer on top.
 | --- | --- | --- | --- | --- |
 | GNOME Shell and GTK apps | Zink (Mesa GL) on PanVK, MIT-SHM presentation | n/a | n/a | [PANVK-DESKTOP.md](PANVK-DESKTOP.md) |
 | Ghostty | llvmpipe by default: it needs OpenGL 4.3 and Zink on this GPU gives 4.2. GPU rendering works with the experimental large-workgroup driver, opt-in only | n/a | n/a | [GHOSTTY-PANVK-HANDOFF.md](GHOSTTY-PANVK-HANDOFF.md) |
-| Chromium (Bionic) | ANGLE's Vulkan back end on PanVK | VP9 and HEVC; H.264 software | WebRTC H.264 and VP9 work with `AcceleratedVideoEncoder`, which stays off by default | [X1S-BROWSER-VERIFICATION.md](X1S-BROWSER-VERIFICATION.md) |
-| Google Chrome (glibc, Bionilux) | ANGLE's Vulkan back end on the glibc PanVK | VP9 (one frame comparison below threshold) and HEVC with `android-vaapi-glibc` revision 1; H.264 software | not testable: Chrome finds no network interfaces under Bionilux | same |
-| Firefox | WebRender on Zink on PanVK (on a Zink desktop) | VP9 and HEVC; H.264 software | untested | [X1S-FIREFOX-VIDEO.md](X1S-FIREFOX-VIDEO.md) |
+| Chromium (Bionic) | ANGLE's Vulkan back end on PanVK | VP9 and HEVC; H.264 software | WebRTC and WebCodecs H.264 and VP9, on by default from revision 3 | [X1S-BROWSER-VERIFICATION.md](X1S-BROWSER-VERIFICATION.md) |
+| Google Chrome (glibc, Bionilux) | ANGLE's Vulkan back end on the glibc PanVK | VP9 (one frame comparison below threshold) and HEVC with `android-vaapi-glibc` revision 1; H.264 software | WebRTC H.264 and VP9, on by default (Bionilux 0.5.0-2); WebCodecs crashes the GPU process | same |
+| Firefox | WebRender on Zink on PanVK (on a Zink desktop) | VP9 and HEVC; H.264 software | opt-in (`firefox_encode`), untested on the phone | [X1S-FIREFOX-VIDEO.md](X1S-FIREFOX-VIDEO.md) |
 
 mpv is the one exception: it still renders through VirGL on the vendor's GLES driver
 (`src/native/mali.py`) and decodes through MediaCodec directly. It passed direct Vulkan rendering on
@@ -97,34 +97,6 @@ VK_DRIVER_FILES=~/gpu-x1s/jim/android/icd.json GALLIUM_DRIVER=zink \
 
 Raw output: local `temp/gpu-x1s/jim-eval/`.
 
-## What was consolidated
-
-| Branch | What it carried | Now |
-| --- | --- | --- |
-| `research/panvk-g77-workgroups` (PR 11) and `research/panvk-kbase-probes` | Probe and driver rebuild workflows, the experimental large-workgroup driver, Mesa patch 0022, the Ghostty readback result | merged |
-| `fix/zink-dmabuf-without-sync-fd` | Mesa patch 0023, Mesa revision 103 | merged |
-| `fix/vaapi-own-gallium-driver` | `android-vaapi` revision 4 | merged |
-| `feat/firefox-mali-video` | Firefox probe for Mali, launcher wiring, `android-firefox-video` 9.0.2-1 | merged |
-| `fix/exynos-hevc-latency` | `android-vaapi` revision 5, HEVC in Firefox, `android-firefox-video` 9.0.2-2 | merged |
-| `feat/browser-mali-video` (was local only) | `android-vaapi-glibc` revision 1 built from source for Mali, launcher selection, CI artifact check | merged, and compiled for the first time |
-
-Fixed while merging:
-
-- `feat/browser-mali-video` deleted the lock file Bionilux's recipe linked to. Staging copies
-  every recipe, so that dangling link failed every package build. Bionilux now reads the shared
-  sysroot lock, and a packaging test fails on any dangling link under `packages/`.
-- The glibc driver had never been compiled. Getting it through CI took four fixes: the
-  builder's meson, linker flags kept off the compiler command, Debian's `/lib` link in the
-  sysroot, and X11 as its only platform.
-- Chromium and Chrome fell back to software for HEVC. The reorder setting that fixed Firefox
-  fixes them too, so the launcher now applies it to every VA-API client on Mali.
-- The glibc driver applied a fixed list of bridge patches and missed the HEVC one; it now
-  applies every `01xx` patch of the Bionic recipe.
-- `tools/panvk-probes/va-glibc.sh` and its CI job, the research build the glibc package
-  replaced, are removed. The script could no longer run against the current recipe.
-- `tests/browsers/test-acceleration.py` required Turnip on every phone; it now expects the
-  driver the launcher selected.
-
 ## What is left
 
 In order of value. None of it needs a different driver.
@@ -132,13 +104,11 @@ In order of value. None of it needs a different driver.
 1. **Chrome's VP9 frame comparison.** Hardware decode works, but one of four compositor
    comparisons misses the SSIM threshold by 0.0013, the same through the installed launcher
    ([X1S-BROWSER-VERIFICATION.md](X1S-BROWSER-VERIFICATION.md)).
-2. **H.264 decoding**, off on every phone and every browser: the bridge rebuilds the PPS with a
-   guessed reference count ([X1S-FIREFOX-VIDEO.md](X1S-FIREFOX-VIDEO.md), item 2).
-3. **Browser encoding.** WebRTC works in Chromium behind a feature flag; WebCodecs aborts the
-   GPU process inside Chromium, so the flag stays off until our Chromium is patched
-   ([ENCODING.md](ENCODING.md)). Chrome's WebRTC has no network under Bionilux. Firefox's
-   encoder is untested. [VIDEO-ENCODING-HANDOFF.md](VIDEO-ENCODING-HANDOFF.md) has the causes
-   and the order to take them in.
+2. **H.264 decoding**, off on every phone and every browser. The bridge's PPS fix is on main;
+   the browser runs before turning it on are still to do ([handoff/decode-h264.md](handoff/decode-h264.md)).
+3. **Browser encoding.** On by default on Mali for Chromium revision 3+ and Chrome (WebRTC;
+   Chrome's WebCodecs still crashes its GPU process). Firefox is opt-in and untested on the
+   phone ([ENCODING.md](ENCODING.md), [handoff/README.md](handoff/README.md)).
 4. **Ghostty on the GPU by default.** Needs the large-workgroup pass qualified beyond the tested
    shapes and packaged ([GHOSTTY-PANVK-HANDOFF.md](GHOSTTY-PANVK-HANDOFF.md)). The work is laid
    out in [PANVK-VERSION-BUMP-HANDOFF.md](PANVK-VERSION-BUMP-HANDOFF.md) (OpenGL 4.3, and

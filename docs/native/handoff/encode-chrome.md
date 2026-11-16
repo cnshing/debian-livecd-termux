@@ -66,4 +66,3 @@ The user chose WebRTC hardware encoding over this on 2026-11-15. To turn it off,
 | Netlink fix | `packages/bionilux/0002-netlink-route.patch` |
 | Chrome flags | `command_line()` in `src/native/acceleration.py` |
 | Phone runners and results | `~/encode-chrome-test` on the S20 (`rt.sh`, `wc.sh`, `out-rtc-*`, `out-wc-avc`) |
-| History | [VIDEO-ENCODING-HANDOFF.md](../VIDEO-ENCODING-HANDOFF.md) |

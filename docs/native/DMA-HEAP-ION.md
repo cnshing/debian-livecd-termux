@@ -1,7 +1,7 @@
 # `/dev/dma_heap` on top of `/dev/ion`
 
-Progress on the handoff `docs/native/handoff/dmabuf-s20.md` (on `feat/s20-video-parity`,
-PR #12). State on 2026-11-15 (second pass: bridge refactor and phone checks).
+Results of the handoff [handoff/dmabuf-s20.md](handoff/dmabuf-s20.md), merged in PRs #12–#14.
+State on 2026-11-15.
 
 ## What exists
 
@@ -113,10 +113,8 @@ IO-coherent, so PanVK asks for `/dev/dma_heap/system-uncached` for HOST_COHERENT
 
 ## Left
 
-- **Chromium and Chrome** (glibc, so the glibc build of the preload) have not run on a phone
-  yet. They need the packages installed, or the phone suite pointed at a private glibc stack.
 - **Note10+ regression run.** It is also ION-only, so its bridge now depends on the preload.
-  It was not run: sshd was not running there.
+  It has not been run.
 - **The desktop session through the preload**, which changes PanVK's HOST_COHERENT memory to
   uncached ION. It needs the desktop and Ghostty checks before `graphics.py` loads it.
 - `opendir("/dev/dma_heap")` listing is not emulated yet.

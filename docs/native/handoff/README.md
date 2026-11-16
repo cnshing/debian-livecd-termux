@@ -1,6 +1,6 @@
 # Video handoffs, one per feature
 
-State on 2026-11-14.
+State on 2026-11-15. All the work below is on main (PR #12).
 
 **Acceptance criterion:** feature parity with the S20's own encoding and decoding: every
 hardware codec Android offers on that phone, up to its limits.
@@ -24,15 +24,15 @@ Two phones were used:
 | Chromium decode | VP9 hardware passes; HEVC not accepted on the source build | VP9, HEVC hardware pass (revision 3 with the dma-heap bridge, 2026-11-15) | yes; H.264 and AV1 software | [decode-chromium.md](decode-chromium.md) |
 | Chrome decode | VP9, HEVC pass | HEVC passes; VP9 decodes in hardware but misses one SSIM check | yes; H.264 and AV1 software | [decode-chrome.md](decode-chrome.md) |
 | Firefox decode | VP9, HEVC pass | VP9, HEVC pass, on a Zink desktop only | yes; H.264 and AV1 software | [decode-firefox.md](decode-firefox.md) |
-| H.264 decode, every VA-API client | off | off | no: a bridge bug can hang the player | [decode-h264.md](decode-h264.md) |
+| H.264 decode, every VA-API client | off | off | no: the bridge fix is in, browser runs still to do | [decode-h264.md](decode-h264.md) |
 | Frame sync: stale frames, flicker, tearing | one stale frame in 13 runs under load | not seen | n/a | [decode-frame-sync.md](decode-frame-sync.md) |
 | Native decode: mpv, FFmpeg, GStreamer | mpv passes VP9, H.264, HEVC | mpv passes on its GLES route | mpv yes; VA-API clients see decoders | [decode-native.md](decode-native.md) |
-| Native encode: FFmpeg, GStreamer, Serein | passes | passes in private tests; not on a fresh install | yes where `android-vaapi` is installed | [encode-native.md](encode-native.md) |
+| Native encode: FFmpeg, GStreamer, Serein | passes | passes in private tests; fresh-install blockers fixed on main, not rechecked | yes where `android-vaapi` is installed | [encode-native.md](encode-native.md) |
 | Chromium encode | not run | WebRTC and WebCodecs (H.264, VP9) pass on hardware with revision 3; rerun from CI 43676101303 on 2026-11-15 | yes, revision 3+ on Mali | [encode-chromium.md](encode-chromium.md) |
 | Chrome encode | not run | WebRTC H.264/VP9 passes on Exynos (Bionilux 0.5.0-2 netlink fix); WebCodecs crash cannot be patched | yes on Mali (user decision 2026-11-15); WebCodecs pages crash Chrome's GPU process | [encode-chrome.md](encode-chrome.md) |
-| Firefox encode | not run | both Firefox bugs patched on fix/encode-firefox (own Firefox build); opt-in `firefox_encode` | no (user's call) | [encode-firefox.md](encode-firefox.md) |
+| Firefox encode | not run | both Firefox bugs patched in this project's Firefox build; opt-in `firefox_encode`; not yet run on the phone | no (user's call) | [encode-firefox.md](encode-firefox.md) |
 | `/dev/dma_heap` emulated on `/dev/ion` for kernels without DMA-BUF heaps (the S20's 4.19) | needed too (ION, no heap) | done: the preload provides the heap; bridges use only the heap; verified installed | yes, on phones with ION and no heap | [dmabuf-s20.md](dmabuf-s20.md) |
-| **Parity with the S20's codecs** | n/a | not met: H.264 decode off; VP8, MPEG-4 and H.263 not offered; 10-bit, 4K and 8K untested; nothing on a fresh install | n/a | [s20-codec-parity.md](s20-codec-parity.md) |
+| **Parity with the S20's codecs** | n/a | not met: H.264 decode off; VP8, MPEG-4 and H.263 not offered; 10-bit, 4K and 8K untested | n/a | [s20-codec-parity.md](s20-codec-parity.md) |
 
 AV1 is disabled on every phone. Neither the Snapdragon 855 nor the S20 has an AV1 decoder, so
 software AV1 is parity.
@@ -95,7 +95,6 @@ These were learned the hard way. They apply to every page here.
 
 ## Older, longer records
 
-- [VIDEO-ENCODING-HANDOFF.md](../VIDEO-ENCODING-HANDOFF.md): the full encoding log to 2026-11-14.
 - [ENCODING.md](../ENCODING.md), [ENCODING-EXYNOS.md](../ENCODING-EXYNOS.md): encoding design and
   results.
 - [MALI-GPU-STATUS.md](../MALI-GPU-STATUS.md), [X1S-BROWSER-VERIFICATION.md](../X1S-BROWSER-VERIFICATION.md),

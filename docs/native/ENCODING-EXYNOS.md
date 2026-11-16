@@ -1,8 +1,7 @@
 # Hardware video encoding on Exynos
 
 **Support is limited.** Hardware encoding on Samsung Exynos phones works for some programs, with
-known faults, and does not work out of the box on a fresh installation. Browsers do not
-hardware-encode by default. Treat everything on this page as experimental.
+known faults. Chromium and Chrome encode WebRTC in hardware by default; Firefox is opt-in. Treat everything on this page as experimental.
 
 Tested on one phone: Galaxy S20 (`x1s`, SM-G981B), Exynos 990, Mali-G77, stock Android 13,
 November 2026. Other Exynos phones have not been tested. For the Snapdragon results, see
@@ -48,25 +47,22 @@ root and a changed SELinux policy.
 | The daemon's own protocol test | 28 of 30 checks pass. Both failures are the extra key frame below |
 | FFmpeg `h264_vaapi`, `hevc_vaapi` | Pass with driver revision 7 or later and a VA-API build of FFmpeg: 46 of 46 checks covering pixels, profiles, key frames, MP4 seeking and bitrate. Targets of 1 and 6 Mb/s gave 0.96 and 5.78 Mb/s. Colours are right only after colour metadata is added (below) |
 | GStreamer `va` encoders, Serein's camera | Pass with revision 6 or later: 60 of 60 key frames with parameter sets; pictures above 47 dB at 8 Mb/s. Fails at low bitrates (below) |
-| Chromium WebRTC, H.264 and VP9 | Works in a private test with `--enable-features=AcceleratedVideoEncoder`: about 284 frames per codec, received colours exact. **Not enabled by default** (below) |
+| Chromium WebRTC and WebCodecs, H.264 and VP9 | Pass with revision 3, on by default on Mali ([Browsers](#browsers)) |
 
 ## What does not work
 
 ### On a fresh installation
 
-These are packaging and deployment problems. They mean that, as installed, programs on an
-Exynos phone get no hardware encoder at all.
+Three packaging problems kept a fresh install from encoding at all. All three are fixed on main
+([handoff](handoff/encode-native.md)); a fresh install has not been rechecked since:
 
-- **The installed FFmpeg has no VA-API.** The S20 had Termux's FFmpeg `9.0.2-1`, which lists
-  zero VA-API encoders. This project's `ffmpeg` package (`9.0.2-100`, VA-API enabled) was not
-  offered by the phone's package source; the cause has not been established.
-- **The installed VA driver cannot find the Mali GPU.** `android-vaapi` revision 5 presents
-  only the Snapdragon GPU as `/dev/dri/renderD128`. Revisions 7 and 8 present `/dev/mali0` and
-  choose CPU-backed surfaces on Mali. They pass the device-discovery tests but are not yet
-  released; they are on the `fix/chromium-webcodecs-shmem` branch.
-- **GStreamer has no VA-API plugin.** No overlay installs `gst-plugins-va`, so GStreamer
-  programs, Serein included, have no hardware encoder.
-- **OBS Studio** has no recipe.
+- This project's VA-API `ffmpeg` was missing from the release (a build-order bug), so the S20
+  got Termux's FFmpeg, which has no VA-API encoders.
+- `android-vaapi` before revision 7 presented only the Snapdragon GPU. Revision 7 and later
+  present `/dev/mali0` and choose CPU-backed surfaces on Mali.
+- No overlay installed `gst-plugins-va`; the Video Player overlay now does.
+
+**OBS Studio** still has no recipe.
 
 ### Faults in the encoded video
 
@@ -96,43 +92,23 @@ Exynos phone get no hardware encoder at all.
 
 ## Browsers
 
-No browser hardware-encodes by default. The launcher adds no encoding switches.
+State on 2026-11-15; [ENCODING.md](ENCODING.md#browsers) has the detail and the per-feature
+handoffs.
 
-**Chromium (this project's build).** WebRTC works in hardware behind a feature flag (above).
-The same flag also enables WebCodecs `VideoEncoder`, which crashes Chromium's GPU process. On
-Linux, Chromium asks for GPU-memory input frames. Here those are plain shared memory, and a
-check in Chromium aborts. After three crashes Chromium turns GPU acceleration off for the
-session. A patch that gives WebCodecs shared-memory input
-([`0100-termux-webcodecs-shmem.patch`](https://github.com/cnshing/debian-livecd-termux/blob/fix/chromium-webcodecs-shmem/packages/chromium/0100-termux-webcodecs-shmem.patch),
-on the `fix/chromium-webcodecs-shmem` branch) is being built. Until it passes on the phone, the flag stays off. WebCodecs also needs
-`bitrateMode: "constant"`: Chromium refuses variable bitrate on VA-API outside ChromeOS.
-
-**Google Chrome (prebuilt).** It cannot take the Chromium patch, so the WebCodecs crash stays.
-Its WebRTC cannot connect at all: it finds no network interfaces under Bionilux (zero ICE
-candidates, `Could not bind NETLINK socket: Permission denied`). That is a networking problem,
-not a video one.
-
-**Firefox: off, and not pursued.** With this project's private FFmpeg runtime
-(`android-firefox-video` revision 5, on the `fix/chromium-webcodecs-shmem` branch), Firefox does reach the Exynos encoders, and an H.264 WebRTC
-call passes. Two problems in Firefox's own code remain, and this project cannot fix them without
-building Firefox:
-
-1. **WebCodecs mislabels a canvas's colours.** Firefox converts canvas pixels with the BT.601
-   matrix, then tells the page the stream is BT.709. Pictures decode with visibly wrong colours
-   (maximum channel error 22). Firefox's own software VP9 encoder gives exactly the same result,
-   so this is not the hardware.
-2. **WebRTC cannot lower a hardware call's bitrate.** Firefox applies a bitrate change on the
-   fly only to `libx264` and Android's MediaCodec, and refuses it for VA-API encoders. A call
-   keeps its starting bitrate until the resolution changes, so congestion control cannot react.
-
-Firefox's hardware encoding therefore stays at Firefox's default, off. This Firefox has no
-software H.264 encoder, so it cannot send H.264 in WebRTC or WebCodecs at all. VP9 calls use
-its software encoder and work.
-
-Revision 5 also fixes a third problem, so it is not reopened: Firefox declares the H.264 level's
-frame-rate limit (450 fps at 320x180) instead of the capture rate. The encoder then spread its
-bitrate over 450 pictures a second while 30 arrived, and the call stayed at 320x180. The
-runtime now takes the rate from the pictures' timestamps.
+- **Chromium (this project's build)**: on by default on Mali from revision 3. WebRTC and
+  WebCodecs (H.264, VP9) encode on the Exynos encoders. Revision 2's
+  [`0100-termux-webcodecs-shmem.patch`](../../packages/chromium/0100-termux-webcodecs-shmem.patch)
+  stopped the WebCodecs GPU-process crash, and revision 3's
+  [`0101-termux-vaapi-upload-nv12.patch`](../../packages/chromium/0101-termux-vaapi-upload-nv12.patch)
+  uploads its NV12 frames. WebCodecs needs `bitrateMode: "constant"`.
+- **Google Chrome (prebuilt)**: on by default on Mali by the user's decision. WebRTC works with
+  Bionilux `0.5.0-2`, which fixes the netlink refusal that left Chrome with no network
+  interfaces. WebCodecs hardware encoding still crashes Chrome's GPU process; Chrome cannot be
+  patched.
+- **Firefox**: opt-in (`firefox_encode`), with this project's Firefox build, which patches the
+  two Firefox bugs (WebCodecs labelling canvas colours BT.709, and WebRTC refusing bitrate
+  changes on VA-API encoders). `android-firefox-video` also follows the real picture rate
+  rather than the H.264 level's limit. The patched build has not been tested on the phone.
 
 ## What cannot be fixed here
 
@@ -140,7 +116,6 @@ runtime now takes the rate from the pictures' timestamps.
 | --- | --- | --- |
 | Direct V4L2 access to the encoder | Android's SELinux policy | Root and a changed policy |
 | Shared GPU buffers (no copies) | Android gives apps no GBM or dma-buf allocator | None realistic |
-| Firefox's two problems above | Firefox's own code | Building Firefox, or a fix from Mozilla |
 | Chrome's WebCodecs crash | Chrome is a closed binary | A change from Google |
 | Extra key frame, low-bitrate overshoot | Possibly Samsung's encoder firmware | Untested vendor settings; otherwise workarounds only |
 

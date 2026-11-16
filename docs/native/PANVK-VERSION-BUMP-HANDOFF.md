@@ -1130,4 +1130,4 @@ python3 tests/native/check-panvk-desktop.py <dir> && python3 tests/native/check-
 The dumps behind this page are in `temp/gpu-x1s/jim-eval/out2/` (packaged driver:
 `zenith-vulkaninfo.txt`, `zenith-eglinfo.txt`) and `temp/gpu-x1s/jim-eval/out/`
 (JimVulkan's). Builds go through GitHub CI. Phone rules are in
-[VIDEO-ENCODING-HANDOFF.md](VIDEO-ENCODING-HANDOFF.md).
+[handoff/README.md](handoff/README.md#rules-for-anyone-using-the-phones).

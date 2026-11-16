@@ -1,11 +1,11 @@
 # Handoff: Chromium hardware encoding
 
-State on 2026-11-14. Chromium is this project's source build (`packages/chromium`). Shared
+State on 2026-11-15. Chromium is this project's source build (`packages/chromium`). Shared
 rules and pass criteria: [README.md](README.md).
 
 ## Status
 
-State on 2026-11-14 (evening). **On for Mali when Chromium 156.0.8078.79-3 or later is installed**
+**On for Mali when Chromium 156.0.8078.79-3 or later is installed**
 (`chromium_encodes_webcodecs()` in `src/native/acceleration.py` reads dpkg's status file and adds
 `AcceleratedVideoEncoder` for the bionic `chromium` profile on `/dev/mali0`). Older revisions keep it off.
 
@@ -56,12 +56,12 @@ Chromium staged privately (not installed) and started through the installed laun
   low-latency: -10000`, then retried without), so call latency is unmeasured.
 - HEVC WebCodecs encode not tested (the S20 has `OMX.Exynos.HEVC.Encoder`; see
   [s20-codec-parity.md](s20-codec-parity.md)).
-- Revision 3 must reach the apt repository (merge, then the packages build on main) before users get it.
+- Revision 3 is on main (PR #12); a fresh install gets it once a release carries it.
 
 ## How to test
 
-On the S20, private display and private daemon. The probes are in Git on the CI branch:
-[`tests/video-encode/webcodecs.html`](https://github.com/cnshing/debian-livecd-termux/blob/fix/chromium-webcodecs-shmem/tests/video-encode/webcodecs.html)
+On the S20, private display and private daemon. The probe is in Git:
+[`tests/video-encode/webcodecs.html`](https://github.com/cnshing/debian-livecd-termux/blob/main/tests/video-encode/webcodecs.html)
 takes `codec=avc1.42001f` or `vp09.00.10.08` and `input=canvas` or `bt709` in its query string,
 and `save=1` posts the chunks to `/chunks` for software decoding. Serve it on localhost, run the
 browser on a private display with its own `XDG_CONFIG_HOME`, and read `window.RESULT`. The
@@ -72,7 +72,6 @@ runner are not in Git.
 
 | What | Where |
 | --- | --- |
-| Patch | `packages/chromium/0100-termux-webcodecs-shmem.patch` (CI branch) |
-| Bootstrap and reuse | `.github/workflows/packages.yml` (CI branch) |
+| Patch | `packages/chromium/0100-termux-webcodecs-shmem.patch`, `0101-termux-vaapi-upload-nv12.patch` |
+| Bootstrap and reuse | `.github/workflows/packages.yml` |
 | Browser flags | `command_line()` in `src/native/acceleration.py` |
-| History | [VIDEO-ENCODING-HANDOFF.md](../VIDEO-ENCODING-HANDOFF.md) |

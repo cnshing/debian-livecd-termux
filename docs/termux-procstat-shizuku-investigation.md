@@ -131,7 +131,7 @@ do not make that copier part of the recommendation.
 
 ## Mission Center port boundary
 
-The previous [Mission Center assessment](termux-mission-center-assessment.md)
+The previous Mission Center assessment (since removed)
 and [migration measurements](termux-native-migration.md#whole-device-cpu-counters-through-shizuku)
 show the application already ran under the forked PRoot with real counters, but
 that arrangement cost about 65% of one core, including about 24% for its PRoot

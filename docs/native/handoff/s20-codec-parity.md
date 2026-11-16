@@ -1,6 +1,6 @@
 # Handoff: parity with the S20's own video hardware
 
-State on 2026-11-14. Shared rules and pass criteria: [README.md](README.md).
+State on 2026-11-14; branches merged to main in PR #12 (2026-11-15). Shared rules and pass criteria: [README.md](README.md).
 
 ## The acceptance criterion
 
@@ -91,7 +91,7 @@ Firefox's FFmpeg. mpv calls MediaCodec directly through FFmpeg, so it is a separ
 | HEVC 10-bit | untested; the bridge does write Main 10 into its rebuilt SPS | **passes** (FFmpeg MediaCodec, 48/48 frames, 2026-11-14) | bridge test; the bridge offers only `HEVC_MAIN`, so a P010 surface and the Main 10 profile need adding |
 | VP9 profile 0 | passes up to 1080p | passes | nothing above 1080p tested |
 | VP9 profile 2 (10-bit) | **not offered**: the bridge offers only profile 0 | **passes** (FFmpeg MediaCodec, 48/48, 2026-11-14) | add profile 2 and a P010 surface to the bridge |
-| VP8 | **not offered**, and not a bridge-table fix: Mesa's gallium has no VP8 video format, no VA picture parser and no `VAProfileVP8` in its frontend. The daemon already maps `CODEC_VP8` | **decodes bit-exact** (YUV of all 48 frames equals libvpx, `OMX.Exynos.vp8.dec`), but the suite's RGB check fails: FFmpeg converts the MediaCodec frame as if full range | fix the range tag in FFmpeg's MediaCodec output (decode-native); for VA-API, add a VP8 pipe format, `picture_vp8.c` and the 3/10-byte frame-header rebuild to the Mesa fork |
+| VP8 | **not offered**, and not a bridge-table fix: Mesa's gallium has no VP8 video format, no VA picture parser and no `VAProfileVP8` in its frontend. The daemon already maps `CODEC_VP8` | **decodes bit-exact** (YUV of all 48 frames equals libvpx, `OMX.Exynos.vp8.dec`), and FFmpeg's MediaCodec frames were tagged BT.709; this project's FFmpeg revision 101 tags them BT.601 ([decode-native.md](decode-native.md)), not yet run on the phone | for VA-API, add a VP8 pipe format, `picture_vp8.c` and the 3/10-byte frame-header rebuild to the Mesa fork |
 | MPEG-4 Part 2 | **not offered**: Mesa's VA frontend dropped MPEG-4 Part 2, and the daemon protocol has no id for it | **passes** (`OMX.Exynos.mpeg4.dec`, 48/48, 640x360). Android limits it to 896x896 | VA-API needs a Mesa frontend for MPEG-4 plus a new protocol id; low value |
 | H.263 | **not offered** | no FFmpeg MediaCodec decoder; Android limits it to 720x576 | VA-API's MPEG-4 profiles cover H.263 baseline streams; low value |
 | AV1 | software, which is parity | software | nothing; keep it disabled on the S20 |
@@ -113,30 +113,19 @@ Firefox's FFmpeg. mpv calls MediaCodec directly through FFmpeg, so it is a separ
 
 ### On a fresh installation
 
-None of the above is reachable as installed today. The installed driver (`android-vaapi`
-revision 5) cannot find the Mali GPU, the installed FFmpeg has no VA-API, and no overlay
-installs GStreamer's VA plugin. That comes first: [encode-native.md](encode-native.md). It
-affects decoding through FFmpeg and GStreamer as well.
-
-### Peer work (2026-11-14)
-
-No peer PR is open yet. Branches pushed: `fix/decode-h264`, `fix/decode-frame-sync`,
-`fix/decode-native`, `fix/decode-chromium`, `fix/decode-chrome`, `fix/decode-firefox`,
-`fix/encode-native`, `fix/encode-chromium` (as `fix/chromium-webcodecs-shmem`),
-`fix/encode-chrome`, `fix/encode-firefox`. Update the rows above as each merges.
+The three blockers (a driver that could not find the Mali GPU, an FFmpeg without VA-API, no
+overlay installing GStreamer's VA plugin) are fixed on main ([encode-native.md](encode-native.md)).
+A fresh install on the S20 has not been rechecked since.
 
 Fixtures for the new rows: `tests/browsers/make-video-fixtures.py --codecs vp8 mpeg4`, and
 `--ten-bit --codecs hevc vp9`; run them with `tests/browsers/test-native-mediacodec.py`.
 
 ## Order of work
 
-1. **Deployment** ([encode-native.md](encode-native.md), steps 1–3). Without it nothing else
-   reaches a user.
-2. **Read the run-time capabilities** of every S20 codec: profiles, colour formats, performance
-   points. Termux has no Java API for `MediaCodecList`. A small dex run with `app_process` works,
-   as the display-power helper did for the fresh-install tests. Compare the phone's
-   `/vendor/etc/media_codecs_performance.xml` with the LineageOS copy above. Add the results to
-   this page, so the target is complete and in Git.
+1. **Deployment** ([encode-native.md](encode-native.md), steps 1–3): fixed in code; check a fresh
+   install on the phone.
+2. Compare the phone's `/vendor/etc/media_codecs_performance.xml` with the LineageOS copy above
+   (the run-time capabilities are read; see above).
 3. **H.264 decode** ([decode-h264.md](decode-h264.md)): the biggest gap for users.
 4. **VP8** decode and encode in the bridge and daemon. The structure is already there for VP9.
 5. **10-bit** HEVC and VP9 decode, then encode if the encoders offer it.

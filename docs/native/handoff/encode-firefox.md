@@ -4,15 +4,15 @@ State on 2026-11-14. Shared rules and pass criteria: [README.md](README.md).
 
 ## Status
 
-**Reopened 2026-11-14 for S20 codec parity. Fixes are on `fix/encode-firefox`; encoding stays
-opt-in, off by default. Turning it on by default is the user's call.**
+**On main since PR #12 (2026-11-15); encoding stays opt-in, off by default, and has not been
+tested on the phone with the patched build. Turning it on by default is the user's call.**
 
 Opt in with `"firefox_encode": true` in `~/.config/livecd-native/acceleration.json`. The launcher
 then sets `media.use-remote-encoder.video.platform` in its managed `user.js` block, only on Mali
 and only when the installed `android-firefox-video` manifest lists its encoders
 (`firefox_encode_ready()` in `src/native/acceleration.py`). Without the opt-in nothing changes.
 
-Firefox 159.0.1 (Termux's current build) and Mozilla's main still have both bugs, so the branch
+Firefox 159.0.1 (Termux's current build) and Mozilla's main still have both bugs, so this project
 builds Firefox itself:
 
 | Fix | Where |
@@ -24,16 +24,14 @@ builds Firefox itself:
 `packages/firefox` is Termux's recipe at the pinned builder revision (159.0) plus those two patches.
 It builds in a CI job of its own, like Chromium. Because of the apt pin, it replaces Termux's
 Firefox until it is removed. android-firefox-video's manifest pins the Firefox binary, so the two
-always build together. Revision 6 of android-firefox-video carries the encoder work from the CI
-branch (revisions 3 to 5), and android-vaapi revision 6 carries the Mali backend and local-libdrm
-fixes (revision 8 on the CI branch).
+always build together. android-firefox-video revision 6 carries the encoder work below, and
+android-vaapi carries the Mali backend and local-libdrm fixes.
 
 See "Verification" at the end for what was proven on the phone.
 
 ## What was made to work
 
-With the preference on and the private runtime `android-firefox-video` revision 5 (on the CI
-branch only), Firefox does reach the Exynos encoders:
+With the preference on and a private build of `android-firefox-video` revision 5, Firefox does reach the Exynos encoders:
 
 | Use | Result on the S20 |
 | --- | --- |
@@ -53,14 +51,14 @@ Revisions 3 to 5 fixed, in order:
    level's limit over the picture size (450 fps at 320x180), not the capture rate. VA-API has no
    timestamps, so the encoder spread its bitrate over 450 pictures a second while 30 arrived,
    and the call stayed at 320x180. Revision 5
-   ([`0102-follow-real-picture-rate.patch`](https://github.com/cnshing/debian-livecd-termux/blob/fix/chromium-webcodecs-shmem/packages/android-firefox-video/0102-follow-real-picture-rate.patch))
+   ([`0102-follow-real-picture-rate.patch`](https://github.com/cnshing/debian-livecd-termux/blob/main/packages/android-firefox-video/0102-follow-real-picture-rate.patch))
    declares at most 60 fps (otherwise 30) and scales the bitrate from the interval between
    timestamps, averaged over 32 pictures. Its device test passes 18 of 18 (1.80–2.06 Mb/s against
    2 Mb/s); revision 4 failed 6.
 
-All of this is harmless while the preference is off and is kept on the CI branch.
+All of this is harmless while the preference is off.
 
-## The two problems left, both in Firefox
+## The two Firefox problems (patched in `packages/firefox`)
 
 1. **WebCodecs mislabels a canvas's colours.** Firefox converts canvas pixels with BT.601 and
    then hands the page a decoder configuration saying BT.709
@@ -75,26 +73,22 @@ All of this is harmless while the preference is off and is kept on the CI branch
    `h264_vaapi`. A call keeps its starting bitrate until the resolution changes, so congestion
    control cannot lower it.
 
-Fixing either means patching and building Firefox (a job comparable to Chromium's), or a fix
-from Mozilla. Both would be small patches in those two functions.
+Both are patched in this project's Firefox build (table above); neither patch has run on the
+phone yet.
 
-## If it is reopened
+## Before turning it on by default
 
-1. Check whether Mozilla has fixed either function in the Firefox Termux ships.
-2. Merge `android-firefox-video` revision 5 and `android-vaapi` revision 8 to main.
-3. Set the preference in the launcher's managed `user.js` block (`firefox_preferences` in
-   `src/native/acceleration.py`), on Mali, gated by the package version.
-4. Accept with the canvas WebCodecs case and a WebRTC loopback, never with the BT.709 control
+1. Check whether Mozilla has fixed either function, so the patched build can be dropped.
+2. Accept with the canvas WebCodecs case and a WebRTC loopback, never with the BT.709 control
    alone. Do not loosen the pixel check.
 
 ## How to test
 
-On the CI branch:
-[`tests/video-encode/test-firefox-ffmpeg.py`](https://github.com/cnshing/debian-livecd-termux/blob/fix/chromium-webcodecs-shmem/tests/video-encode/test-firefox-ffmpeg.py)
+[`tests/video-encode/test-firefox-ffmpeg.py`](https://github.com/cnshing/debian-livecd-termux/blob/main/tests/video-encode/test-firefox-ffmpeg.py)
 loads the runtime's codec libraries the way Firefox does. It checks an empty drain for H.264,
 HEVC and VP9, and five streams per codec whose declared and real frame rates differ. The
 WebCodecs probe is
-[`tests/video-encode/webcodecs.html`](https://github.com/cnshing/debian-livecd-termux/blob/fix/chromium-webcodecs-shmem/tests/video-encode/webcodecs.html)
+[`tests/video-encode/webcodecs.html`](https://github.com/cnshing/debian-livecd-termux/blob/main/tests/video-encode/webcodecs.html)
 (see [encode-chromium.md](encode-chromium.md)). Run Firefox with
 `MOZ_LOG=FFmpegVideo:5,PlatformEncoderModule:5` and a private profile.
 
@@ -102,5 +96,5 @@ WebCodecs probe is
 
 | What | Where |
 | --- | --- |
-| Runtime | `packages/android-firefox-video` (revision 5 on the CI branch; main has revision 2) |
-| Full record | [VIDEO-ENCODING-HANDOFF.md](../VIDEO-ENCODING-HANDOFF.md), [ENCODING-EXYNOS.md](../ENCODING-EXYNOS.md) |
+| Runtime | `packages/android-firefox-video` (revision 6) |
+| Full record | [ENCODING-EXYNOS.md](../ENCODING-EXYNOS.md) |

@@ -110,7 +110,7 @@ The source candidate must pass installed desktop validation (30/30) before the
 normal driver recipe is repinned to it. Private GTK capture checks and basic
 Vulkan probes are useful evidence, but do not replace that installed-session
 check. Stop only private test processes that belong to the test. Follow
-[VIDEO-ENCODING-HANDOFF.md](VIDEO-ENCODING-HANDOFF.md) for device coordination.
+the phone rules in [handoff/README.md](handoff/README.md#rules-for-anyone-using-the-phones) for device coordination.
 
 Feature patches then need their own qualification as described in
 [PANVK-VERSION-BUMP-HANDOFF.md](PANVK-VERSION-BUMP-HANDOFF.md).

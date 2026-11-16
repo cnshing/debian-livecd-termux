@@ -589,7 +589,7 @@ CPU fallback, stale pixels and abnormal exit. Correct pixels alone do not prove
 DMA-BUF presentation. The earlier direct no-wait controls establish the race;
 a delayed Ghostty screenshot need not reproduce it on every run.
 
-Phone rules are in [VIDEO-ENCODING-HANDOFF.md](VIDEO-ENCODING-HANDOFF.md): private displays
+Phone rules are in [handoff/README.md](handoff/README.md#rules-for-anyone-using-the-phones): private displays
 only, mark `temp/PHONE-STATUS`, check memory between runs.
 
 ## Where things are

@@ -77,12 +77,12 @@ python3 tests/browsers/test-video-tools.py AccelerationEvidence -v
 | Launcher | `firefox_preferences`, `video_environment` in `src/native/acceleration.py` |
 | Results and history | [X1S-FIREFOX-VIDEO.md](../X1S-FIREFOX-VIDEO.md) |
 
-## 2026-11-14 follow-up (decode-firefox)
+## H.264 in Firefox (not yet run)
 
-H.264 in Firefox can now be tested. android-vaapi 27.0.0~devel20261029-10 and android-vaapi-glibc -2 are built from `fix/decode-h264` (CI run 43596220676). Neither Firefox test has been run yet: the S20 was busy (Ghostty test, plus a queued soak). To run them:
+The H.264 fix ([decode-h264.md](decode-h264.md)) is on main from android-vaapi revision 10 and
+android-vaapi-glibc revision 2. To test it:
 - **H.264 on the Zink desktop**, from a private config:
   - set `disabled_va_codecs=['av1']` in the config and `TERMUX_VA_H264_REORDER_FRAMES=0` in the environment;
-  - load the render-node preload from `fix/chromium-webcodecs-shmem`;
   - make the fixture with `make-video-fixtures.py --codecs h264-fast`;
   - run `test-acceleration.py firefox`.
 - **PanVK on a software desktop:** the `LIVECD_FIREFOX_GPU=1` command in open problem 4.

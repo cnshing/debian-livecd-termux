@@ -15,27 +15,26 @@ find the encoder with no settings.
 | Daemon's own protocol test | passes | 28 of 30; both failures are an extra key frame (below) |
 | FFmpeg `h264_vaapi`, `hevc_vaapi` | 46 of 46, live camera at 720p30 in real time | 46 of 46 with driver revision 7 and a VA-API FFmpeg, privately. Colours right only with added metadata (below) |
 | GStreamer `vah264enc`, `vah265enc`; Serein | pass in a test prefix | camera key frames and pixels pass (revision 6); low bitrate and screen sharing fail |
-| Found with no settings | yes | **no** on the installed revision 5; yes on unreleased 7 and 8 |
+| Found with no settings | yes | yes from `android-vaapi` revision 7 (main has 11); not yet checked on a fresh install |
 | OBS Studio | no recipe | no recipe |
 
-## Why a fresh S20 gets no hardware encoder
+## Why a fresh S20 got no hardware encoder (fixed on main)
 
 1. **FFmpeg has no VA-API.** Found 2026-11-14: no release carried this project's `ffmpeg`.
    `ffmpeg` is in the v0.12.0 tarball's pin list but no `ffmpeg_*.deb` is in its pool, so APT
    fell back to Termux's build. In CI's video set (run 43414277233), `android-firefox-video`
    was built before `ffmpeg`; Termux's `firefox`, its dependency, depends on `ffmpeg`, so the
    builder downloaded Termux's `ffmpeg_9.0.2-2` and then printed `ffmpeg@9.0.2-100 built -
-   skipping`, and the job still succeeded. Fixed on `fix/encode-native`: `android-firefox-video`
+   skipping`, and the job still succeeded. Fixed on main: `android-firefox-video`
    build-depends on `ffmpeg` so the planner orders it first, a test checks the order, and the
    build step now fails when a recipe leaves no package. Needs a CI build and a fresh-install
    check on the phone.
-2. **The driver cannot find the Mali GPU.** `android-vaapi` revision 5 (on main) presents only
-   the Snapdragon GPU. Revisions 7 and 8, on the CI branch
-   [`fix/chromium-webcodecs-shmem`](https://github.com/cnshing/debian-livecd-termux/tree/fix/chromium-webcodecs-shmem),
+2. **The driver could not find the Mali GPU.** `android-vaapi` revision 5 presented only
+   the Snapdragon GPU. Revisions 7 and later
    present `/dev/mali0`, also when `/dev/dri` is missing, and pick CPU-backed surfaces on Mali.
    Revision 8 adds a lookup through an already-loaded libdrm when `RTLD_NEXT` fails (libdrm
    loaded as a local dependency, as in Firefox).
-3. **GStreamer has no VA plugin.** `gst-plugins-va` is a recipe and is in the release, but no overlay installed it. The Video Player overlay installs it from `fix/encode-native`. Not yet checked on a phone.
+3. **GStreamer has no VA plugin.** `gst-plugins-va` is a recipe and is in the release, but no overlay installed it. The Video Player overlay now installs it. Not yet checked on a phone.
 
 ## Faults in the encoded video
 
@@ -61,8 +60,7 @@ These serve the parity criterion; [s20-codec-parity.md](s20-codec-parity.md) add
 4K/8K work on top of them.
 
 1. Done in code (above); build it in CI and check `apt-cache policy ffmpeg` on a fresh S20 install.
-2. Rerun the full native suite on `android-vaapi` revision 8 on both phones, then merge 6–8 to
-   main and install them. Keep the ordinary-process and GL/EGL checks: the preload is loaded
+2. Rerun the full native suite on the current `android-vaapi` on both phones. Keep the ordinary-process and GL/EGL checks: the preload is loaded
    into every desktop process.
 3. Done in code: the Video Player overlay installs `gst-plugins-va`. Check on a phone.
 4. Colour metadata in the daemon.

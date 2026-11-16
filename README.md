@@ -4,7 +4,8 @@
 > Everything past this point for the whole project is completely generated with LLMs. Proceed at your own risk!
 
 A port of [debian-livecd](https://github.com/cnshing/debian-livecd)'s GNOME desktop to native
-Termux on Android, without PRoot. Tested on an arm64 Note10+ running Android 11.
+Termux on Android, without PRoot. Tested on an arm64 Note10+ running Android 11 and a Galaxy S20
+(Exynos 990, Mali-G77) running Android 13.
 
 ## Requirements
 
@@ -73,13 +74,15 @@ livecd start
 ```
 
 `livecd stop` ends it, and `livecd status` reports it. On a Qualcomm GPU, setup installs Mesa's
-Turnip driver and the desktop renders through Zink; elsewhere it renders in software.
+Turnip driver and the desktop renders through Zink. On the qualified Mali phone (Galaxy S20) it
+installs the PanVK driver and also renders through Zink ([PanVK desktop](docs/native/PANVK-DESKTOP.md));
+elsewhere it renders in software.
 
 Firefox, Chromium and Google Chrome are installed with GPU rendering and Android's hardware video
 decoding. Chrome is downloaded from Google during installation, because its license does not
 allow this project to redistribute it. Hardware video **encoding** has limited support: native
-programs can use it on Snapdragon phones, Exynos phones have known faults, and browsers do not
-hardware-encode by default. See [hardware encoding](docs/native/ENCODING.md) and
+programs can use it on Snapdragon phones, Exynos phones have known faults, and on Mali phones
+Chromium and Chrome hardware-encode WebRTC by default. See [hardware encoding](docs/native/ENCODING.md) and
 [Exynos encoding](docs/native/ENCODING-EXYNOS.md).
 
 The desktop's Android integrations start with it: the phone microphone, or a connected Bluetooth

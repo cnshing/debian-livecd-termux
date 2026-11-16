@@ -6,7 +6,7 @@ directly. Shared rules and pass criteria: [README.md](README.md).
 
 ## Status
 
-**Off by default everywhere** (fix on `fix/decode-h264`; see Outcome below). `disabled_va_codecs` defaults to `['h264', 'av1']`, and the
+**Off by default everywhere**, although the bridge fix is on main (see Outcome below). `disabled_va_codecs` defaults to `['h264', 'av1']`, and the
 launcher turns each entry into `TERMUX_VA_DISABLE_H264=1` (`src/native/acceleration.py`). Every
 browser decodes H.264 in software. H.264 is still the most common format on the web, so this
 fix is worth the most of any decode work left.
@@ -14,7 +14,7 @@ fix is worth the most of any decode work left.
 Hardware H.264 decode does work when the stream suits the bridge's guess. FFmpeg through the
 bridge decoded 1080p30 frame-exact against software (300 of 300 frames, Adreno, 2026-11-03).
 
-## Outcome on 2026-11-14 (branch `fix/decode-h264`)
+## Outcome on 2026-11-14 (on main since PR #12)
 
 **Fixed in the driver, still off by default.** `packages/android-vaapi/0107-h264-pps-defaults.patch`
 (android-vaapi revision 10, android-vaapi-glibc 2):
@@ -36,9 +36,9 @@ bridge decoded 1080p30 frame-exact against software (300 of 300 frames, Adreno, 
   software, a timeout counts as a hang, and frames 12 and 36 saved to look at.
 
 **S20 results** (private daemon, Xvfb, the CI driver, this project's FFmpeg 9.0.2-100, and the
-Mali-aware render-node preload from `fix/chromium-webcodecs-shmem`, which main's revision lacks):
+Mali-aware render-node preload, now also on main):
 
-| Stream | revision 5 (main) | revision 10 |
+| Stream | revision 5 | revision 10 |
 | --- | --- | --- |
 | `chart-h264.mp4`, `chart-h264-fast.mp4`, 640x360 x264 fast | 48/48, 48/48, 120/120 identical | same |
 | x264 five references (1 or 4 slices, with or without B frames or weighted prediction) | **hangs** (4 of 4 streams) | 90/90 identical, each of 5 streams |
@@ -52,8 +52,7 @@ Qualcomm's dropped frames (proven on the Note10+ on 2026-11-03). The Note10+ has
 **Still open before H.264 can be on by default:** run the browser harnesses (Chromium, Chrome,
 Firefox) with `disabled_va_codecs: ['av1']` on both phones with revision 10, the new fixture
 included; rerun the Note10+ with `test-va-decode.py` as the control for the PPS guess; then drop
-`h264` from the default in `src/native/acceleration.py`. On a fresh S20, FFmpeg also needs the
-render-node fix from `fix/chromium-webcodecs-shmem`.
+`h264` from the default in `src/native/acceleration.py`.
 
 ## The bug
 

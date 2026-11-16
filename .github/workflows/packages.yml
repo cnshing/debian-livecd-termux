@@ -128,6 +128,7 @@ jobs:
     - name: Test automatic Mali terminal setup and offline fallback
       run: |
         python3 tests/packaging/test-mali-terminal-install.py
+        python3 tests/packaging/test-panvk-install.py
     - name: Test the camera supervisor and its desktop wiring
       run: python3 tests/camera/test-camera-controller.py
     - name: Test GNOME wallpaper registration

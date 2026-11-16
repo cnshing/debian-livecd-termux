@@ -67,6 +67,7 @@ if apt-get -s install --no-install-recommends $packages | grep -q '^Inst [^ ]* \
     export LIVECD_SETUP_LOCKED=1
 fi
 apt-get install -y --no-install-recommends $packages
+python "$source_dir/../../../tools/install-panvk-desktop.py"
 
 if wants chromium; then
     # Termux's recipe fills in placeholder names upstream has since renamed, which leaves

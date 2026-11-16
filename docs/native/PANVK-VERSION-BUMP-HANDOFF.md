@@ -14,13 +14,54 @@ has not repeated the earlier broader CTS qualification: the corrected
 `combined-platform` pair separately passed **597/597 GLES**, **115 Pass /
 9 NotSupported** Vulkan core/info/mapping cases and nested CPU-oracle checks.
 The unsafe ION placed-map capability remains withdrawn; its thirteen cases
-report NotSupported. Full conformance is not established. Package pins and API
-defaults remain unchanged, and no further soak is requested or run.
+report NotSupported. Full conformance is not established. The normal package now pins the matching
+fourteen-patch pair; see the default-install checkpoint below. Vulkan remains
+1.3.363 in the ICD, and no further soak is requested or run.
 
 For the daily-desktop acceptance policy, upstream CTS evidence and optional
 broader test plan, see
 [PANVK-CTS-AND-DAILY-DESKTOP-HANDOFF.md](PANVK-CTS-AND-DAILY-DESKTOP-HANDOFF.md).
 Full CTS passage is not the user's daily-desktop release requirement.
+
+## Default-install integration, 2026-11-15
+
+The user's completion condition is integration into normal `install.sh` Mali
+paths. `mesa-vulkan-icd-panvk-kbase` 26.3.1-1 now carries the fourteen-patch pair
+under the normal `$PREFIX/lib/panvk-kbase` paths. The matching glibc build
+[43695585757](https://github.com/cnshing/debian-livecd-termux/actions/runs/43695585757)
+has SHA-256 `64f5516f608fa31db503e8c45f5442790d0afe1cf28ba2aa6a334030dd608b04`.
+It passes enumeration and the triangle/line/point pixel checks in default and
+nested modes. Bionic retains the exact already-qualified hash above. Both
+builds have the same Mesa tree. Immutable binaries, full patched source and
+provenance are at [panvk-desktop-26.3.1-1](https://github.com/cnshing/debian-livecd-termux/releases/tag/panvk-desktop-26.3.1-1).
+
+Package CI [43696544730](https://github.com/cnshing/debian-livecd-termux/actions/runs/43696544730)
+built and audited the normal driver. The controller minimum is 0.2.0-21,
+built by [43789503859](https://github.com/cnshing/debian-livecd-termux/actions/runs/43789503859),
+including the module-link refresh for upgrades. The installer and browser hook
+use a shared pinned-package helper. Fresh qualified x1s installs select Zink;
+saved renderer preferences remain intact. The controller enables nested
+workgroups by default only when both the device ABI and installed source
+manifest match the qualified driver. Other devices retain their prior
+renderer policy. No GL version override is used.
+
+An older online repository is supplemented by checksum-verified package
+assets. Downloaded packages remain in a local APT repository at priority 1001,
+so later upgrades do not select older copies from the original tarball.
+Offline installs need the qualified packages in their local repository.
+Host checks exercise the installer branches and real isolated APT candidate
+selection, plus both ABI renderer environments and the hardware/profile guard.
+
+The final live installation-helper acceptance is pending: x1s went offline
+before staging or running it. Those failed SSH attempts changed no device
+files or installed packages. The phone was last observed with driver 26.3.1
+and controller 0.2.0-20. Do not mark this completion condition accepted until
+the normal installed driver, automatic mode flags, repeat-install behavior
+and APT candidates have been checked on the phone. The prepared bounded
+script and rollback packages are under local
+`temp/panvk-qualification/desktop-release/install-check.sh` and phone
+`~/gpu-x1s/qualification/default-install/rollback/` respectively. Refresh the
+rollback baseline if another owner upgrades the phone before that test.
 
 ## Focused iteration policy
 

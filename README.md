@@ -31,7 +31,7 @@ through Shizuku again.
 | Feature | Needs |
 | --- | --- |
 | The desktop | Termux:X11 (stops the installation) |
-| GPU rendering, hardware video | A Qualcomm Adreno GPU; otherwise software rendering |
+| GPU rendering, hardware video | Qualcomm Adreno or the qualified Mali-G77 x1s path; video support depends on the codec |
 | Phone microphone | Termux:API, with its Microphone permission |
 | Bluetooth headset microphone | The microphone's permission, Shizuku, and the headset paired with **Calls** enabled |
 | Front and rear cameras | Termux:API, with its Camera permission |

@@ -284,11 +284,18 @@ zero-copy display path or hardware video decoding.
 
 ## Native PanVK + Zink on Mali
 
-On Mali phones, `--renderer zink` selects the packaged
-`mesa-vulkan-icd-panvk-kbase` Bionic ICD. The installer includes that package
-when `/dev/mali0` is readable and writable. Existing installations can install
-it with `pkg install mesa-vulkan-icd-panvk-kbase`. Use this repository's Mesa
-26.2.6-101 or later with its native-fence capability fix.
+On the qualified Galaxy S20 x1s (Mali-G77, Linux 4.19.87, kbase JM 11.35),
+`install.sh` installs the pinned source-built `mesa-vulkan-icd-panvk-kbase`
+26.3.1-1 pair and `livecd-desktop` 0.2.0-21 or newer. Fresh installs default to
+PanVK/Zink with the qualified nested-workgroup mode. Saved renderer choices,
+including software, are preserved. Online installs can fetch the pinned pair
+when an older repository tarball lacks it; offline installs require a tarball
+containing the qualified packages.
+
+Other Mali devices receive the normal driver package but retain explicit
+renderer selection until their desktop profile is qualified. The following
+commands select and save Zink manually; qualified fresh x1s installs can use
+plain `livecd start` immediately.
 
 ```sh
 livecd stop
@@ -307,18 +314,16 @@ library. Raw DRI3 remains experimental. `livecd validate` checks the actual
 PanVK mapping and Mali descriptor, as well as the accelerated GL renderer;
 software rendering does not qualify as a GPU pass.
 
-Ghostty 1.4 needs OpenGL 4.3; the tested PanVK path exposes 4.2. The terminal
-launcher probes the core GL version and uses llvmpipe for Ghostty when required,
-while keeping the desktop on PanVK. The menu launcher and `livecd terminal`
-share this policy. This is a terminal fallback, not a terminal GPU pass.
+Qualified x1s installs also retain the dedicated Ghostty GTK GL DMA-BUF stack.
+The normal qualified PanVK profile provides GL 4.6 / GLES 3.2 through Zink;
+other profiles retain capability-based terminal fallback. No GL version
+override is used. There is no further timed soak requirement.
 
-The integrated path uses the upstream release driver pinned by the package.
-The experimental point-size driver variant is excluded because it failed GTK
-presentation. The 30-minute soak remains pending. See
-[PanVK desktop integration](PANVK-DESKTOP.md) for validation and remaining limits, and
-[Mali GPU and hardware video](MALI-GPU-STATUS.md) for the state of the desktop, Ghostty and
-each browser on Mali in one place. The [video handoffs](handoff/README.md) give one page per
-feature, such as Firefox encoding or Chrome decoding, with what is left on each phone.
+See [PanVK desktop integration](PANVK-DESKTOP.md) for package identities and
+validation, [daily desktop acceptance](PANVK-CTS-AND-DAILY-DESKTOP-HANDOFF.md)
+for the practical test policy, and [Mali GPU and hardware video](MALI-GPU-STATUS.md)
+for the desktop, Ghostty and browser status. The [video handoffs](handoff/README.md)
+give one page per feature with device-specific remaining work.
 
 ## Native renderer recovery
 

@@ -8,6 +8,11 @@ The normal package continues to use `$PREFIX/lib/panvk-kbase`; launchers and
 overlays select that stack. Installing the candidate therefore permits explicit
 qualification without switching a running desktop to a new driver.
 
+The normal `mesa-vulkan-icd-panvk-kbase` 26.3.1-1 package now pins the separate
+fourteen-patch desktop/AHB pair, not this unmodified comparison candidate.
+Its default installer path and verification state are recorded in
+[PANVK-VERSION-BUMP-HANDOFF.md](PANVK-VERSION-BUMP-HANDOFF.md).
+
 ## Source and build identity
 
 The candidate pins [baseline build 43542985775](https://github.com/cnshing/debian-livecd-termux/actions/runs/43542985775)

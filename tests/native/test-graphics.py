@@ -67,6 +67,16 @@ class Graphics(unittest.TestCase):
             env = graphics.apply_renderer({'PANVK_G77_LWG': '0'}, 'zink')
             self.assertEqual((env['PANVK_G77_LWG'], env['PANVK_G77_NESTED']), ('0', '0'))
 
+    def test_glibc_browser_uses_same_package_and_qualified_mode(self):
+        icd = self.panvk / 'glibc/panfrost_icd.json'
+        self.manifest(icd, icd.parent / 'libvulkan_panfrost.so')
+        with mock.patch.object(graphics, 'qualified_desktop_stack', return_value=True):
+            env = {'BIONILUX_LIBRARY_PATH': '/chrome/lib'}
+            graphics.use_panvk(env, 'glibc')
+        self.assertEqual(env['VK_DRIVER_FILES'], str(icd))
+        self.assertEqual(env['BIONILUX_LIBRARY_PATH'], str(icd.parent / 'lib') + ':/chrome/lib')
+        self.assertEqual((env['PANVK_G77_LWG'], env['PANVK_G77_NESTED']), ('1', '1'))
+
     def test_old_or_unqualified_driver_does_not_enable_workgroups(self):
         self.install_panvk()
         with mock.patch.object(graphics, 'qualified_mali', return_value=True):

@@ -134,6 +134,7 @@ if test -r /dev/mali0 && test -w /dev/mali0; then
     packages+=(mesa-vulkan-icd-panvk-kbase)
 fi
 "${apt[@]}" install --no-install-recommends "${packages[@]}"
+python "$repo/tools/install-panvk-desktop.py"
 # The measured G77 stack has a specific device/kernel/JM ABI. Reuse its guard
 # before installing; /dev/mali0 alone also matches incompatible Mali devices.
 if test -r /dev/mali0 && test -w /dev/mali0 && python - "$repo/tools/ghostty-dmabuf/launcher.py" <<'EOF'
@@ -190,9 +191,9 @@ if ! test -f "$HOME/.local/lib/livecd/config.json"; then
     chmod 600 "$HOME/.local/lib/livecd/config.json"
 fi
 python "$repo/src/apply-overlays.py" --default "$@"
-# Qualcomm GPUs get Mesa's Turnip driver, and the desktop then renders through Zink.
+# Qualcomm uses Turnip; the measured Mali profile uses the qualified PanVK package.
 # `livecd start --renderer software` remains available, and a saved choice is kept.
-if test -e /dev/kgsl-3d0 && python "$repo/prebuilt/turnip/gpu-setup.py" > "$state/gpu-setup.log"; then
+if { test -e /dev/kgsl-3d0 && python "$repo/prebuilt/turnip/gpu-setup.py" > "$state/gpu-setup.log"; } || python "$repo/src/native/panvk_device.py"; then
     python - "$HOME/.local/lib/livecd/config.json" <<'EOF'
 import json, sys
 path = sys.argv[1]
@@ -204,7 +205,7 @@ with open(path, 'w') as file:
 EOF
 else
     if test -r /dev/mali0 && test -w /dev/mali0; then
-        echo 'PanVK is available: use livecd start --renderer zink, then livecd select after validation.'
+        echo 'PanVK is installed. This device has no automatic desktop profile; use livecd start --renderer zink to validate it.'
     else
         echo 'No supported GPU driver was set up; the desktop renders in software.'
     fi

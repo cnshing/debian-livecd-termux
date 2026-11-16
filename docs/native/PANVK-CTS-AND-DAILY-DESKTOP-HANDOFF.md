@@ -58,7 +58,10 @@ fourteen-patch driver. The glibc artifact was not rebuilt for the AHB change.
 At the end of that qualification run, the original release controller was
 restored by verified hash and its desktop passed 30/30. Other owners may since
 have updated installed packages; inspect current state before any next switch.
-Normal package driver pins and API defaults were not changed by this work.
+That AHB qualification did not change normal package pins. The subsequent
+installer integration now pins the fourteen-patch pair; see the version
+handoff's default-install checkpoint. Final live installer acceptance remains
+pending because the phone disconnected before it could run.
 
 The measured blockers have different resolutions:
 
@@ -225,7 +228,7 @@ certification work.
   on fixed artifacts establishes that campaign's complete coverage; results
   from different binaries cannot be combined into one complete passing run.
 
-Next owner: first review the existing evidence and choose the daily-desktop
-acceptance scope. Complete the missing bounded app checks if pursuing package
-promotion. Do not begin a full mustpass run merely because “full conformance”
+Next owner: finish the pending normal-install acceptance recorded in the
+version handoff, then complete the missing bounded app checks for the promoted
+package. Review existing evidence before selecting any further test scope. Do not begin a full mustpass run merely because “full conformance”
 was mentioned in the previous discussion.

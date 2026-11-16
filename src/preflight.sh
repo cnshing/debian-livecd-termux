@@ -8,6 +8,7 @@ set -uo pipefail
 pm=${LIVECD_PREFLIGHT_PM:-/system/bin/pm}
 sdcard=${LIVECD_PREFLIGHT_SDCARD:-/sdcard}
 gpu=${LIVECD_PREFLIGHT_GPU:-/dev/kgsl-3d0}
+mali=${LIVECD_PREFLIGHT_MALI:-/dev/mali0}
 shizuku=$HOME/.local/lib/shizuku
 grant=
 case ${1:-} in
@@ -19,6 +20,13 @@ esac
 rish() { RISH_APPLICATION_ID=com.termux RISH_PRESERVE_ENV=0 timeout 30 "$shizuku/rish" -c "$*" </dev/null; }
 installed() { "$pm" path "$1" >/dev/null 2>&1; }
 storage() { test -r "$sdcard/Android" && test -w "$sdcard/"; }
+# The qualified Mali-G77 path (src/native/panvk_device.py): the Galaxy S20 x1s on its 4.19.87 kernel.
+# setup checks the kbase driver version too; this check needs no Python, which a fresh Termux lacks.
+qualified_mali() {
+    test -r "$mali" && test -w "$mali" &&
+        test "${LIVECD_PREFLIGHT_DEVICE:-$(/system/bin/getprop ro.product.device 2>/dev/null)}" = x1s &&
+        case ${LIVECD_PREFLIGHT_KERNEL:-$(uname -r)} in 4.19.87*) true;; *) false;; esac
+}
 
 # Shizuku's rish is exported to shared storage, so finding it needs storage access first.
 if test -n "$grant" && ! test -f "$shizuku/rish_shizuku.dex"; then
@@ -97,8 +105,10 @@ else
 fi
 if test -e "$gpu"; then
     report ok 'GPU rendering and hardware video (Qualcomm Adreno)'
+elif qualified_mali; then
+    report ok 'GPU rendering and hardware video (qualified Mali-G77, Galaxy S20)'
 else
-    report WARN 'GPU rendering and hardware video' 'need a Qualcomm Adreno GPU, which was not found; the desktop renders in software.'
+    report WARN 'GPU rendering and hardware video' 'need a Qualcomm Adreno GPU or the qualified Galaxy S20 Mali-G77, which were not found; the desktop renders in software.'
 fi
 api_permission 'Phone microphone' RECORD_AUDIO Microphone
 if test -n "$shell"; then

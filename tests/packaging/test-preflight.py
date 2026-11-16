@@ -58,6 +58,8 @@ class Preflight(unittest.TestCase):
         (self.sdcard / 'Android').mkdir(parents=True)
         self.gpu = self.fake / 'kgsl-3d0'
         self.gpu.write_text('')
+        self.mali = self.fake / 'mali0'
+        self.device, self.kernel = 'x1s', '4.19.87-27102796'
         self.apps(ALL_APPS)
         (self.fake / 'granted').write_text('CAMERA\nRECORD_AUDIO\nidle\n')
         (self.fake / 'shizuku-running').write_text('')
@@ -68,7 +70,8 @@ class Preflight(unittest.TestCase):
     def run_preflight(self, *args):
         env = {**os.environ, 'HOME': str(self.home), 'FAKE': str(self.fake),
                'LIVECD_PREFLIGHT_PM': str(self.fake / 'pm'), 'LIVECD_PREFLIGHT_SDCARD': str(self.sdcard),
-               'LIVECD_PREFLIGHT_GPU': str(self.gpu)}
+               'LIVECD_PREFLIGHT_GPU': str(self.gpu), 'LIVECD_PREFLIGHT_MALI': str(self.mali),
+               'LIVECD_PREFLIGHT_DEVICE': self.device, 'LIVECD_PREFLIGHT_KERNEL': self.kernel}
         result = subprocess.run(['bash', str(PREFLIGHT), *args], env=env, capture_output=True,
                                 text=True, timeout=120)
         lines = result.stdout.splitlines()
@@ -111,6 +114,20 @@ class Preflight(unittest.TestCase):
 
     def test_missing_gpu(self):
         self.gpu.unlink()
+        _, levels, output = self.run_preflight()
+        self.assertEqual(self.problems(levels), {'GPU rendering and hardware video': 'WARN'}, output)
+
+    def test_qualified_mali_counts_as_gpu(self):
+        self.gpu.unlink()
+        self.mali.write_text('')
+        _, levels, output = self.run_preflight()
+        self.assertEqual(self.problems(levels), {}, output)
+        self.assertIn('qualified Mali-G77', output)
+
+    def test_other_mali_phone_renders_in_software(self):
+        self.gpu.unlink()
+        self.mali.write_text('')
+        self.device = 'a52q'
         _, levels, output = self.run_preflight()
         self.assertEqual(self.problems(levels), {'GPU rendering and hardware video': 'WARN'}, output)
 

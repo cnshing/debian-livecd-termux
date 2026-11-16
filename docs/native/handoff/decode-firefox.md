@@ -1,6 +1,6 @@
 # Handoff: Firefox hardware decoding
 
-State on 2026-11-14. Firefox is Termux's build. Its hardware decoding comes from
+State on 2026-11-16. Firefox is this project's build (`packages/firefox`, 159.0-101). Its hardware decoding comes from
 `android-firefox-video`: a port of Mozilla's graphics probe plus VA-API FFmpeg libraries, under
 `$PREFIX/lib/android-firefox-video`. Shared rules and pass criteria: [README.md](README.md).
 
@@ -16,6 +16,13 @@ State on 2026-11-14. Firefox is Termux's build. Its hardware decoding comes from
 
 **On Mali, only on a Zink desktop.** Firefox's GL uses PanVK only when the desktop renderer is
 Zink (`gpu_enabled`). On a software desktop it renders and decodes in software.
+
+**2026-11-16, fresh v0.12.0 install on the S20:** Firefox decoded in software, and the launcher
+logged "Firefox changed; update android-firefox-video". The receipt's binary hash is taken from
+`$PREFIX`'s Firefox while the package builds. Since this project builds Firefox, that file is
+unstripped, and packaging then strips both the installed binary and the loader copy. The launcher
+now compares the installed binary with the loader copy (livecd-desktop 0.2.0-22). VP9 and HEVC
+pass again through the installed launcher (`test-acceleration.py firefox`, pixels checked).
 
 ## What it depends on
 

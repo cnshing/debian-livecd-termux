@@ -7,6 +7,7 @@ real sshd listener off and on again with the Secure Shell switch: established
 SSH sessions survive, but new connections fail until it is back.
 """
 import argparse
+import ctypes
 import os
 from pathlib import Path
 import select
@@ -252,8 +253,31 @@ def privacy_test(log, directory):
     print('PASS: the XSettings bridge passes file history preferences to GTK', flush=True)
 
 
+def ipv4_addresses():
+    """Local IPv4 addresses through getifaddrs, as the panel reads them. `ip addr` exits 1 for
+    apps on Android 13 (Galaxy S20), where the netlink address dump is refused."""
+    class Address(ctypes.Structure):
+        _fields_ = [('family', ctypes.c_ushort), ('port', ctypes.c_uint16), ('ip', ctypes.c_ubyte * 4)]
+
+    class Interface(ctypes.Structure):
+        pass
+    Interface._fields_ = [('next', ctypes.POINTER(Interface)), ('name', ctypes.c_char_p),
+                          ('flags', ctypes.c_uint), ('addr', ctypes.POINTER(Address)),
+                          ('netmask', ctypes.c_void_p), ('broadcast', ctypes.c_void_p), ('data', ctypes.c_void_p)]
+    libc = ctypes.CDLL(None)
+    head = ctypes.POINTER(Interface)()
+    assert libc.getifaddrs(ctypes.byref(head)) == 0, 'getifaddrs failed'
+    addresses, item = set(), head
+    while item:
+        if item.contents.addr and item.contents.addr.contents.family == socket.AF_INET:
+            addresses.add('.'.join(map(str, item.contents.addr.contents.ip)))
+        item = item.contents.next
+    libc.freeifaddrs(head)
+    return addresses
+
+
 def secure_shell_test(log, toggle):
-    addresses = set(subprocess.check_output(['ip', '-4', '-o', 'addr', 'show'], text=True).split())
+    addresses = ipv4_addresses()
     running = sshd_running()
     settings = Settings('system', log)
     try:
@@ -262,7 +286,7 @@ def secure_shell_test(log, toggle):
                            10, 'the SSH login command')
         port, address = command.split()[2:]
         assert port == '8022', command
-        assert any(item.startswith(address + '/') for item in addresses) or address == 'localhost', command
+        assert address in addresses or address == 'localhost', (command, addresses)
         switch = settings.find('Secure Shell', 'switch', actionable=True)
         assert settings.checked(switch) == running, (settings.checked(switch), running)
         print(f'PASS: Secure Shell shows {command!r} and sshd running={running}', flush=True)

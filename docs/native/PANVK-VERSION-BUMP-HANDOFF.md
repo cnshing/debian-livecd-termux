@@ -52,6 +52,16 @@ Offline installs need the qualified packages in their local repository.
 Host checks exercise the installer branches and real isolated APT candidate
 selection, plus both ABI renderer environments and the hardware/profile guard.
 
+The installer implementation was pushed in `2e90771`. Final focused
+[package CI 43790919323](https://github.com/cnshing/debian-livecd-termux/actions/runs/43790919323)
+passes the host checks, driver audit and repository assembly. Its rebuilt
+normal `.deb` is byte equal to the pinned published package, SHA-256
+`b51417755fb276ac8c47e6c3f6e30529aaf2239d013f814bfc8f76716b14cc94`.
+The controller `.deb` SHA-256 is
+`ceb6757fe0f06d6ab98ad36e4c6b827566967c7c528fea900030a8da4ec87daa`.
+The local integration record is
+`temp/panvk-qualification/desktop-release/integration-checkpoint.json`.
+
 The final live installation-helper acceptance is pending: x1s went offline
 before staging or running it. Those failed SSH attempts changed no device
 files or installed packages. The phone was last observed with driver 26.3.1

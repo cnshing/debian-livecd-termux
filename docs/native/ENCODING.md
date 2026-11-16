@@ -34,33 +34,53 @@ program (GStreamer va, FFmpeg VA-API, ...)
   → termux-va → MediaCodec: OMX.qcom.video.encoder.avc / .hevc
 ```
 
-## Browser follow-up: Galaxy S20 / Mali-G77 (2026-11-12)
+## Browsers on the Galaxy S20 / Mali-G77 (2026-11-15)
 
-Native Chromium's WebRTC loopback can hardware-encode and decode H.264 and VP9
-through Termux:VA: Exynos AVC/VP9 encoders and decoders, about 284 received
-frames per codec, exact received colours. This was a private test with
-`AcceleratedVideoEncoder` enabled, not an installed-launcher default. WebRTC
-uses ordinary I420 shared memory and uploads it with VA image operations.
-The low-latency configuration is rejected and the daemon retries without it;
-real-call latency remains unqualified. Adreno browser encoding remains untested.
+On Mali (`/dev/mali0`) the launcher turns on `AcceleratedVideoEncoder` for
+Chromium and Chrome (`command_line()` in
+[`acceleration.py`](../../src/native/acceleration.py)). Firefox needs an opt-in.
+Adreno browser encoding has never been tested, so it stays off there.
 
-**Browser hardware encoding remains disabled by default.** WebCodecs on Linux
-instead requests GPU-memory-buffer input. Chromium and Chrome here supply
-shared memory where their native-pixmap conversion requires `gfx::NATIVE_PIXMAP`,
-so the GPU process aborts. Repeated requests can disable GPU acceleration for
-the browser session. WebCodecs also needs CBR because VA-API VBR is blocked
-outside ChromeOS. A shared-memory adapter or graceful failure is needed in our
-Chromium build before enabling the feature by default. Chrome is prebuilt and
-requires a separate decision about accepting that crash risk. Do not enable
-`--video-capture-use-gpu-memory-buffer` for the working WebRTC path.
+| Browser | Default on Mali | WebRTC H.264/VP9 | WebCodecs `VideoEncoder` |
+| --- | --- | --- | --- |
+| Chromium (this project's build) | **On** from `156.0.8078.79-3`; older revisions stay off | Passes: 286 and 284 frames, received 640x360 pictures viewed | Passes: H.264 and VP9, 60 of 60 frames on the Exynos encoders, maximum colour error 12 |
+| Google Chrome (prebuilt, Bionilux) | **On**, by the user's decision, for WebRTC | Passes with Bionilux `0.5.0-2`: 278 and 280 frames, received frames viewed | **Crashes the GPU process**; the page gets `OperationError: Encoding error.` This cannot be fixed outside Chrome |
+| Firefox | Off; opt in with `"firefox_encode": true` | Passed at 640x360 with an earlier private runtime | 60 of 60 frames, but wrong colours from Firefox's own BT.709 label; the patched build below relabels it, untested on the phone |
 
-Chrome's WebRTC loopback cannot connect under Bionilux: no network interfaces,
-zero ICE candidates, `Could not bind NETLINK socket: Permission denied`.
-Chrome WebRTC hardware encoding is therefore unqualified. See the
-[browser verification](X1S-BROWSER-VERIFICATION.md) for playback, package status
-and the remaining device checks. The Adreno investigation below is historical;
-its original statements about installation and browser build status apply to
-that test session.
+**Chromium.** Revision 1 crashed: WebCodecs on Linux asks for GPU-memory-buffer
+input, which is shared memory here, and a `gfx::NATIVE_PIXMAP` check in the GPU
+process aborted. Revision 2
+([`0100-termux-webcodecs-shmem.patch`](../../packages/chromium/0100-termux-webcodecs-shmem.patch))
+sends shared memory instead, and revision 3
+([`0101-termux-vaapi-upload-nv12.patch`](../../packages/chromium/0101-termux-vaapi-upload-nv12.patch))
+lets VA-API upload the resulting NV12 frames. Encoding does not need the
+dma-heap library. WebCodecs needs `bitrateMode: "constant"`, because Chromium
+refuses variable bitrate on VA-API outside ChromeOS. Never add
+`--video-capture-use-gpu-memory-buffer`. Not yet tested: MediaRecorder, HEVC
+WebCodecs, and any Adreno phone. Revision 3 reaches users only once the
+packages build on main has published it.
+[Handoff](handoff/encode-chromium.md).
+
+**Chrome.** WebRTC used to find no network interfaces under Bionilux, because
+Android's SELinux refuses Chrome's netlink socket. Bionilux `0.5.0-2`
+(`packages/bionilux/0002-netlink-route.patch`) reports the refused bind as
+success and answers the interface dump from `ioctl()`. Chrome's WebCodecs path
+always requests GPU-memory-buffer input, and Chrome is prebuilt, so it cannot be
+patched. With the encoder on, a page that asks WebCodecs for hardware encoding
+crashes Chrome's GPU process. [Handoff](handoff/encode-chrome.md).
+
+**Firefox.** [`packages/firefox`](../../packages/firefox) builds Firefox with
+two patches. One labels WebCodecs output BT.601, the matrix Firefox actually
+converts with. The other lets WebRTC change a VA-API encoder's bitrate
+mid-call. The opt-in applies only on Mali, and only when the installed
+`android-firefox-video` manifest lists its encoders. The patched build has not
+been tested on the phone. [Handoff](handoff/encode-firefox.md).
+
+In every browser the Exynos encoders refuse MediaCodec's `low-latency` key, so
+the daemon retries without it, and call latency is unmeasured. Playback and
+package status are in the [browser verification](X1S-BROWSER-VERIFICATION.md).
+The Adreno investigation below is historical; its statements about installation
+and browser builds apply to that test session.
 
 ## Testing at the boundaries instead of per program
 
@@ -77,8 +97,8 @@ has a control that must fail:
 | The Termux:VA protocol | The driver | `test-daemon.py` |
 | Camera to encoder in real time | Webcam and streaming programs | `test-camera-encode.sh` |
 
-Chromium has its own VA-API client. It was not covered by the original Adreno
-suite; the later Mali WebRTC result is described above.
+Browsers have their own VA-API clients. The original Adreno suite did not cover
+them; the Mali browser results are [above](#browsers-on-the-galaxy-s20--mali-g77-2026-11-15).
 
 ## Results
 
@@ -156,9 +176,10 @@ All changes are generic: none is specific to a program.
 | GStreamer programs | The same package |
 | `ffmpeg`, libavcodec programs | Termux's FFmpeg needs `--enable-vaapi` and `libva`. A test build of 9.0.2 needed only that, plus `-Wno-error=incompatible-function-pointer-types` for libv4l2 and `--disable-xlib`. No recipe yet: Termux's FFmpeg is in its main repository, which `tools/recipes.py` does not stage, and replacing it affects every program that links it |
 | OBS Studio | Termux's recipe removes VAAPI on purpose (its patch 0007) and builds without V4L2. Restoring both needs a recipe override and libpci, which Termux does not package. Not built or tested |
-| Chromium (Termux) | Our VA-API build passes private Mali WebRTC H.264/VP9 loopback. Hardware encoding stays disabled by default because WebCodecs crashes the GPU process |
-| Google Chrome, ungoogled-chromium | Use their separate glibc stack. Chrome WebRTC is blocked by network discovery under Bionilux; ungoogled-chromium encoding is untested |
-| Firefox | Off by decision: two problems in Firefox's own code, described in [ENCODING-EXYNOS.md](ENCODING-EXYNOS.md#browsers) |
+| Chromium (Termux) | Our VA-API build, revision 3 or later, encodes WebRTC and WebCodecs H.264/VP9 on Mali, on by default there. Adreno untested |
+| Google Chrome | Glibc stack under Bionilux `0.5.0-2`. WebRTC encodes on Mali, on by default there; WebCodecs hardware encoding crashes its GPU process |
+| ungoogled-chromium | Glibc stack; encoding untested and not enabled |
+| Firefox | Opt-in only (`firefox_encode`), with the patched [`packages/firefox`](../../packages/firefox) build; not yet phone-tested. See the [handoff](handoff/encode-firefox.md) |
 
 ## Limits
 

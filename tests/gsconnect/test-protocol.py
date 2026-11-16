@@ -166,10 +166,12 @@ def main():
         channel.packet("kdeconnect.battery.request", request=True)
         on_phone(f"dconf write {dconf_path('plugin/battery/send-statistics')} true")
         battery = channel.receive(lambda p: p["type"] == "kdeconnect.battery")
-        sysfs = on_phone("cat /sys/class/power_supply/battery/capacity")
-        check("Battery level comes from Android sysfs",
-              bool(battery) and str(battery["body"]["currentCharge"]) == sysfs,
-              f"{battery and battery['body']} sysfs={sysfs}")
+        # Android 13 on the Galaxy S20 denies the battery's sysfs files; Termux:API reads the same level.
+        android = on_phone("cat /sys/class/power_supply/battery/capacity 2>/dev/null || "
+                           "termux-battery-status | python3 -c 'import json,sys; print(json.load(sys.stdin)[\"percentage\"])'")
+        check("Battery level comes from Android",
+              bool(battery) and str(battery["body"]["currentCharge"]) == android,
+              f"{battery and battery['body']} android={android}")
 
         # GSConnect forgets a disconnected unpaired device, including the earlier setting.
         on_phone(f"dconf write {dconf_path('plugin/runcommand/command-list')} {shlex.quote(command_list)}")

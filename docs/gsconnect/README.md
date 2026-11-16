@@ -15,7 +15,7 @@ device results and limits are in [the verification report](VERIFICATION.md).
 ```text
 peer on the LAN ⇄ TLS, TCP/UDP 1716 ⇄ GSConnect daemon (cjs) on a private D-Bus session
                                         ├── settings window and popups on Termux:X11
-                                        └── dconf, X clipboard, Android battery from sysfs
+                                        └── dconf, X clipboard, Android battery (sysfs or Termux:API)
 ```
 
 ## Why this runs on CJS
@@ -71,7 +71,7 @@ and similar tools that Android lacks, so replace them with commands that work he
 | File sharing; ping; Find My Phone alert | Works. The alert is silent: `gsound` is not a dependency |
 | Shared text and links | Accepted without error. What the phone then shows or opens was not checked |
 | Clipboard sync | Works with the **X clipboard**. Android's own clipboard was not tested |
-| Battery report to the peer | Works, read from Android sysfs. Enable it per device, as upstream |
+| Battery report to the peer | Works, read from Android sysfs, or from Termux:API where Android denies sysfs (Galaxy S20, Android 13). Enable it per device, as upstream |
 | Run Command | Works, using Termux's `sh` |
 | Remote pointer | Pointer motion works through AT-SPI. Clicks and keys were not tested |
 | Shell panel menu and Nautilus integration | **Not available here**: tested without a native Shell or Nautilus, and the daemon's bus is private |
@@ -110,7 +110,7 @@ and similar tools that Android lacks, so replace them with commands that work he
 | Paths in `config.js` and the D-Bus service; `cjs -m` shebangs | Termux's prefix and interpreter |
 | `GIRepository` 3.0 instead of 2.0 in the daemon | CJS links `libgirepository-2.0`, whose typelib is 3.0 |
 | Run Command uses Termux's `sh` | `/bin/sh` is Android's shell, not Termux's |
-| Battery component reads sysfs | Android has no UPower |
+| Battery component reads sysfs, else `termux-battery-status` | Android has no UPower; Android 13 on the Galaxy S20 denies the battery sysfs files |
 | Notification listener not started; MPRIS objects not exported | **Memory safety**, below |
 
 **Why two features are disabled.** Termux's `cjs` 140.2 typelib has the wrong

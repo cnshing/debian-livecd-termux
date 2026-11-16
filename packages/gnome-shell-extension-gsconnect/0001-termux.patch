@@ -27,12 +27,7 @@ diff -ruN a/src/service/components/notification.js b/src/service/components/noti
 diff -ruN a/src/service/components/upower.js b/src/service/components/upower.js
 --- a/src/service/components/upower.js
 +++ b/src/service/components/upower.js
-@@ -2,46 +2,12 @@
- //
- // SPDX-License-Identifier: GPL-2.0-or-later
- 
--import Gio from 'gi://Gio';
- import GLib from 'gi://GLib';
+@@ -7,41 +7,8 @@
  import GObject from 'gi://GObject';
  
  
@@ -76,14 +71,14 @@ diff -ruN a/src/service/components/upower.js b/src/service/components/upower.js
  
  
  /**
-@@ -84,89 +50,37 @@
+@@ -84,89 +51,74 @@
      _init() {
          super._init();
  
--        this._cancellable = new Gio.Cancellable();
++        this._present = false;
+         this._cancellable = new Gio.Cancellable();
 -        this._proxy = null;
 -        this._propertiesChangedId = 0;
-+        this._present = false;
 +        this._readBattery();
  
 -        this._loadUPower();
@@ -96,6 +91,7 @@ diff -ruN a/src/service/components/upower.js b/src/service/components/upower.js
  
 -    async _loadUPower() {
 +    _readBattery() {
++        let level, status;
          try {
 -            this._proxy = new Gio.DBusProxy({
 -                g_bus_type: Gio.BusType.SYSTEM,
@@ -123,12 +119,24 @@ diff -ruN a/src/service/components/upower.js b/src/service/components/upower.js
 -            }
 -
 -            this._proxy = null;
--        }
--    }
--
++            const read = name => new TextDecoder().decode(
++                GLib.file_get_contents(`${SYSFS_BATTERY}/${name}`)[1]).trim();
++            level = parseInt(read('capacity'));
++            status = read('status');
++        } catch {
++            // Android 13 on the Galaxy S20 denies these files to apps.
++            this._readTermuxApi();
++            return;
+         }
++        this._update(level, status === 'Charging' || status === 'Full');
+     }
+ 
 -    _initProperties(proxy) {
 -        if (proxy.g_name_owner === null)
--            return;
++    // Termux:API reports the level Android shows; its status is CHARGING, FULL, DISCHARGING...
++    _readTermuxApi() {
++        if (this._reading)
+             return;
 -
 -        const percentage = proxy.get_cached_property('Percentage').unpack();
 -        const state = proxy.get_cached_property('State').unpack();
@@ -151,16 +159,41 @@ diff -ruN a/src/service/components/upower.js b/src/service/components/upower.js
 -            const value = proxy.get_cached_property('Percentage').unpack();
 -            this._level = Math.floor(value);
 -            this.notify('level');
--        }
--
++        this._reading = true;
++        try {
++            const proc = Gio.Subprocess.new(['timeout', '10', 'termux-battery-status'],
++                Gio.SubprocessFlags.STDOUT_PIPE | Gio.SubprocessFlags.STDERR_SILENCE);
++            proc.communicate_utf8_async(null, this._cancellable, (proc_, result) => {
++                this._reading = false;
++                try {
++                    const [, stdout] = proc_.communicate_utf8_finish(result);
++                    const battery = JSON.parse(stdout);
++                    this._update(Math.floor(battery.percentage),
++                        battery.status === 'CHARGING' || battery.status === 'FULL');
++                } catch {
++                    if (!this._cancellable.is_cancelled())
++                        this._present = false;
++                }
++            });
++        } catch {
++            this._reading = false;
++            this._present = false;
+         }
++    }
+ 
 -        if (properties.hasOwnProperty('State')) {
 -            emitChanged = true;
 -
 -            const value = proxy.get_cached_property('State').unpack();
 -            this._charging = (value !== DeviceState.DISCHARGING);
 -            this.notify('charging');
--        }
--
++    _update(level, charging) {
++        if (!Number.isInteger(level)) {
++            this._present = false;
++            return;
+         }
++        const threshold = (!charging && level <= LOW_LEVEL) ? 1 : 0;
+ 
 -        if (properties.hasOwnProperty('WarningLevel')) {
 -            emitChanged = true;
 -
@@ -168,31 +201,21 @@ diff -ruN a/src/service/components/upower.js b/src/service/components/upower.js
 -            this._threshold = (!this.charging && value >= DeviceLevel.LOW);
 -            this.notify('threshold');
 -        }
--
++        if (this._present && level === this._level &&
++            charging === this._charging && threshold === this._threshold)
++            return;
+ 
 -        if (emitChanged)
-+            const read = name => new TextDecoder().decode(
-+                GLib.file_get_contents(`${SYSFS_BATTERY}/${name}`)[1]).trim();
-+            const level = parseInt(read('capacity'));
-+            const status = read('status');
-+            const charging = (status === 'Charging' || status === 'Full');
-+            const threshold = (!charging && level <= LOW_LEVEL) ? 1 : 0;
-+
-+            if (this._present && level === this._level &&
-+                charging === this._charging && threshold === this._threshold)
-+                return;
-+
-+            this._present = true;
-+            this._level = level;
-+            this._charging = charging;
-+            this._threshold = threshold;
-             this.emit('changed');
-+        } catch {
-+            this._present = false;
-+        }
+-            this.emit('changed');
++        this._present = true;
++        this._level = level;
++        this._charging = charging;
++        this._threshold = threshold;
++        this.emit('changed');
      }
  
      get charging() {
-@@ -177,7 +91,7 @@
+@@ -177,7 +129,7 @@
      }
  
      get is_present() {
@@ -201,14 +224,14 @@ diff -ruN a/src/service/components/upower.js b/src/service/components/upower.js
      }
  
      get level() {
-@@ -195,14 +109,9 @@
+@@ -195,14 +147,10 @@
      }
  
      destroy() {
 -        if (this._cancellable.is_cancelled())
 -            return;
 -
--        this._cancellable.cancel();
+         this._cancellable.cancel();
 -
 -        if (this._proxy && this._propertiesChangedId > 0) {
 -            this._proxy.disconnect(this._propertiesChangedId);

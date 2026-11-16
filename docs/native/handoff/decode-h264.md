@@ -6,10 +6,11 @@ directly. Shared rules and pass criteria: [README.md](README.md).
 
 ## Status
 
-**Off by default everywhere**, although the bridge fix is on main (see Outcome below). `disabled_va_codecs` defaults to `['h264', 'av1']`, and the
-launcher turns each entry into `TERMUX_VA_DISABLE_H264=1` (`src/native/acceleration.py`). Every
-browser decodes H.264 in software. H.264 is still the most common format on the web, so this
-fix is worth the most of any decode work left.
+**On by default on Adreno since 2026-11-16 (livecd-desktop 0.2.0-23); still off on Mali.**
+`disabled_va_codecs` defaults to `['av1']` on Adreno and `['h264', 'av1']` on Mali, and the
+launcher and the desktop session turn each entry into `TERMUX_VA_DISABLE_<CODEC>=1`
+(`decode_safeguards()` in `src/native/acceleration.py`). Mali browsers decode H.264 in software
+until the S20 runs below are done.
 
 Hardware H.264 decode does work when the stream suits the bridge's guess. FFmpeg through the
 bridge decoded 1080p30 frame-exact against software (300 of 300 frames, Adreno, 2026-11-03).
@@ -49,7 +50,18 @@ The decoded pictures were looked at (frame numbers and patterns right). The old 
 make `chart-h264-fast.mp4` fail on Exynos: its decoder tolerates the wrong default where
 Qualcomm's dropped frames (proven on the Note10+ on 2026-11-03). The Note10+ has not been rerun.
 
-**Still open before H.264 can be on by default:** run the browser harnesses (Chromium, Chrome,
+**Note10+ rerun, 2026-11-16** (v0.12.0 fresh install, android-vaapi 11, installed launcher):
+`test-va-decode.py` gave 48/48 identical frames for `chart-h264.mp4` and `chart-h264-fast.mp4`
+(the PPS control that dropped frames on Qualcomm before the fix), and 300/300 or 600/600 for six
+more streams (1080p30 x264 ultrafast, veryfast, medium and slow; 720p Baseline; 720p60 with eight
+references, five B-frames, B-pyramid and weighted prediction). With `TERMUX_VA_DISABLE_H264=1` the
+same check fails, as it must. GStreamer `vah264dec` matched `avdec_h264` checksums. Chrome and
+Chromium (`test-fullscreen.py --require-hardware-decode`, both fixtures) and Firefox
+(`test-acceleration.py`, both fixtures) decoded on `OMX.qcom` hardware with the pictures checked.
+H.264 is therefore on by default on Adreno. Evidence is outside Git in
+`temp/fresh-note10-20261116/tests/`.
+
+**Still open before H.264 can be on by default on Mali:** run the browser harnesses (Chromium, Chrome,
 Firefox) with `disabled_va_codecs: ['av1']` on both phones with revision 10, the new fixture
 included; rerun the Note10+ with `test-va-decode.py` as the control for the PPS guess; then drop
 `h264` from the default in `src/native/acceleration.py`.

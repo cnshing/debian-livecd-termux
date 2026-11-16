@@ -31,10 +31,10 @@ class SessionDecode(unittest.TestCase):
                 desktop.native_encode(env, preload)
             return env, preload
 
-    def test_adreno_session_hides_h264_and_av1(self):
+    def test_adreno_session_offers_h264_and_hides_av1(self):
         env, preload = self.session(False)
         self.assertTrue(preload)
-        self.assertEqual(env['TERMUX_VA_DISABLE_H264'], '1')
+        self.assertNotIn('TERMUX_VA_DISABLE_H264', env)
         self.assertEqual(env['TERMUX_VA_DISABLE_AV1'], '1')
         self.assertNotIn('TERMUX_VA_HEVC_REORDER_PICS', env)
 
@@ -42,6 +42,7 @@ class SessionDecode(unittest.TestCase):
         env, _ = self.session(True)
         self.assertEqual(env['TERMUX_VA_HEVC_REORDER_PICS'], '0')
         self.assertEqual(env['TERMUX_VA_DISABLE_H264'], '1')
+        self.assertEqual(env['TERMUX_VA_DISABLE_AV1'], '1')
 
     def test_configured_codec_list_is_shared_with_the_launcher(self):
         env, _ = self.session(False, {'disabled_va_codecs': []})

@@ -27,25 +27,22 @@ State on 2026-11-14. Chromium here is this project's source build (`packages/chr
 
 ## Open problems
 
-1. **HEVC on Adreno.** The launcher sets the reorder variable on Mali only. Chromium's source
-   build has passed VP9 on Adreno but not HEVC; the earlier prebuilt Debian Chromium passed both.
-   The likely cause is the same reorder stall, but the bridge's source says Qualcomm's decoder
-   stops returning frames at 0. Try a count of 1 on the Note10+ (it gave identical frames on the
-   S20) before changing the default.
-2. **H.264** is the most common web format and is software everywhere. See
+1. **HEVC on Adreno: passes since 2026-11-16.** On the v0.12.0 fresh install of the Note10+
+   (revision 3, `android-vaapi` 11 with the dma-heap preload), `test-fullscreen.py
+   --require-hardware-decode` passed HEVC with no reorder override: 298 units in, 295 frames out,
+   pictures checked. VP9 and H.264 passed in the same run.
+2. **H.264** is on by default on Adreno and still software on Mali. See
    [decode-h264.md](decode-h264.md).
 3. **One stale compositor frame** in 13 Adreno runs under concurrent encoder load. See
    [decode-frame-sync.md](decode-frame-sync.md).
-4. Not run: a 30-minute soak, seeking, and the Adreno regression with the Mali-era packages
-   (`android-vaapi` 5 and later).
+4. Not run: a 30-minute soak and seeking. The Adreno regression with the Mali-era packages
+   passed on 2026-11-16.
 
 ## Next steps
 
-1. On the Note10+, run HEVC with `TERMUX_VA_HEVC_REORDER_PICS=1` and `=0`; if one passes, set it
-   in `video_environment` in `src/native/acceleration.py` with a host test.
-2. After the H.264 bridge fix, take `h264` out of the default disabled list and rerun both
-   phones.
-3. The soak and seek runs.
+1. Run the H.264 browser harnesses on the S20, then take `h264` out of Mali's default disabled
+   list too (done for Adreno on 2026-11-16).
+2. The soak and seek runs.
 
 ## How to test
 

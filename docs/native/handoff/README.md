@@ -21,10 +21,10 @@ Two phones were used:
 
 | Feature | Adreno | Mali (S20) | On by default? | Page |
 | --- | --- | --- | --- | --- |
-| Chromium decode | VP9 hardware passes; HEVC not accepted on the source build | VP9, HEVC hardware pass (revision 3 with the dma-heap bridge, 2026-11-15) | yes; H.264 and AV1 software | [decode-chromium.md](decode-chromium.md) |
-| Chrome decode | VP9, HEVC pass | HEVC passes; VP9 decodes in hardware but misses one SSIM check | yes; H.264 and AV1 software | [decode-chrome.md](decode-chrome.md) |
-| Firefox decode | VP9, HEVC pass | VP9, HEVC pass, on a Zink desktop only | yes; H.264 and AV1 software | [decode-firefox.md](decode-firefox.md) |
-| H.264 decode, every VA-API client | off | off | no: the bridge fix is in, browser runs still to do | [decode-h264.md](decode-h264.md) |
+| Chromium decode | VP9, HEVC, H.264 hardware pass (revision 3, 2026-11-16) | VP9, HEVC hardware pass (revision 3 with the dma-heap bridge, 2026-11-15) | yes; AV1 software, H.264 software on Mali | [decode-chromium.md](decode-chromium.md) |
+| Chrome decode | VP9, HEVC, H.264 pass (2026-11-16) | HEVC passes; VP9 decodes in hardware but misses one SSIM check | yes; AV1 software, H.264 software on Mali | [decode-chrome.md](decode-chrome.md) |
+| Firefox decode | VP9, HEVC, H.264 pass (2026-11-16) | VP9, HEVC pass, on a Zink desktop only | yes; AV1 software, H.264 software on Mali | [decode-firefox.md](decode-firefox.md) |
+| H.264 decode, every VA-API client | passes: FFmpeg, GStreamer, all three browsers (2026-11-16) | off | yes on Adreno; Mali browser runs still to do | [decode-h264.md](decode-h264.md) |
 | Frame sync: stale frames, flicker, tearing | one stale frame in 13 runs under load | not seen | n/a | [decode-frame-sync.md](decode-frame-sync.md) |
 | Native decode: mpv, FFmpeg, GStreamer | mpv passes VP9, H.264, HEVC | mpv passes on its GLES route | mpv yes; VA-API clients see decoders | [decode-native.md](decode-native.md) |
 | Native encode: FFmpeg, GStreamer, Serein | passes | passes in private tests; fresh-install blockers fixed on main, not rechecked | yes where `android-vaapi` is installed | [encode-native.md](encode-native.md) |
@@ -58,7 +58,7 @@ mpv is the exception: it calls MediaCodec directly through FFmpeg
 
 The launcher (`src/native/acceleration.py`) sets each browser's driver and environment by
 device. `~/.config/livecd-native/acceleration.json` holds the user's choices: `hardware_video`,
-`disabled_va_codecs` (default `['h264', 'av1']`), `native_encode` and `native_decode`.
+`disabled_va_codecs` (default `['av1']` on Adreno, `['h264', 'av1']` on Mali), `native_encode` and `native_decode`.
 
 ## Rules for anyone using the phones
 

@@ -20,7 +20,7 @@ spec.loader.exec_module(installer)
 
 
 class Install(unittest.TestCase):
-    def exercise(self, current=False, repository=False, offline=False, corrupt=False):
+    def exercise(self, current=False, repository=False, offline=False, corrupt=False, cache_output=None):
         calls = []
         item = {'name': 'driver', 'version': '2-1', 'file': 'driver.deb',
                 'sha256': hashlib.sha256(b'payload').hexdigest()}
@@ -29,7 +29,9 @@ class Install(unittest.TestCase):
             name = command[0]
             code, output = 0, ''
             if name == 'dpkg-query': code, output = (0, 'installed\t3-1') if current else (1, '')
-            if name == 'apt-cache': code = 0 if repository else 1
+            if name == 'apt-cache':
+                code = 0 if repository or cache_output is not None else 1
+                output = 'Package: driver\nVersion: 2-1\n' if repository else (cache_output or '')
             if name == 'curl': Path(command[-1]).write_bytes(b'bad' if corrupt else b'payload')
             return subprocess.CompletedProcess(command, code, output, '')
         with mock.patch.object(installer.subprocess, 'run', side_effect=run), \
@@ -53,6 +55,12 @@ class Install(unittest.TestCase):
         self.assertTrue(any(c[0] == 'apt-get' and c[-1] == 'update' for c in calls))
         self.assertEqual(calls[-1][0], 'apt-get')
         self.assertTrue(calls[-1][-1].endswith('/driver.deb'))
+
+    def test_successful_cache_query_without_exact_version_uses_download(self):
+        for output in ['', 'Package: driver\nVersion: 1-1\n', 'Package: other\nVersion: 2-1\n']:
+            with self.subTest(output=output):
+                calls = self.exercise(cache_output=output)
+                self.assertTrue(any(c[0] == 'curl' for c in calls))
 
     def test_missing_offline_package_and_corrupt_asset_are_rejected(self):
         with self.assertRaisesRegex(RuntimeError, 'offline repository lacks'):

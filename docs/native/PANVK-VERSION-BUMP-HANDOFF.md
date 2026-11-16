@@ -1,6 +1,6 @@
 # Handoff: Vulkan 1.4 and OpenGL 4.3 on the packaged PanVK driver
 
-State on 2026-11-15, Galaxy S20 (`x1s`, Mali-G77 MC11, architecture 9, kbase job manager).
+State on 2026-11-16 UTC, Galaxy S20 (`x1s`, Mali-G77 MC11, architecture 9, kbase job manager).
 For whoever raises the versions the Mali stack reports. Paths under `temp/` are local files
 that Git ignores.
 
@@ -23,7 +23,7 @@ broader test plan, see
 [PANVK-CTS-AND-DAILY-DESKTOP-HANDOFF.md](PANVK-CTS-AND-DAILY-DESKTOP-HANDOFF.md).
 Full CTS passage is not the user's daily-desktop release requirement.
 
-## Default-install integration, 2026-11-15
+## Default-install integration accepted, 2026-11-16 UTC
 
 The user's completion condition is integration into normal `install.sh` Mali
 paths. `mesa-vulkan-icd-panvk-kbase` 26.3.1-1 now carries the fourteen-patch pair
@@ -62,16 +62,27 @@ The controller `.deb` SHA-256 is
 The local integration record is
 `temp/panvk-qualification/desktop-release/integration-checkpoint.json`.
 
-The final live installation-helper acceptance is pending: x1s went offline
-before staging or running it. Those failed SSH attempts changed no device
-files or installed packages. The phone was last observed with driver 26.3.1
-and controller 0.2.0-20. Do not mark this completion condition accepted until
-the normal installed driver, automatic mode flags, repeat-install behavior
-and APT candidates have been checked on the phone. The prepared bounded
-script and rollback packages are under local
-`temp/panvk-qualification/desktop-release/install-check.sh` and phone
-`~/gpu-x1s/qualification/default-install/rollback/` respectively. Refresh the
-rollback baseline if another owner upgrades the phone before that test.
+The default-install completion condition is **accepted**. On 2026-11-16 UTC,
+the real helper upgraded x1s from driver 26.3.1 to **26.3.1-1**, preserving
+already-installed controller **0.2.0-21**. Plain desktop startup passes **30/30**.
+Both installed ABI hashes match SOURCE.json; Shell maps the normal packaged
+Bionic driver with automatic `PANVK_G77_LWG=1` and `PANVK_G77_NESTED=1`.
+Zink reports accelerated OpenGL 4.6 and GLES 3.2 without version overrides.
+The profile's new module link resolves correctly, APT candidates retain the
+qualified versions, and a second helper invocation is a silent no-op.
+
+The first live attempt exposed Termux APT returning success with empty output
+for a missing exact version. The helper now requires matching Package and
+Version fields before trusting the local repository. A regression check covers
+empty output and mismatched identities; all eight installer checks pass.
+Rollback after that first attempt restored the original driver and desktop
+30/30 before the corrected retry. No broad CTS or timed soak was rerun.
+
+Local evidence: `temp/panvk-qualification/evidence/default-install/installed-check/`
+contains installation logs, both APT policies, validation, GL information and
+`identity.json`. Phone evidence is under
+`~/gpu-x1s/qualification/default-install/installed-check/`.
+The managed desktop remains running with the upgraded normal package.
 
 ## Focused iteration policy
 

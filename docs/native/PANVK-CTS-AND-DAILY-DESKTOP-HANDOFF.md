@@ -1,6 +1,6 @@
 # PanVK handoff: daily desktop acceptance and optional broader CTS
 
-State: 2026-11-15. Target: Galaxy S20 `x1s`, Exynos 990, Mali-G77 MC11,
+State: 2026-11-16 UTC. Target: Galaxy S20 `x1s`, Exynos 990, Mali-G77 MC11,
 architecture 9, Android vendor `mali_kbase`/ION. This is a practical engineering
 handoff. Official certification, Adopter membership and submission paperwork
 are outside the user's objective.
@@ -54,14 +54,16 @@ CTS logs, process-library mappings and installed desktop identities beside it.
 Phone files: `~/gpu-x1s/qualification/ahb-focus/`.
 
 Do not transfer the thirteen-patch driver's broader CTS results to the new
-fourteen-patch driver. The glibc artifact was not rebuilt for the AHB change.
+fourteen-patch driver. The initial AHB round covered Bionic; the matching glibc artifact was subsequently rebuilt and passed enumeration and triangle/line/point checks in both modes.
 At the end of that qualification run, the original release controller was
 restored by verified hash and its desktop passed 30/30. Other owners may since
 have updated installed packages; inspect current state before any next switch.
 That AHB qualification did not change normal package pins. The subsequent
 installer integration now pins the fourteen-patch pair; see the version
-handoff's default-install checkpoint. Final live installer acceptance remains
-pending because the phone disconnected before it could run.
+handoff's default-install checkpoint. Live acceptance now passes: normal driver
+26.3.1-1 with controller 0.2.0-21, plain desktop 30/30, exact paired hashes,
+automatic nested mode, correct APT candidates and a no-op repeat installation.
+The user's default-install integration completion condition is accepted.
 
 The measured blockers have different resolutions:
 
@@ -228,7 +230,7 @@ certification work.
   on fixed artifacts establishes that campaign's complete coverage; results
   from different binaries cannot be combined into one complete passing run.
 
-Next owner: finish the pending normal-install acceptance recorded in the
-version handoff, then complete the missing bounded app checks for the promoted
-package. Review existing evidence before selecting any further test scope. Do not begin a full mustpass run merely because “full conformance”
-was mentioned in the previous discussion.
+The default-install integration is complete. Further bounded application checks
+and broader CTS are follow-up engineering work when needed. Review existing
+evidence before selecting any further test scope. Do not begin a full mustpass
+run merely because “full conformance” was mentioned in the previous discussion.

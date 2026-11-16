@@ -58,7 +58,12 @@ def ensure(packages, release, offline=False, prefix=None):
                     capture_output=True).returncode == 0:
                 continue
             target = name + '=' + version
-            if subprocess.run(['apt-cache', 'show', target], capture_output=True).returncode == 0:
+            available = subprocess.run(['apt-cache', 'show', target], capture_output=True, text=True)
+            identities = [dict(line.split(': ', 1) for line in stanza.splitlines() if ': ' in line)
+                          for stanza in available.stdout.split('\n\n')]
+            if available.returncode == 0 and any(
+                    fields.get('Package') == name and fields.get('Version') == version
+                    for fields in identities):
                 pending.append(target)
                 continue
             if offline:

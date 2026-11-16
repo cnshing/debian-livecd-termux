@@ -44,7 +44,12 @@ EXTENSIONS = Path.home() / '.vscode-oss/extensions'
 MAIN = 'lib/electron43/electron ' + str(PREFIX / 'lib/code-oss/code.mjs')
 # The packaged extensions this test uses. Only Open Remote - SSH is installed by default; first run
 # pkg install code-oss-extension-vscode-sshfs code-oss-extension-vscode-pull-request-github code-oss-extension-vscode-github-actions
-EXPECTED = {'github.vscode-pull-request-github', 'github.vscode-github-actions', 'jeanp413.open-remote-ssh', 'kelvin.vscode-sshfs'}
+# The overlay installs only Open Remote - SSH; the other packaged extensions are optional
+# (pkg install code-oss-extension-NAME) and are checked when installed.
+EXPECTED = {'jeanp413.open-remote-ssh'}
+OPTIONAL = {'code-oss-extension-vscode-pull-request-github': 'github.vscode-pull-request-github',
+            'code-oss-extension-vscode-github-actions': 'github.vscode-github-actions',
+            'code-oss-extension-vscode-sshfs': 'kelvin.vscode-sshfs'}
 BUILTIN = Path(os.environ.get('PREFIX', '/data/data/com.termux/files/usr')) / 'lib/code-oss/resources/app/extensions'
 SETTINGS = {'workbench.startupEditor': 'none', 'security.workspace.trust.enabled': False,
     'git.useEditorAsCommitInput': False, 'git.enableSmartCommit': True, 'extensions.autoUpdate': False}
@@ -254,7 +259,9 @@ class Fixture:
             'XDG_CONFIG_HOME': str(self.home / 'config'), 'XDG_DATA_HOME': str(self.home / 'data'),
             'XDG_STATE_HOME': str(self.home / 'state'), 'XDG_CACHE_HOME': str(self.home / 'cache'),
             'XDG_RUNTIME_DIR': str(self.runtime), 'SECRET_PROBE_OUT': str(scratch / 'secret.out'),
-            'SECRET_PROBE_VALUE': 'value-' + os.urandom(6).hex()}
+            'SECRET_PROBE_VALUE': 'value-' + os.urandom(6).hex(),
+            # Xvfb has no DRI3: on Mali, Zink then retries for a minute before the keyring prompt maps.
+            'GSK_RENDERER': 'cairo'}
         self.start(['Xvfb', f':{self.display}', '-screen', '0', '1500x950x24', '-nolisten', 'tcp'])
         wait_for((Path(os.environ['TMPDIR']) / f'.X11-unix/X{self.display}').exists, 20, 'Xvfb')
         self.start_bus()
@@ -457,7 +464,10 @@ def local_checks(fixture, check, evidence):
         env=fixture.env, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=120).stdout.split()
     builtin = [json.loads(path.read_text()) for path in BUILTIN.glob('*/package.json')]
     found = {e.split('@')[0].lower() for e in listed} | {f"{m['publisher']}.{m['name']}".lower() for m in builtin}
-    check('extensions_installed', EXPECTED <= found, sorted(EXPECTED - found))
+    installed = subprocess.run(['dpkg-query', '-W', '-f', '${Package} ${Status}\\n', *OPTIONAL], capture_output=True,
+                               text=True).stdout.splitlines()
+    expected = EXPECTED | {OPTIONAL[line.split()[0]] for line in installed if line.endswith(' installed')}
+    check('extensions_installed', expected <= found, sorted(expected - found))
 
     work = fixture.scratch / 'work'
     (work / '.vscode').mkdir(parents=True)
@@ -495,9 +505,11 @@ def local_checks(fixture, check, evidence):
         round(time.monotonic() - began, 1))
 
     # Extensions that need proposed APIs say so in this log when refused.
-    wait_for(lambda: '_doActivateExtension GitHub.vscode-pull-request-github' in fixture.log('exthost.log'), 60, 'the PR extension to activate')
-    host = fixture.log('exthost.log')
-    check('pr_extension_activated', '_doActivateExtension GitHub.vscode-pull-request-github' in host)
+    if 'github.vscode-pull-request-github' in expected:
+        wait_for(lambda: '_doActivateExtension GitHub.vscode-pull-request-github' in fixture.log('exthost.log'), 60,
+                 'the PR extension to activate')
+        host = fixture.log('exthost.log')
+        check('pr_extension_activated', '_doActivateExtension GitHub.vscode-pull-request-github' in host)
     renderer = fixture.log('renderer.log')
     refused = [line[:200] for line in renderer.splitlines() if 'proposed' in line.lower() and 'error' in line.lower()]
     check('no_proposed_api_refusals', not refused, refused)

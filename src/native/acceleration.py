@@ -256,7 +256,11 @@ def firefox_video_runtime():
                 continue
             installed = (PREFIX / 'bin/firefox').resolve()
             inputs = receipt['inputs']
-            if (hashlib.sha256(installed.read_bytes()).hexdigest() != inputs['binary'] or
+            # The loader copy must be the installed Firefox's own. Compare the two files rather than
+            # the receipt's binary hash: CI takes that before packaging strips both copies, so it
+            # never matches a Firefox that this project builds (packages/firefox).
+            if (hashlib.sha256(installed.read_bytes()).hexdigest() !=
+                    hashlib.sha256((port / 'application/firefox').read_bytes()).hexdigest() or
                     hashlib.sha256((installed.parent / 'application.ini').read_bytes()).hexdigest() !=
                     inputs['application_ini']):
                 reason = 'Firefox changed; update android-firefox-video to match it'

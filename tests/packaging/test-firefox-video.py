@@ -106,6 +106,18 @@ class FirefoxVideo(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             stage.patch(source)
 
+    def test_receipt_hash_taken_before_stripping_still_selects_video(self):
+        # CI hashes $PREFIX's unstripped Firefox; packaging then strips the installed binary and
+        # the loader copy alike (v0.12.0 on the Galaxy S20: hardware video silently off).
+        receipt = self.runtime / 'manifest.json'
+        data = json.loads(receipt.read_text())
+        data['inputs']['binary'] = '0' * 64
+        receipt.write_text(json.dumps(data))
+        command, _, video, errors = self.prepare()
+        self.assertEqual(command[0], str(self.runtime / 'application/firefox'))
+        video.assert_called_once()
+        self.assertEqual(errors, '')
+
     def test_firefox_binary_or_application_ini_changes_fall_back_without_starting_video(self):
         for name in ('firefox', 'application.ini'):
             with self.subTest(name=name):

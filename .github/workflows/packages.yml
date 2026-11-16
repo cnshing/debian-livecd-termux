@@ -7,6 +7,9 @@
 #   Build again anyway:       add rebuild: true, or -f rebuild=true.
 #   Draft a release:          push a tag such as v1, or set release: v1 with packages left empty.
 #                             A new release starts as a draft; publish it by hand.
+#   Refresh a release:        release_id: the numeric id (gh api repos/OWNER/REPO/releases --jq
+#                             '.[]|[.id,.name]'), with packages left empty. The run's tarballs replace
+#                             all of that release's files, whatever its tag, draft or published.
 #   Pushes and pull requests publish nothing.
 #   Which tarballs:           tarballs: net (the default), offline or both. net holds this project's
 #                             packages, and install.sh downloads the rest from Termux's mirrors. offline
@@ -43,6 +46,10 @@ on:
         default: false
       release:
         description: Release tag to publish. Needs every package, so leave packages empty.
+        required: false
+        default: ""
+      release_id:
+        description: Numeric id of an existing release whose files this run replaces. Instead of release.
         required: false
         default: ""
       rebuild:
@@ -83,6 +90,7 @@ jobs:
       count: ${{ steps.plan.outputs.count }}
       artifacts: ${{ steps.plan.outputs.artifacts }}
       release: ${{ steps.plan.outputs.release }}
+      release_id: ${{ steps.plan.outputs.release_id }}
       revision: ${{ steps.config.outputs.revision }}
       image: ${{ steps.config.outputs.image }}
       net: ${{ steps.plan.outputs.net }}
@@ -148,6 +156,7 @@ jobs:
       env:
         INPUT_PACKAGES: ${{ inputs.packages }}
         INPUT_RELEASE: ${{ inputs.release }}
+        INPUT_RELEASE_ID: ${{ inputs.release_id }}
         INPUT_REBUILD: ${{ inputs.rebuild }}
         CHROMIUM_DEPENDENCIES_ONLY: ${{ inputs.chromium_dependencies_only }}
         TARBALLS: ${{ inputs.tarballs || vars.REPO_TARBALLS || 'net' }}
@@ -155,9 +164,9 @@ jobs:
         DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
       run: |
         set -f  # Package names are split into words below, and must not expand as globs.
-        release=
+        release= release_id=
         if test "$GITHUB_EVENT_NAME" = workflow_dispatch; then
-          release=$INPUT_RELEASE
+          release=$INPUT_RELEASE release_id=$INPUT_RELEASE_ID
         elif test "$GITHUB_REF_TYPE" = tag; then
           release=$GITHUB_REF_NAME
         fi
@@ -167,19 +176,28 @@ jobs:
           both) net=true offline=true;;
           *) echo "::error::tarballs must be net, offline or both, not $TARBALLS."; exit 1;;
         esac
-        if test -n "$release" && test "$net" != true; then
+        case $release_id in
+          *[!0-9]*) echo "::error::release_id must be a release's numeric id, not $release_id."; exit 1;;
+        esac
+        if test -n "$release" && test -n "$release_id"; then
+          echo "::error::Give release or release_id, not both."
+          exit 1
+        fi
+        # Either names the release this run publishes to.
+        target=$release$release_id
+        if test -n "$target" && test "$net" != true; then
           echo "::error::install.sh downloads a release's net tarball, so a release needs tarballs: net or both."
           exit 1
         fi
         if test "$CHROMIUM_DEPENDENCIES_ONLY" = true; then
-          if test "$INPUT_PACKAGES" != chromium || test -n "$release"; then
+          if test "$INPUT_PACKAGES" != chromium || test -n "$target"; then
             echo "::error::Dependency-only builds require packages=chromium and no release."
             exit 1
           fi
         fi
         if test -z "$INPUT_PACKAGES"; then
           requested=$(python3 tools/recipes.py plan --all)
-        elif test -n "$release"; then
+        elif test -n "$target"; then
           # install.sh takes the latest release as complete, so a partial one would break it.
           echo "::error::A release needs every package: leave packages empty."
           exit 1
@@ -193,8 +211,8 @@ jobs:
         fi
         artifacts=$(printf '%s' "$requested" | python3 -c 'import json,sys; print(" ".join(job["artifact"] for job in json.load(sys.stdin)["include"]))')
         count=$(printf '%s' "$matrix" | python3 -c 'import json,sys; print(len(json.load(sys.stdin)["include"]))')
-        printf 'matrix=%s\ncount=%s\nartifacts=%s\nrelease=%s\nnet=%s\noffline=%s\n' \
-          "$matrix" "$count" "$artifacts" "$release" "$net" "$offline" >> "$GITHUB_OUTPUT"
+        printf 'matrix=%s\ncount=%s\nartifacts=%s\nrelease=%s\nrelease_id=%s\nnet=%s\noffline=%s\n' \
+          "$matrix" "$count" "$artifacts" "$release" "$release_id" "$net" "$offline" >> "$GITHUB_OUTPUT"
         printf 'Building %s of the requested sets: %s\n' "$count" "$matrix"
 
   build:
@@ -472,7 +490,8 @@ jobs:
     if: >-
       ${{ !inputs.chromium_dependencies_only && !cancelled() && needs.plan.result == 'success'
       && (needs.build.result == 'success' || needs.build.result == 'skipped')
-      && (needs.plan.outputs.count != '0' || needs.plan.outputs.release != '' || needs.plan.outputs.offline == 'true') }}
+      && (needs.plan.outputs.count != '0' || needs.plan.outputs.release != '' || needs.plan.outputs.release_id != ''
+      || needs.plan.outputs.offline == 'true') }}
     runs-on: ubuntu-26.04
     permissions:
       contents: write
@@ -588,15 +607,29 @@ jobs:
         compression-level: 0
         retention-days: 30
 
-    - name: Attach the packages to the release draft
-      if: needs.plan.outputs.release != ''
+    - name: Replace the release's files
+      if: needs.plan.outputs.release != '' || needs.plan.outputs.release_id != ''
       env:
         GH_TOKEN: ${{ github.token }}
         TAG: ${{ needs.plan.outputs.release }}
+        RELEASE_ID: ${{ needs.plan.outputs.release_id }}
         OFFLINE: ${{ needs.plan.outputs.offline }}
       run: |
-        gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 ||
-          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --generate-notes --draft
+        api=repos/$GITHUB_REPOSITORY/releases
+        # Everything below goes by the release's id. A tag can be shared by several releases, drafts
+        # included, and gh release would then pick one of them.
+        if test -n "$RELEASE_ID"; then
+          id=$(gh api "$api/$RELEASE_ID" --jq .id)
+        else
+          ids=$(gh api --paginate "$api" --jq ".[] | select(.tag_name == \"$TAG\") | .id")
+          case $(printf '%s' "$ids" | grep -c .) in
+            0) id=$(gh api -X POST "$api" -f tag_name="$TAG" -f target_commitish="$GITHUB_SHA" \
+                 -F generate_release_notes=true -F draft=true --jq .id);;
+            1) id=$ids;;
+            *) echo "::error::Several releases have tag $TAG:" $ids". Choose one with release_id."; exit 1;;
+          esac
+        fi
+        echo "Release $id: $(gh api "$api/$id" --jq '"\(.name) (\(.tag_name)), draft \(.draft)"')"
         files=("$REPO_TARBALL" "$REPO_TARBALL.sha256")
         if test "$OFFLINE" = true; then
           # GitHub refuses release files of 2 GiB or more. A larger tarball goes up in parts, which
@@ -609,4 +642,24 @@ jobs:
             files+=("$OFFLINE_TARBALL" "$OFFLINE_TARBALL.sha256")
           fi
         fi
-        gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" --clobber "${files[@]}"
+        # The release ends up with exactly this run's files. Files this run does not make, such as an
+        # older offline tarball or its parts, go first; each one it does make is deleted just before
+        # its replacement goes up, so install.sh's net tarball is missing only for its own upload.
+        assets=$(gh api --paginate "$api/$id/assets" --jq '.[] | "\(.id) \(.name)"')
+        while read -r asset name; do
+          test -n "$asset" || continue
+          case " ${files[*]} " in
+            *" $name "*) ;;
+            *) echo "Deleting $name"; gh api -X DELETE "$api/assets/$asset";;
+          esac
+        done <<< "$assets"
+        for file in "${files[@]}"; do
+          old=$(awk -v name="$file" '$2 == name { print $1 }' <<< "$assets")
+          test -z "$old" || gh api -X DELETE "$api/assets/$old"
+          echo "Uploading $file"
+          digest=$(curl -fsS -X POST -T "$file" -H "Authorization: Bearer $GH_TOKEN" \
+            -H 'Content-Type: application/octet-stream' \
+            "https://uploads.github.com/$api/$id/assets?name=$file" | jq -r .digest)
+          test "$digest" = "sha256:$(sha256sum "$file" | cut -d' ' -f1)" ||
+            { echo "::error::GitHub's digest of $file, $digest, is not the file's."; exit 1; }
+        done

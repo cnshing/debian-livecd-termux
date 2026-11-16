@@ -11,9 +11,9 @@ rules and pass criteria: [README.md](README.md).
 
 | Use | Adreno | Mali (S20), revision 3 |
 | --- | --- | --- |
-| WebRTC, H.264 and VP9 | not run | **passes**: loopback 285 frames per codec, `OMX.Exynos.AVC.Encoder` / `OMX.Exynos.VP9.Encoder` 286 in, 286 out, received 640x360 picture correct, no GPU crash |
-| WebCodecs `VideoEncoder` H.264 | not run | **passes**: 60 in, 60 out on `OMX.Exynos.AVC.Encoder`, clean flush, software decode max colour error 12, 0 frames over 16; frames 0, 29, 59 viewed after ffmpeg decode (labels, moving box and colours right) |
-| WebCodecs `VideoEncoder` VP9 | not run | **passes** on `OMX.Exynos.VP9.Encoder`, 60 in/out, software decode max error 12 (pixels checked in-page; not viewed as an image) |
+| WebRTC, H.264 and VP9 | H.264 **passes** (Note10+, 2026-11-16): 288 in, 288 out on `OMX.qcom.video.encoder.avc`, received 640x360 picture viewed; no VP9 encoder on this SoC | **passes**: loopback 285 frames per codec, `OMX.Exynos.AVC.Encoder` / `OMX.Exynos.VP9.Encoder` 286 in, 286 out, received 640x360 picture correct, no GPU crash |
+| WebCodecs `VideoEncoder` H.264 | **passes**: 60 in, 60 out on `OMX.qcom.video.encoder.avc`, max colour error 10, 0 frames over 16 | **passes**: 60 in, 60 out on `OMX.Exynos.AVC.Encoder`, clean flush, software decode max colour error 12, 0 frames over 16; frames 0, 29, 59 viewed after ffmpeg decode (labels, moving box and colours right) |
+| WebCodecs `VideoEncoder` VP9 | no hardware VP9 encoder | **passes** on `OMX.Exynos.VP9.Encoder`, 60 in/out, software decode max error 12 (pixels checked in-page; not viewed as an image) |
 | MediaRecorder | not run | not run |
 
 ## What was wrong, and the fixes
@@ -50,7 +50,7 @@ Chromium staged privately (not installed) and started through the installed laun
 
 ## Still open
 
-- Note10+ (and any Adreno phone) has never run a browser encode test.
+- On by default on Adreno too since livecd-desktop 0.2.0-24. HEVC WebCodecs is not offered by Chromium's VA-API encoder on either phone.
 - MediaRecorder not tested.
 - The Exynos encoders refuse MediaCodec's `low-latency` key (logged as `configure failed with
   low-latency: -10000`, then retried without), so call latency is unmeasured.

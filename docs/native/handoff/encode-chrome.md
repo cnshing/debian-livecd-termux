@@ -9,15 +9,18 @@ patched. Shared rules and pass criteria: [README.md](README.md).
 `AcceleratedVideoEncoder` for Chrome when the video device is `/dev/mali0` (livecd-desktop
 0.2.0-20). WebRTC encodes on the Exynos encoders. WebCodecs hardware encoding still crashes the
 GPU process, and that cannot be fixed outside Chrome (see "Consequence" below). Adreno stays off:
-never tested.
+on the Note10+ (2026-11-16) WebRTC H.264 encoded in hardware, but Chrome there uses the prebuilt
+glibc driver, which encodes the 16-aligned surface uncropped, so 640x360 arrived as 640x368 with a
+green band at the bottom (received frame viewed). Switching Adreno Chrome to this project's glibc
+driver build, as on Mali, is the likely fix.
 
 Tested on the S20 (`x1s`), Chrome 157.0.8103.78, Bionilux 0.5.0-2 preload (CI 43665869060),
 private display and private `termux-va`, 640x360 loopback:
 
 | Use | Adreno | Mali (S20) |
 | --- | --- | --- |
-| WebRTC, software | not run | **passes** with Bionilux 0.5.0-2: 1+1 ICE candidates, connected, 278 frames, received picture right. With 0.5.0-1: 0 candidates, never connects |
-| WebRTC H.264, with `AcceleratedVideoEncoder` | not run | **passes**: `VaapiVideoEncodeAccelerator` in `kEncoding`, daemon session on `OMX.Exynos.AVC.Encoder`, 278 frames encoded and decoded, received frame viewed (hue field and white bar clean) |
+| WebRTC, software | **passes** (2026-11-16), received 640x360 | **passes** with Bionilux 0.5.0-2: 1+1 ICE candidates, connected, 278 frames, received picture right. With 0.5.0-1: 0 candidates, never connects |
+| WebRTC H.264, with `AcceleratedVideoEncoder` | encodes on `OMX.qcom.video.encoder.avc` but at 640x368, green band (2026-11-16) | **passes**: `VaapiVideoEncodeAccelerator` in `kEncoding`, daemon session on `OMX.Exynos.AVC.Encoder`, 278 frames encoded and decoded, received frame viewed (hue field and white bar clean) |
 | WebRTC VP9, with `AcceleratedVideoEncoder` | not run | **passes**: same, on `OMX.Exynos.VP9.Encoder`, 280 encoded, 279 decoded, frame viewed |
 | WebCodecs `VideoEncoder` | not run | **crashes the GPU process** (exit code 5) as soon as frames arrive; the page gets `OperationError: Encoding error.` |
 

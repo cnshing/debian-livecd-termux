@@ -39,7 +39,12 @@ program (GStreamer va, FFmpeg VA-API, ...)
 On Mali (`/dev/mali0`) the launcher turns on `AcceleratedVideoEncoder` for
 Chromium and Chrome (`command_line()` in
 [`acceleration.py`](../../src/native/acceleration.py)). Firefox needs an opt-in.
-Adreno browser encoding has never been tested, so it stays off there.
+On Adreno (Note10+, 2026-11-16) it is on for Chromium only: WebCodecs H.264 passed 60 of 60
+frames on `OMX.qcom.video.encoder.avc` (maximum colour error 10) and WebRTC H.264 287 frames,
+received picture viewed. Chrome stays off there: on Adreno it uses the prebuilt glibc driver,
+which encodes the 16-aligned surface without the crop, so a 640x360 call arrives as 640x368 with
+a green band at the bottom. The Snapdragon 855 has no VP9 encoder, and Chromium offers no
+VA-API HEVC encoding.
 
 | Browser | Default on Mali | WebRTC H.264/VP9 | WebCodecs `VideoEncoder` |
 | --- | --- | --- | --- |
@@ -176,7 +181,7 @@ All changes are generic: none is specific to a program.
 | GStreamer programs | The same package |
 | `ffmpeg`, libavcodec programs | Termux's FFmpeg needs `--enable-vaapi` and `libva`. A test build of 9.0.2 needed only that, plus `-Wno-error=incompatible-function-pointer-types` for libv4l2 and `--disable-xlib`. No recipe yet: Termux's FFmpeg is in its main repository, which `tools/recipes.py` does not stage, and replacing it affects every program that links it |
 | OBS Studio | Termux's recipe removes VAAPI on purpose (its patch 0007) and builds without V4L2. Restoring both needs a recipe override and libpci, which Termux does not package. Not built or tested |
-| Chromium (Termux) | Our VA-API build, revision 3 or later, encodes WebRTC and WebCodecs H.264/VP9 on Mali, on by default there. Adreno untested |
+| Chromium (Termux) | Our VA-API build, revision 3 or later, encodes WebRTC and WebCodecs H.264/VP9 on Mali and H.264 on Adreno, on by default on both |
 | Google Chrome | Glibc stack under Bionilux `0.5.0-2`. WebRTC encodes on Mali, on by default there; WebCodecs hardware encoding crashes its GPU process |
 | ungoogled-chromium | Glibc stack; encoding untested and not enabled |
 | Firefox | Opt-in only (`firefox_encode`), with the patched [`packages/firefox`](../../packages/firefox) build; not yet phone-tested. See the [handoff](handoff/encode-firefox.md) |

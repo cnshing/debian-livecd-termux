@@ -82,7 +82,8 @@ Firefox, Chromium and Google Chrome are installed with GPU rendering and Android
 decoding. Chrome is downloaded from Google during installation, because its license does not
 allow this project to redistribute it. Hardware video **encoding** has limited support: native
 programs can use it on Snapdragon phones, Exynos phones have known faults, and on Mali phones
-Chromium and Chrome hardware-encode WebRTC by default. See [hardware encoding](docs/native/ENCODING.md) and
+Chromium and Chrome hardware-encode WebRTC by default, as
+Chromium also does on Snapdragon phones. See [hardware encoding](docs/native/ENCODING.md) and
 [Exynos encoding](docs/native/ENCODING-EXYNOS.md).
 
 The desktop's Android integrations start with it: the phone microphone, or a connected Bluetooth

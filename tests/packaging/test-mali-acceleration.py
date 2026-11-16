@@ -189,6 +189,10 @@ class PanVKBrowsers(unittest.TestCase):
         # Revision 2 fails every WebCodecs frame (NV12 upload); revision 1 crashes the GPU process.
         self.assertFalse(any('AcceleratedVideoEncoder' in arg for arg in self.chromium_encode_argv('156.0.8078.79-2')))
         self.assertNotIn('--video-capture-use-gpu-memory-buffer', self.chromium_encode_argv('156.0.8078.79-3'))
+        # Adreno too: WebRTC and WebCodecs H.264 pass on the Note10+'s OMX.qcom encoder.
+        with mock.patch.object(acceleration, 'video_device', return_value='/dev/kgsl-3d0'):
+            self.assertTrue(any('AcceleratedVideoEncoder' in arg for arg in self.chromium_encode_argv('156.0.8078.79-3')))
+            self.assertFalse(any('AcceleratedVideoEncoder' in arg for arg in self.chromium_encode_argv('156.0.8078.79-2')))
 
     def test_adreno_keeps_the_prebuilt_glibc_driver(self):
         root = self.tmp / 'va'
@@ -209,7 +213,7 @@ class PanVKBrowsers(unittest.TestCase):
         self.assertTrue(any('AcceleratedVideoEncoder' in arg for arg in flags))
         with mock.patch.object(acceleration, 'video_device', return_value='/dev/kgsl-3d0'):
             flags = acceleration.command_line('chrome', ['/chrome'], 'glibc', video=True, gpu=True)
-        # Never tried on Adreno.
+        # Adreno's prebuilt glibc driver sends 640x368 for 640x360, with a green band.
         self.assertFalse(any('AcceleratedVideoEncoder' in arg for arg in flags))
 
     def test_completion_can_be_disabled_for_a_control_run(self):

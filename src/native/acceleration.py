@@ -325,12 +325,13 @@ def command_line(profile, command, abi, video, gpu, mali=False):
                 '--hardware-video-device-path=' + video_device(),
                 '--enable-features=Vulkan,VulkanFromANGLE,DefaultANGLEVulkan,VaapiVideoDecoder,VaapiVideoDecodeLinux,PlatformHEVCDecoderSupport,AcceleratedVideoDecoder,AcceleratedVideoDecodeLinuxGL,VaapiIgnoreDriverChecks',
                 '--disable-features=VaapiVideoMinResolutionForPerformance']
-            # Exynos hardware encoding, accepted on the S20: Chromium revision 3 for WebRTC and
-            # WebCodecs; Chrome for WebRTC. Chrome's WebCodecs hardware path crashes its GPU process
-            # (unpatchable GMB input); the user chose WebRTC hardware encoding over that.
-            if video_device() == '/dev/mali0' and (
-                    (profile == 'chromium' and abi == 'bionic' and chromium_encodes_webcodecs()) or
-                    (profile == 'chrome' and abi == 'glibc')):
+            # Hardware encoding: Chromium revision 3 for WebRTC and WebCodecs, on the S20 and the
+            # Note10+; Chrome for WebRTC on Mali only. Chrome's WebCodecs hardware path crashes its
+            # GPU process (unpatchable GMB input); the user chose WebRTC hardware encoding over
+            # that. On Adreno Chrome uses the prebuilt glibc driver, which encodes the 16-aligned
+            # surface uncropped: 640x360 arrives as 640x368 with a green band (ENCODING.md).
+            if ((profile == 'chromium' and abi == 'bionic' and chromium_encodes_webcodecs()) or
+                    (profile == 'chrome' and abi == 'glibc' and video_device() == '/dev/mali0')):
                 flags = [flag + ',AcceleratedVideoEncoder' if flag.startswith('--enable-features=') else flag
                          for flag in flags]
         if abi == 'glibc':

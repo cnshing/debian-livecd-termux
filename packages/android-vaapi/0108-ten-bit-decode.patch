@@ -1,0 +1,258 @@
+diff --git a/src/gallium/frontends/va/tva_bridge.c b/src/gallium/frontends/va/tva_bridge.c
+index 48663e3..12bf2e6 100644
+--- a/src/gallium/frontends/va/tva_bridge.c
++++ b/src/gallium/frontends/va/tva_bridge.c
+@@ -187,6 +187,21 @@ tva_av1_disabled(void)
+     return tva_option_enabled("TERMUX_VA_DISABLE_AV1");
+ }
+ 
++/* 10-bit decoding is offered only where the daemon's start-up probe saw the
++ * decoder return real P010 (<socket>.tenbit); it is never inferred. */
++static bool
++tva_ten_bit_disabled(void)
++{
++    return tva_option_enabled("TERMUX_VA_DISABLE_10BIT");
++}
++
++static bool
++tva_ten_bit_profile(enum pipe_video_profile profile)
++{
++    return profile == PIPE_VIDEO_PROFILE_HEVC_MAIN_10 ||
++           profile == PIPE_VIDEO_PROFILE_VP9_PROFILE2;
++}
++
+ static bool
+ tva_profile_supported(enum pipe_video_profile profile)
+ {
+@@ -202,6 +217,12 @@ tva_profile_supported(enum pipe_video_profile profile)
+         return !tva_hevc_disabled();
+     case PIPE_VIDEO_PROFILE_VP9_PROFILE0:
+         return !tva_vp9_disabled();
++    case PIPE_VIDEO_PROFILE_HEVC_MAIN_10:
++        return !tva_hevc_disabled() && !tva_ten_bit_disabled() &&
++               tva_ten_bit_available("video/hevc");
++    case PIPE_VIDEO_PROFILE_VP9_PROFILE2:
++        return !tva_vp9_disabled() && !tva_ten_bit_disabled() &&
++               tva_ten_bit_available("video/x-vnd.on2.vp9");
+     case PIPE_VIDEO_PROFILE_AV1_MAIN:
+         return !tva_av1_disabled();
+     default:
+@@ -232,6 +253,10 @@ tva_encode_profile_supported(enum pipe_video_profile profile)
+ static int
+ tva_codec_id(enum pipe_video_profile profile)
+ {
++    if (profile == PIPE_VIDEO_PROFILE_HEVC_MAIN_10)
++        return CODEC_HEVC_MAIN10;
++    if (profile == PIPE_VIDEO_PROFILE_VP9_PROFILE2)
++        return CODEC_VP9_PROFILE2;
+     switch (u_reduce_video_profile(profile)) {
+     case PIPE_VIDEO_FORMAT_MPEG4_AVC:
+         return CODEC_H264;
+@@ -392,6 +417,7 @@ tva_screen_is_video_format_supported(struct pipe_screen *screen,
+          * path. */
+         switch (format) {
+         case PIPE_FORMAT_NV12:
++        case PIPE_FORMAT_P010:
+         case PIPE_FORMAT_R8G8B8A8_UNORM:
+         case PIPE_FORMAT_B8G8R8A8_UNORM:
+         case PIPE_FORMAT_R8G8B8X8_UNORM:
+@@ -414,7 +440,15 @@ tva_screen_is_video_format_supported(struct pipe_screen *screen,
+         (profile != PIPE_VIDEO_PROFILE_UNKNOWN &&
+          !tva_profile_supported(profile)))
+         return false;
+-    if (format != PIPE_FORMAT_NV12)
++    /* 10-bit profiles decode into P010 only, 8-bit ones into NV12 only. */
++    if (profile == PIPE_VIDEO_PROFILE_UNKNOWN) {
++        if (format != PIPE_FORMAT_NV12 &&
++            !(format == PIPE_FORMAT_P010 &&
++              (tva_profile_supported(PIPE_VIDEO_PROFILE_HEVC_MAIN_10) ||
++               tva_profile_supported(PIPE_VIDEO_PROFILE_VP9_PROFILE2))))
++            return false;
++    } else if (format != (tva_ten_bit_profile(profile) ? PIPE_FORMAT_P010
++                                                       : PIPE_FORMAT_NV12))
+         return false;
+     return vl_video_buffer_is_format_supported(screen, format, profile,
+                                                entrypoint);
+@@ -688,6 +722,7 @@ tva_nalu_type(const uint8_t *b, size_t len)
+ static bool
+ tva_is_param_set(int codec_id, const uint8_t *b, size_t len)
+ {
++    codec_id = codec_base_id(codec_id);
+     if (codec_id == CODEC_H264) {
+         int t = tva_nalu_type(b, len);
+         return (t == 7 || t == 8);
+@@ -1354,7 +1389,8 @@ tva_create_contiguous_video_buffer(struct pipe_context *context,
+    struct pipe_video_buffer *result = NULL;
+ 
+    if (!screen || !screen->resource_from_handle ||
+-       !templat || templat->buffer_format != PIPE_FORMAT_NV12 ||
++       !templat || (templat->buffer_format != PIPE_FORMAT_NV12 &&
++                    templat->buffer_format != PIPE_FORMAT_P010) ||
+        templat->interlaced)
+       return NULL;
+ 
+@@ -1632,20 +1668,22 @@ tva_copy_frame_direct(struct tva_codec *c, struct tva_pending *p,
+        stride < (size_t)uv_w * uv_blocksize)
+       return false;
+ 
++   /* Crop offsets count samples; P010 samples are two bytes. */
++   const size_t crop_x = (size_t)p->crop_left * y_blocksize;
++   const size_t crop_uv_x = (size_t)(p->crop_left & ~1) * y_blocksize;
+    if ((size_t)p->crop_top > SIZE_MAX / stride ||
+-       (size_t)p->crop_top * stride > SIZE_MAX - (size_t)p->crop_left ||
++       (size_t)p->crop_top * stride > SIZE_MAX - crop_x ||
+        (size_t)p->slice_height > SIZE_MAX / stride ||
+        (size_t)(p->crop_top / 2) > SIZE_MAX / stride)
+       return false;
+-   const size_t y_offset = (size_t)p->crop_top * stride +
+-                           (size_t)p->crop_left;
++   const size_t y_offset = (size_t)p->crop_top * stride + crop_x;
+    size_t uv_offset = (size_t)p->slice_height * stride;
+    if (uv_offset > SIZE_MAX - (size_t)(p->crop_top / 2) * stride)
+       return false;
+    uv_offset += (size_t)(p->crop_top / 2) * stride;
+-   if (uv_offset > SIZE_MAX - (size_t)(p->crop_left & ~1))
++   if (uv_offset > SIZE_MAX - crop_uv_x)
+       return false;
+-   uv_offset += (size_t)(p->crop_left & ~1);
++   uv_offset += crop_uv_x;
+ 
+    const size_t y_rows = h - 1;
+    const size_t uv_rows = uv_h - 1;
+@@ -1845,10 +1883,13 @@ tva_copy_frame(struct tva_codec *c, struct tva_pending *p)
+     if (stride < y_row_bytes || stride < uv_row_bytes ||
+         p->resources[1]->width0 < uv_w || p->resources[1]->height0 < uv_h)
+         return false;
++    /* Crop offsets count samples; P010 samples are two bytes. */
++    const size_t crop_x = (size_t)p->crop_left * y_blocksize;
++    const size_t crop_uv_x = (size_t)(p->crop_left & ~1) * y_blocksize;
+     if ((size_t)p->crop_top > SIZE_MAX / stride ||
+-        (size_t)p->crop_top * stride > SIZE_MAX - (size_t)p->crop_left)
++        (size_t)p->crop_top * stride > SIZE_MAX - crop_x)
+         return false;
+-    y_offset = (size_t)p->crop_top * stride + (size_t)p->crop_left;
++    y_offset = (size_t)p->crop_top * stride + crop_x;
+     if ((size_t)p->slice_height > SIZE_MAX / stride)
+         return false;
+     uv_offset = (size_t)p->slice_height * stride;
+@@ -1856,9 +1897,9 @@ tva_copy_frame(struct tva_codec *c, struct tva_pending *p)
+         uv_offset > SIZE_MAX - (size_t)(p->crop_top / 2) * stride)
+         return false;
+     uv_offset += (size_t)(p->crop_top / 2) * stride;
+-    if (uv_offset > SIZE_MAX - (size_t)(p->crop_left & ~1))
++    if (uv_offset > SIZE_MAX - crop_uv_x)
+         return false;
+-    uv_offset += (size_t)(p->crop_left & ~1);
++    uv_offset += crop_uv_x;
+     if (y_rows > SIZE_MAX / stride ||
+         y_offset > SIZE_MAX - y_rows * stride ||
+         y_offset + y_rows * stride > SIZE_MAX - y_row_bytes)
+diff --git a/src/gallium/frontends/va/tva_client.c b/src/gallium/frontends/va/tva_client.c
+index bdc80c9..eab8cd7 100644
+--- a/src/gallium/frontends/va/tva_client.c
++++ b/src/gallium/frontends/va/tva_client.c
+@@ -852,7 +852,7 @@ int tva_session_send_unit(struct tva_session *s, const void *data, size_t len)
+      * start codes make the decoder silently swallow everything and produce
+      * no frames - fail here instead.  VP8/VP9 is the opposite: adding start
+      * codes would corrupt the frame, so none are ever added. */
+-    if (s->codec == CODEC_H264 || s->codec == CODEC_HEVC) {
++    if (codec_base_id(s->codec) == CODEC_H264 || codec_base_id(s->codec) == CODEC_HEVC) {
+         const uint8_t *b = data;
+         int sc3 = (len >= 3 && b[0] == 0 && b[1] == 0 && b[2] == 1);
+         int sc4 = (len >= 4 && b[0] == 0 && b[1] == 0 && b[2] == 0 && b[3] == 1);
+@@ -924,6 +924,34 @@ bool tva_encoder_available(const char *mime)
+     return false;
+ }
+ 
++static char tva_ten_bit[1024];
++
++static void tva_read_ten_bit(void)
++{
++    char endpoint[512], path[600];
++    snprintf(path, sizeof(path), "%s.tenbit",
++             tva_default_endpoint(endpoint, sizeof(endpoint)));
++    FILE *f = fopen(path, "re");
++    if (!f)
++        return;   /* an older daemon: no 10-bit sessions */
++    size_t n = fread(tva_ten_bit, 1, sizeof(tva_ten_bit) - 1, f);
++    tva_ten_bit[n] = '\0';
++    fclose(f);
++}
++
++bool tva_ten_bit_available(const char *mime)
++{
++    static util_once_flag once = UTIL_ONCE_FLAG_INIT;
++    util_call_once(&once, tva_read_ten_bit);
++    size_t len = strlen(mime);
++    for (const char *line = tva_ten_bit; *line;
++         line = strchr(line, '\n') ? strchr(line, '\n') + 1 : "") {
++        if (!strncmp(line, mime, len) && line[len] == ' ')
++            return true;
++    }
++    return false;
++}
++
+ int tva_session_send_raw_frame(struct tva_session *s, const void *data,
+                                size_t len, uint32_t flags)
+ {
+diff --git a/src/gallium/frontends/va/tva_client.h b/src/gallium/frontends/va/tva_client.h
+index 353075d..23e2e84 100644
+--- a/src/gallium/frontends/va/tva_client.h
++++ b/src/gallium/frontends/va/tva_client.h
+@@ -241,6 +241,9 @@ int tva_session_set_bitrate(struct tva_session *s, uint32_t bitrate);
+  * "<socket>.encoders" file it writes at start-up.  Without the file (an
+  * older daemon), every encoder is assumed available. */
+ bool tva_encoder_available(const char *mime);
++/* Whether the daemon proved that this MIME type's decoder returns real P010
++ * (<socket>.tenbit).  False with a daemon that predates 10-bit sessions. */
++bool tva_ten_bit_available(const char *mime);
+ 
+ /* Receive one encoded access unit from an encoder session.  The output is
+  * copied into caller-provided storage because the decoder receive buffer is
+diff --git a/src/gallium/frontends/va/tva_protocol.h b/src/gallium/frontends/va/tva_protocol.h
+index 0d4a462..0987fc1 100644
+--- a/src/gallium/frontends/va/tva_protocol.h
++++ b/src/gallium/frontends/va/tva_protocol.h
+@@ -106,6 +106,15 @@ typedef enum {
+     CODEC_H264_BASELINE_ENC = 8,
+     CODEC_H264_MAIN_ENC     = 9,
+     CODEC_H264_HIGH_ENC     = 10,
++    /* 10-bit sessions (debian-livecd-termux).  Frames travel as P010: a
++     * 16-bit little-endian luma plane, then interleaved 16-bit CbCr, each
++     * sample in the high 10 bits; the format descriptor's stride is in
++     * bytes.  Separate ids, so a daemon or client that predates them rejects
++     * the session instead of reading P010 as NV12.  The daemon lists the
++     * decoders it proved to return real P010 in <socket>.tenbit. */
++    CODEC_HEVC_MAIN10       = 11,   /* decode, P010 out */
++    CODEC_VP9_PROFILE2      = 12,   /* decode, P010 out */
++    CODEC_HEVC_MAIN10_ENC   = 13,   /* encode, P010 in (reserved) */
+     CODEC_MAX
+ } CodecId;
+ 
+@@ -113,15 +122,23 @@ static inline int codec_is_encoder(int codec)
+ {
+     return codec == CODEC_H264_ENC || codec == CODEC_HEVC_ENC ||
+            codec == CODEC_VP9_ENC || codec == CODEC_H264_BASELINE_ENC ||
+-           codec == CODEC_H264_MAIN_ENC || codec == CODEC_H264_HIGH_ENC;
++           codec == CODEC_H264_MAIN_ENC || codec == CODEC_H264_HIGH_ENC ||
++           codec == CODEC_HEVC_MAIN10_ENC;
++}
++
++static inline int codec_is_ten_bit(int codec)
++{
++    return codec == CODEC_HEVC_MAIN10 || codec == CODEC_VP9_PROFILE2 ||
++           codec == CODEC_HEVC_MAIN10_ENC;
+ }
+ 
+ static inline int codec_base_id(int codec)
+ {
+     return (codec == CODEC_H264_ENC || codec == CODEC_H264_BASELINE_ENC ||
+             codec == CODEC_H264_MAIN_ENC || codec == CODEC_H264_HIGH_ENC) ? CODEC_H264 :
+-           codec == CODEC_HEVC_ENC ? CODEC_HEVC :
+-           codec == CODEC_VP9_ENC ? CODEC_VP9 : codec;
++           (codec == CODEC_HEVC_ENC || codec == CODEC_HEVC_MAIN10 ||
++            codec == CODEC_HEVC_MAIN10_ENC) ? CODEC_HEVC :
++           (codec == CODEC_VP9_ENC || codec == CODEC_VP9_PROFILE2) ? CODEC_VP9 : codec;
+ }
+ 
+ /*

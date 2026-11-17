@@ -1,0 +1,292 @@
+diff --git a/common/tva_protocol.h b/common/tva_protocol.h
+index 0d4a462..0987fc1 100644
+--- a/common/tva_protocol.h
++++ b/common/tva_protocol.h
+@@ -106,6 +106,15 @@ typedef enum {
+     CODEC_H264_BASELINE_ENC = 8,
+     CODEC_H264_MAIN_ENC     = 9,
+     CODEC_H264_HIGH_ENC     = 10,
++    /* 10-bit sessions (debian-livecd-termux).  Frames travel as P010: a
++     * 16-bit little-endian luma plane, then interleaved 16-bit CbCr, each
++     * sample in the high 10 bits; the format descriptor's stride is in
++     * bytes.  Separate ids, so a daemon or client that predates them rejects
++     * the session instead of reading P010 as NV12.  The daemon lists the
++     * decoders it proved to return real P010 in <socket>.tenbit. */
++    CODEC_HEVC_MAIN10       = 11,   /* decode, P010 out */
++    CODEC_VP9_PROFILE2      = 12,   /* decode, P010 out */
++    CODEC_HEVC_MAIN10_ENC   = 13,   /* encode, P010 in (reserved) */
+     CODEC_MAX
+ } CodecId;
+ 
+@@ -113,15 +122,23 @@ static inline int codec_is_encoder(int codec)
+ {
+     return codec == CODEC_H264_ENC || codec == CODEC_HEVC_ENC ||
+            codec == CODEC_VP9_ENC || codec == CODEC_H264_BASELINE_ENC ||
+-           codec == CODEC_H264_MAIN_ENC || codec == CODEC_H264_HIGH_ENC;
++           codec == CODEC_H264_MAIN_ENC || codec == CODEC_H264_HIGH_ENC ||
++           codec == CODEC_HEVC_MAIN10_ENC;
++}
++
++static inline int codec_is_ten_bit(int codec)
++{
++    return codec == CODEC_HEVC_MAIN10 || codec == CODEC_VP9_PROFILE2 ||
++           codec == CODEC_HEVC_MAIN10_ENC;
+ }
+ 
+ static inline int codec_base_id(int codec)
+ {
+     return (codec == CODEC_H264_ENC || codec == CODEC_H264_BASELINE_ENC ||
+             codec == CODEC_H264_MAIN_ENC || codec == CODEC_H264_HIGH_ENC) ? CODEC_H264 :
+-           codec == CODEC_HEVC_ENC ? CODEC_HEVC :
+-           codec == CODEC_VP9_ENC ? CODEC_VP9 : codec;
++           (codec == CODEC_HEVC_ENC || codec == CODEC_HEVC_MAIN10 ||
++            codec == CODEC_HEVC_MAIN10_ENC) ? CODEC_HEVC :
++           (codec == CODEC_VP9_ENC || codec == CODEC_VP9_PROFILE2) ? CODEC_VP9 : codec;
+ }
+ 
+ /*
+diff --git a/daemon/termux-va.c b/daemon/termux-va.c
+index 98a5811..4ff0a6c 100644
+--- a/daemon/termux-va.c
++++ b/daemon/termux-va.c
+@@ -145,12 +145,22 @@
+ #define COLOR_QCOM_YUV420_SEMIPLANAR_64X32     0x7fa30c03
+ #define COLOR_TI_YUV420_SEMIPLANAR             0x7f000100
+ #define COLOR_TI_YUV420_SEMIPLANAR_INTERLACED  0x7f000001
++/* 10-bit outputs: Android's P010 and Qualcomm's linear Venus P010. */
++#define COLOR_FORMAT_YUVP010                   0x36
++#define COLOR_QCOM_YUV420_P010_VENUS           0x7fa30c0a
+ 
+ enum OutputLayout {
+     OUTPUT_LAYOUT_NV12 = 0,
+     OUTPUT_LAYOUT_I420 = 1,
++    OUTPUT_LAYOUT_P010 = 2,
+ };
+ 
++static bool color_format_is_p010(int color_format)
++{
++    return color_format == COLOR_FORMAT_YUVP010 ||
++           color_format == COLOR_QCOM_YUV420_P010_VENUS;
++}
++
+ /* ------------------------------------------------------------------ log */
+ /*
+  * 0=quiet (errors only)  1=info (connections/session stats, default)
+@@ -742,7 +752,7 @@ static int do_handshake(Session *s)
+         dlog(1, "[%d] unsupported handshake version: %u (supported %d..%d)",
+              s->id, ver, TVA_VERSION_MIN, HELLO_VERSION);
+         status = 1;
+-    } else if (!mime) {
++    } else if (!mime || cid == CODEC_HEVC_MAIN10_ENC) {
+         dlog(1, "[%d] unknown codec id: %u", s->id, cid);
+         status = 2;
+     } else if (w < 96 || h < 96 || w > 8192 || h > 4320) {
+@@ -969,7 +979,7 @@ static void *input_thread(void *arg)
+         }
+         s->units_in++;
+ 
+-        if (is_param_set(s->codec_id, buf, sz)) {      /* parameter set -> CSD */
++        if (is_param_set(codec_base_id(s->codec_id), buf, sz)) {      /* parameter set -> CSD */
+             if (csd_len + sz <= MAX_FRAME) {
+                 memcpy(csd + csd_len, buf, sz);
+                 csd_len += sz;
+@@ -1095,7 +1105,8 @@ done:
+  */
+ static int shm_prepare(Session *s, int w, int h)
+ {
+-    s->shm_slot  = shm_slot_bytes(w, h);
++    /* P010 samples take two bytes each: twice the NV12 slot. */
++    s->shm_slot  = shm_slot_bytes(w, h) * (codec_is_ten_bit(s->codec_id) ? 2 : 1);
+     s->shm_total = SHM_CTRL_BYTES + s->shm_slot * SHM_SLOTS;
+ 
+     s->shm_fd = (int)syscall(SYS_memfd_create, "dmd-frames", MFD_CLOEXEC);
+@@ -1585,7 +1596,12 @@ static void *output_thread(void *arg)
+                     if (off <= osz && frame_size <= osz - off) {
+                         frame_data = ob + off;
+ 
+-                        if (s->output_layout < 0)
++                        if (s->output_layout < 0 && codec_is_ten_bit(s->codec_id)) {
++                            /* No validated format yet: never guess P010. */
++                            dlog(0, "[%d] 10-bit frame before its output format, ending session", s->id);
++                            frame_data = NULL;
++                            s->stop = 1;
++                        } else if (s->output_layout < 0)
+                             s->output_layout = s->codec_id == CODEC_AV1
+                                                    ? OUTPUT_LAYOUT_I420
+                                                    : OUTPUT_LAYOUT_NV12;
+@@ -1724,7 +1740,19 @@ static void *output_thread(void *arg)
+                 int have_color_format = AMediaFormat_getInt32(
+                     of, TVA_MF_KEY_COLOR_FORMAT, &color_format);
+                 s->color_format = have_color_format ? (int)color_format : -1;
+-                if (have_color_format &&
++                if (codec_is_ten_bit(s->codec_id)) {
++                    /* The client asked for P010.  An 8-bit, tiled or
++                     * unknown layout would be misread: end the session. */
++                    if (!have_color_format || !color_format_is_p010((int)color_format) ||
++                        stride < 2 * w || slice < h) {
++                        dlog(0, "[%d] 10-bit session got color=0x%x stride=%d slice=%d for %dx%d, ending session",
++                             s->id, (unsigned)(uint32_t)s->color_format, stride, slice, w, h);
++                        AMediaFormat_delete(of);
++                        s->stop = 1;
++                        break;
++                    }
++                    s->output_layout = OUTPUT_LAYOUT_P010;
++                } else if (have_color_format &&
+                     media_color_format_is_planar((int)color_format)) {
+                     s->output_layout = OUTPUT_LAYOUT_I420;
+                 } else if (have_color_format &&
+@@ -1754,7 +1782,8 @@ static void *output_thread(void *arg)
+                 dlog(1, "[%d] output format %dx%d stride=%d slice=%d color=0x%x layout=%s crop=(%d,%d)-(%d,%d)%s",
+                      s->id, w, h, stride, slice,
+                      (unsigned)(uint32_t)s->color_format,
+-                     s->output_layout == OUTPUT_LAYOUT_I420 ? "I420" : "NV12",
++                     s->output_layout == OUTPUT_LAYOUT_I420 ? "I420" :
++                     s->output_layout == OUTPUT_LAYOUT_P010 ? "P010" : "NV12",
+                      cl, ct, cr, cb,
+                      s->fmt_changes > 1 ? " (mid-stream change)" : "");
+ 
+@@ -2129,6 +2158,124 @@ static void write_encoder_list(const char *sock_path)
+         dlog(0, "cannot publish %s: %s", path, strerror(errno));
+ }
+ 
++/* ------------------------------------------------------- 10-bit probe */
++/*
++ * Which decoders return real P010.  MediaCodecInfo is no guide: the
++ * Snapdragon 855's list omits P010, yet asking for YUV420Flexible gets
++ * Qualcomm's linear Venus P010, while an explicit P010 request is answered
++ * with NV12.  So decode one tiny 10-bit key frame per codec and look at the
++ * negotiated format.  Only Qualcomm hardware components are tried; nothing
++ * is inferred for other vendors.  TERMUX_VA_TENBIT=0 skips the probe.
++ */
++/* Generated with libx265 Main 10 and libvpx-vp9 profile 2, 96x96, one grey key frame each. */
++static const uint8_t probe_hevc_main10[] = {
++    0x00, 0x00, 0x00, 0x01, 0x40, 0x01, 0x0c, 0x01, 0xff, 0xff, 0x04, 0x08, 0x00, 0x00, 0x03, 0x00,
++    0x9d, 0xa8, 0x00, 0x00, 0x03, 0x00, 0x00, 0x1e, 0xba, 0x02, 0x40, 0x00, 0x00, 0x00, 0x01, 0x42,
++    0x01, 0x01, 0x04, 0x08, 0x00, 0x00, 0x03, 0x00, 0x9d, 0xa8, 0x00, 0x00, 0x03, 0x00, 0x00, 0x1e,
++    0xa0, 0x30, 0x81, 0x84, 0xd9, 0x6e, 0xa4, 0x93, 0x2b, 0xc0, 0x5a, 0x02, 0x00, 0x00, 0x03, 0x00,
++    0x02, 0x00, 0x00, 0x03, 0x00, 0x02, 0x10, 0x00, 0x00, 0x00, 0x01, 0x44, 0x01, 0xc1, 0x72, 0xb0,
++    0x22, 0x40, 0x00, 0x00, 0x01, 0x28, 0x01, 0xaf, 0x78, 0xeb, 0xae, 0xfb, 0xfe, 0x75, 0x57, 0xca,
++    0xc2, 0xa7, 0x9e, 0x4e, 0x84,
++};
++static const uint8_t probe_vp9_profile2[] = {
++    0x92, 0x49, 0x83, 0x42, 0x00, 0x02, 0xf8, 0x02, 0xfb, 0x00, 0x1c, 0x12, 0x0e, 0x0c, 0x49, 0x00,
++    0x00, 0x18, 0x60, 0x00, 0x00, 0x67, 0x36, 0x91, 0x3b, 0xc2, 0x80, 0xd7, 0x00,
++};
++
++static bool probe_ten_bit_decoder(const char *mime, const uint8_t *unit, size_t len,
++                                  char *component, size_t component_size)
++{
++    bool ok = false;
++    AMediaFormat *fmt = NULL;
++    AMediaCodec *codec = AMediaCodec_createDecoderByType(mime);
++    if (!codec)
++        return false;
++    char *name = NULL;
++    if (AMediaCodec_getName(codec, &name) != AMEDIA_OK || !name)
++        goto out;
++    snprintf(component, component_size, "%s", name);
++    bool qualcomm = !strncmp(name, "OMX.qcom.", 9) || !strncmp(name, "c2.qti.", 7);
++    AMediaCodec_releaseName(codec, name);
++    if (!qualcomm)
++        goto out;
++    fmt = AMediaFormat_new();
++    AMediaFormat_setString(fmt, TVA_MF_KEY_MIME, mime);
++    AMediaFormat_setInt32(fmt, TVA_MF_KEY_WIDTH, 96);
++    AMediaFormat_setInt32(fmt, TVA_MF_KEY_HEIGHT, 96);
++    AMediaFormat_setInt32(fmt, TVA_MF_KEY_COLOR_FORMAT, COLOR_FORMAT_YUV420_FLEXIBLE);
++    if (AMediaCodec_configure(codec, fmt, NULL, NULL, 0) != AMEDIA_OK ||
++        AMediaCodec_start(codec) != AMEDIA_OK)
++        goto out;
++    int sent = 0;
++    int32_t color = -1, stride = 0;
++    for (int i = 0; i < 300; i++) {
++        if (sent < 2) {
++            ssize_t in = AMediaCodec_dequeueInputBuffer(codec, 10000);
++            if (in >= 0) {
++                size_t cap = 0;
++                uint8_t *buffer = AMediaCodec_getInputBuffer(codec, (size_t)in, &cap);
++                if (!buffer || cap < len)
++                    break;
++                if (!sent)
++                    memcpy(buffer, unit, len);
++                AMediaCodec_queueInputBuffer(codec, (size_t)in, 0, sent ? 0 : len, 0,
++                                             sent ? AMEDIACODEC_BUFFER_FLAG_END_OF_STREAM : 0);
++                sent++;
++            }
++        }
++        AMediaCodecBufferInfo info;
++        ssize_t out = AMediaCodec_dequeueOutputBuffer(codec, &info, 10000);
++        if (out == AMEDIACODEC_INFO_OUTPUT_FORMAT_CHANGED) {
++            AMediaFormat *of = AMediaCodec_getOutputFormat(codec);
++            if (of) {
++                AMediaFormat_getInt32(of, TVA_MF_KEY_COLOR_FORMAT, &color);
++                AMediaFormat_getInt32(of, TVA_MF_KEY_STRIDE, &stride);
++                AMediaFormat_delete(of);
++            }
++        } else if (out >= 0) {
++            /* A P010 picture of 96x96 holds at least 96*2 bytes per row. */
++            ok = info.size >= 96 * 96 * 3 && color_format_is_p010(color) && stride >= 192;
++            AMediaCodec_releaseOutputBuffer(codec, (size_t)out, false);
++            break;
++        }
++    }
++    dlog(1, "%s 10-bit probe: %s color=0x%x stride=%d -> %s", mime, component,
++         (unsigned)color, stride, ok ? "P010" : "not offered");
++out:
++    AMediaCodec_stop(codec);
++    AMediaCodec_delete(codec);
++    if (fmt)
++        AMediaFormat_delete(fmt);
++    return ok;
++}
++
++/* Write "<mime> <component>" for each decoder proved to return P010 to
++ * <socket>.tenbit.  Replaced atomically; empty when none passed. */
++static void write_ten_bit_list(const char *sock_path)
++{
++    static const struct { const char *mime; const uint8_t *unit; size_t len; } probes[] = {
++        { "video/hevc", probe_hevc_main10, sizeof(probe_hevc_main10) },
++        { "video/x-vnd.on2.vp9", probe_vp9_profile2, sizeof(probe_vp9_profile2) },
++    };
++    char path[600], next[620];
++    snprintf(path, sizeof(path), "%s.tenbit", sock_path);
++    snprintf(next, sizeof(next), "%s.next", path);
++    FILE *f = fopen(next, "we");
++    if (!f) {
++        dlog(0, "cannot write %s: %s", next, strerror(errno));
++        return;
++    }
++    const char *off = getenv("TERMUX_VA_TENBIT");
++    for (size_t i = 0; !(off && !strcmp(off, "0")) && i < sizeof(probes) / sizeof(probes[0]); i++) {
++        char component[128] = "";
++        if (probe_ten_bit_decoder(probes[i].mime, probes[i].unit, probes[i].len,
++                                  component, sizeof(component)))
++            fprintf(f, "%s %s\n", probes[i].mime, component);
++    }
++    if (fclose(f) != 0 || rename(next, path) != 0)
++        dlog(0, "cannot publish %s: %s", path, strerror(errno));
++}
++
+ static int encoder_run(Session *s)
+ {
+     uint8_t *input = malloc(MAX_ENCODE_FRAME);
+@@ -2406,6 +2553,11 @@ static void *session_thread(void *arg)
+     if (!getenv("DMD_NO_PICTURE_ORDER"))
+         AMediaFormat_setInt32(fmt, "vendor.qti-ext-dec-picture-order.enable", 1);
+ 
++    /* 10-bit: YUV420Flexible makes Qualcomm's decoders return P010.  An
++     * explicit P010 request is silently answered with NV12. */
++    if (codec_is_ten_bit(s->codec_id))
++        AMediaFormat_setInt32(fmt, TVA_MF_KEY_COLOR_FORMAT, COLOR_FORMAT_YUV420_FLEXIBLE);
++
+     s->codec = AMediaCodec_createDecoderByType(s->mime);
+     if (!s->codec) { dlog(0, "[%d] no available decoder: %s", s->id, s->mime); goto out_fmt; }
+ 
+@@ -2798,6 +2950,7 @@ int main(int argc, char **argv)
+     }
+     /* Lock acquired: no live instance.  lockfd stays open on purpose. */
+     write_encoder_list(sock_path);
++    write_ten_bit_list(sock_path);
+ 
+     struct stat st;
+     if (stat(sock_path, &st) == 0 && S_ISSOCK(st.st_mode)) {

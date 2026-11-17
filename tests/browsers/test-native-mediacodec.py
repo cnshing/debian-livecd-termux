@@ -14,6 +14,13 @@ def colour_tags(log):
     return list(found.groups()) if found else None
 
 
+def hardware_codec(name):
+    """Reject known software components, including Qualcomm's misflagged *sw ones."""
+    return bool(name and not any(marker in name.lower() for marker in (
+        'omx.google.', 'c2.android.', 'c2.sec.mp43.', 'c2.sec.vc1.',
+        'c2.sec.wmv7.', 'c2.sec.wmv8.', 'c2.sec.mpeg4.', '.sw.', 'mpeg4sw', 'h263sw')))
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('fixtures', type=Path)
@@ -43,8 +50,11 @@ def main():
         log_text = (folder / 'decode.log').read_text()
         codec_name = re.search(r'MediaCodec started successfully: codec = ([\w.]+)', log_text)
         result['android_codec'] = codec_name[1] if codec_name else None
-        result['hardware_codec'] = bool(codec_name and not any(
-            name in codec_name[1].lower() for name in ('omx.google.', 'c2.android.')))
+        result['hardware_codec'] = hardware_codec(result['android_codec'])
+        # Main10 input decoded into NV12 has lost precision. RGB screenshots
+        # can qualify visible SDR playback, but cannot prove a 10-bit output path.
+        result['output_pixel_formats'] = sorted(set(re.findall(r'\bfmt:(\w+)', log_text)))
+        result['output_color_formats'] = sorted(set(re.findall(r'color-format: int32\((\d+)\)', log_text)))
         # The colour tags must match FFmpeg's software decoder, or RGB conversion
         # shifts colours (Exynos VP8 reported BT.709 instead of VP8's BT.601).
         result['colour'], result['software_colour'] = (colour_tags(log_text), colour_tags(subprocess.run(

@@ -4,6 +4,32 @@ State on 2026-11-14. Shared rules and pass criteria: [README.md](README.md).
 
 ## Status
 
+**Note10+ update, 2026-11-16:** the installed patched pair, Firefox `159.0-101`
+and android-firefox-video `9.0.2-6`, passed on Adreno. WebRTC H.264 received
+640x360 with correct colours, 244 frames encoded and 243 decoded. WebCodecs
+H.264 returned and software-decoded all 60 canvas pictures; maximum channel
+error 4, zero pictures above 16. The output correctly labels BT.601. Both
+saved pictures were inspected. With the encoder preference off the private
+daemon ran no encoder, and the hardware acceptance check failed.
+
+**Adreno encoding remains off.** The subsequent rate-control check passed the
+five frame-rate cases (1.974–2.035 Mb/s for a 2 Mb/s request), but failed a
+midstream decrease to 500 kb/s: 1.151 Mb/s over the remaining 60 pictures.
+The daemon received the correct 499995 b/s update; no error was reported by
+MediaCodec. This needs a longer per-packet rate trace and a check of Qualcomm's
+rate-control response before enabling the shared Firefox preference. The
+experimental default was saved only in local evidence and was not shipped.
+Mali retains its existing opt-in policy. The tests use synthetic input, a
+private display, bus, profile and daemon; no camera is opened.
+See [the dated report](../ADRENO-640-PARITY.md).
+
+The private harness initially hung with the session resource preload. Like
+`test-acceleration.py`, it now sets `ANDROID_PROCFS_COMPAT=0` before constructing
+its private desktop environment. It retains the render-node preload needed
+by Firefox's encoder and removes live session ownership markers.
+
+The following describes the earlier S20 qualification and source patches.
+
 **On main since PR #12 (2026-11-15); encoding stays opt-in, off by default, and has not been
 tested on the phone with the patched build. Turning it on by default is the user's call.**
 

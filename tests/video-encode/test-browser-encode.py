@@ -9,6 +9,8 @@ termux-va daemon. Nothing touches the live desktop, its browser profiles or the 
                  colours down to its last rows.
   mediarecorder  the canvas is recorded for three seconds; the file must decode in software to
                  pictures of the sent size and colours.
+  webcodecs      60 canvas pictures are encoded, software decoded and checked against their
+                 original colours, including the metadata supplied by the encoder.
 
 With --expect hardware (the default) the private daemon must also have run an encoder session
 on a hardware component with pictures in and out. With --expect software it must have run none.
@@ -98,9 +100,43 @@ async function mediarecorder(codec) {
   for (let i = 0; i < bytes.length; i += 32768) text += String.fromCharCode.apply(null, bytes.subarray(i, i + 32768));
   return {codec, type, size: bytes.length, recording: btoa(text)};
 }
+async function webcodecs(codec) {
+  const codecs = {h264: 'avc1.42001f', hevc: 'hvc1.1.6.L93.B0', vp8: 'vp8', vp9: 'vp09.00.10.08'};
+  const config = {codec: codecs[codec], width: W, height: H, bitrate: 2000000,
+    framerate: 30, hardwareAcceleration: 'prefer-hardware', bitrateMode: 'constant'};
+  if (codec === 'h264') config.avc = {format: 'annexb'};
+  if (codec === 'hevc') config.hevc = {format: 'annexb'};
+  if (!(await VideoEncoder.isConfigSupported(config)).supported) return {codec, error: 'codec not offered'};
+  const color = i => [(i * 37) %% 256, (i * 91 + 40) %% 256, (i * 53 + 90) %% 256];
+  const canvas = new OffscreenCanvas(W, H), ctx = canvas.getContext('2d', {willReadFrequently: true});
+  const chunks = [], errors = []; let metadata, failure = null, decoded = 0, png;
+  const encoder = new VideoEncoder({output: (chunk, meta) => {
+    chunks.push(chunk); if (meta.decoderConfig) metadata = meta.decoderConfig;
+  }, error: e => { failure = String(e); }});
+  encoder.configure(config);
+  for (let i = 0; i < 60; i++) {
+    ctx.fillStyle = `rgb(${color(i).join(',')})`; ctx.fillRect(0, 0, W, H);
+    const f = new VideoFrame(canvas, {timestamp: i * 33333, duration: 33333});
+    encoder.encode(f, {keyFrame: i %% 30 === 0}); f.close();
+  }
+  await encoder.flush(); encoder.close();
+  const decoder = new VideoDecoder({output: f => {
+    ctx.drawImage(f, 0, 0); const p = ctx.getImageData(W >> 1, H >> 1, 1, 1).data;
+    const want = color(Math.round(f.timestamp / 33333));
+    errors.push(Math.max(...want.map((v, k) => Math.abs(v - p[k])))); decoded++;
+    const save = document.createElement('canvas'); save.width = W; save.height = H;
+    save.getContext('2d').drawImage(f, 0, 0); png = save.toDataURL('image/png'); f.close();
+  }, error: e => { failure = String(e); }});
+  decoder.configure({...metadata, hardwareAcceleration: 'prefer-software'});
+  for (const chunk of chunks) decoder.decode(chunk);
+  await decoder.flush(); decoder.close();
+  return {codec, chunks: chunks.length, decoded, max_color_error: Math.max(...errors),
+    frames_over_16: errors.filter(e => e > 16).length, decoderConfig: metadata, error: failure, png,
+    picture_ok: chunks.length === 60 && decoded === 60 && errors.every(e => e <= 16) && !failure};
+}
 (async () => { const q = new URLSearchParams(location.search), r = [];
   for (const k of q.get('codecs').split(',')) {
-    try { r.push(await (q.get('mode') === 'mediarecorder' ? mediarecorder(k) : webrtc(k))); }
+    try { r.push(await ({mediarecorder, webcodecs, webrtc}[q.get('mode')](k))); }
     catch (e) { r.push({codec: k, error: String(e)}); } }
   window.RESULT = r; })();
 </script>'''
@@ -177,7 +213,7 @@ def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument('browser', choices=('chromium', 'chrome', 'firefox'))
     p.add_argument('--out', type=lambda value: Path(value).resolve(), required=True)
-    p.add_argument('--mode', choices=('webrtc', 'mediarecorder'), default='webrtc')
+    p.add_argument('--mode', choices=('webrtc', 'mediarecorder', 'webcodecs'), default='webrtc')
     p.add_argument('--codec', action='append', help='h264 (default), vp8, vp9 or hevc; repeatable')
     p.add_argument('--expect', choices=('hardware', 'software'), default='hardware')
     p.add_argument('--size', default='640x360')

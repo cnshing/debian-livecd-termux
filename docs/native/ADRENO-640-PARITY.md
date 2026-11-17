@@ -27,14 +27,202 @@ checks including the last rows. Saved pictures were inspected. The prebuilt
 driver control failed the size check. Original worker's HEVC, H.264 and fast
 H.264 private fullscreen playback tests passed with the same driver.
 
-CI and installed-launcher results will be added after package qualification.
+Commit `75a4a98`; [CI 44025524103](https://github.com/cnshing/debian-livecd-termux/actions/runs/44025524103)
+passed and produced livecd-desktop `0.2.0-25`. The CI package was installed
+through the phone's local APT repository. The installed module's SHA256
+matches the tested source (`d7320e5234b5190d35b53d348667b991913388c38dda842b83d4b2884ee3cc5c`),
+and the profile link resolves to that APT-owned module.
 
-## Remaining qualification
+Through the actual installed `google-chrome` command, H.264 WebRTC passed
+with **286 hardware-encoded pictures**, correct 640x360 size, correct colours
+and no GPU crash. H.264, HEVC and VP9 then passed the private fullscreen suite
+with GPU and hardware decode required, two fullscreen cycles per codec.
+`livecd validate` passed **30/30** after installation. Before the upgrade,
+the same installed-launcher encoder check failed hardware acceptance with
+zero hardware sessions, while its software picture was correct.
 
-The capability baseline, 10-bit transport, VP8 bridge support, Firefox encoding,
-MediaRecorder colour signalling and GPU extension differences are still being
-investigated. Do not infer support from a codec's presence in MediaCodecInfo;
-verify the selected component, negotiated output format and decoded pixels.
+Default delivery is the existing installation chain: `install.sh` installs
+`src/native/packages.txt` (including livecd-desktop), the default
+`Browser+Chromium` overlay installs Chrome's `android-vaapi-glibc` and
+`termux-va`, and the installed Chrome wrapper imports the checked launcher
+module. The runtime selects the patched driver from the validated manifest;
+there is no new per-phone opt-in. A final APT simulation for livecd-desktop
+and android-vaapi-glibc reports zero changes. The existing published v0.12.0
+release was deliberately not refreshed; it does not acquire this new
+controller until rebuilt or upgraded.
+
+Deployment note: APT aborted before changing packages on the initial
+`--no-download` attempts (fdsan close-ownership error). Staging the verified
+archive in Termux's actual cache, `/data/data/com.termux/cache/apt/archives`,
+then using ordinary APT installation succeeded without network downloads.
+The desktop was restored after each failed attempt and is running after
+the successful upgrade. The earlier direct invocation of `validate.py`
+lacked the session environment; the authoritative result is `livecd validate`.
+
+## Android baseline measured on this phone
+
+The extended [CodecInfo tool](../../tests/native/codec-info/CodecInfo.java) and
+its [raw device output](../../tests/native/codec-info/note10-2026-11-16.jsonl)
+record profiles, levels, colour formats, size/rate ranges, performance points,
+bitrate modes, vendor/software flags and optional features. The running
+MediaCodec registry is authoritative for availability on this installation;
+the vendor XML also contains commented or unregistered codecs.
+
+Android reports some Qualcomm components ending in `h263sw` or `mpeg4sw` as
+hardware accelerated even though they are software implementations. The
+vendor XML itself labels their capabilities `h263-sw`/`mpeg4-sw`; the phone
+ships `libOmxSwVdec.so` and `libOmxSwVencMpeg4.so`. They are excluded from the
+hardware target. The native decoder regression now rejects these components
+as hardware evidence instead of treating every non-Google codec as hardware.
+
+These are declarations, **not measured throughput**. Width and height maxima
+are ranges, not proof that every combination is supported. 4K/8K rates below
+are the registry's limits for 3840x2160 and 7680x4320, rounded down.
+
+| Hardware component (`OMX.qcom.video.*`) | Profiles / level | Size range | 4K / 8K fps limit | Bitrate max |
+| --- | --- | --- | --- | --- |
+| `decoder.avc` | Baseline, Main, High, Constrained Baseline/High; level 6; no High10 | 96–8192 × 96–4320 | 120 / 30 | 220 Mb/s |
+| `decoder.hevc` | Main, Main10, Main10 HDR10; high tier level 6 | 96–8192 × 96–4320 | 120 / 30 | 220 Mb/s |
+| `decoder.vp9` | Profile 0, profile 2, profile 2 HDR; level 6.1 | 96–8192 × 96–4320 | 120 / 30 | 220 Mb/s |
+| `decoder.vp8` | Main; version 3 | 96–4096 × 96–2304 | 32 / unavailable | 100 Mb/s |
+| `encoder.avc` | Baseline, Main, High, Constrained Baseline/High; level 5.2 | 96–4096 × 96–2304 | 60 / unavailable | 160 Mb/s |
+| `encoder.hevc` | Main and Main10 HDR10; high tier level 6; plain Main10 not separately listed | 96–4096 × 96–2304 | 60 / unavailable | 160 Mb/s |
+| `encoder.vp8` | Main; version 0 | 96–4096 × 96–2304 | 32 / unavailable | 40 Mb/s |
+
+Decode components list adaptive playback. None lists low-latency, tunnelled,
+partial-frame or frame-parsing support in this dump. HEVC's encoder lists
+CBR/VBR/CQ; AVC and VP8 list VBR only, even though the bridge's AVC CBR requests
+work on this firmware. Inspect performance-point and achievable-rate fields
+in the raw output rather than substituting these maxima for benchmarks.
+No hardware AV1, VP9 encoder or MPEG-2 codec is registered. MPEG-4 and H.263
+are vendor software, not hardware gaps. The separately present MPEG-2 vendor
+XML is empty. Google/Android software codecs are also recorded in the dump.
+
+Secure AVC/HEVC/VP9 decoders are registered separately (`*.secure`, up to
+4096×2304, with 4K60 limits and 3 concurrent instances). They are DRM/protected
+output paths, outside this task's non-secure video target. No HEVC HDR10+ or
+VP9 HDR10+ profile was listed. HLG and a working HDR display path were not
+qualified. Profile values are interpreted using Android's
+[profile/level constants](https://developer.android.com/reference/android/media/MediaCodecInfo.CodecProfileLevel).
+The [Qualcomm product brief](https://www.qualcomm.com/content/dam/qcomm-martech/dm-assets/documents/prod_brief_qcom_sd855.pdf)
+describes broader platform HDR capabilities; it does not establish that the
+desktop pipeline exposes them on this firmware.
+
+## Decode routes
+
+“VA” below means the installed bridge used by FFmpeg VA-API, GStreamer's `va`
+elements and the three browsers. mpv uses FFmpeg's separate NDK MediaCodec
+route by default. No new decode default was enabled during this continuation.
+
+| Feature | FFmpeg VA / GStreamer VA | Chromium / Chrome / Firefox | FFmpeg MediaCodec / mpv | Status |
+| --- | --- | --- | --- | --- |
+| AVC 8-bit, HEVC Main, VP9 profile 0 | On | On; Chrome now uses the source-built VA driver | On | Baseline; private Chrome playback rechecked with the new driver |
+| VP8 decode | Not advertised | Software | Hardware; 48/48 ordered pictures passed with `OMX.qcom.video.decoder.vp8` | VA needs a Gallium VP8 frontend, not a launcher flag |
+| HEVC Main10 / VP9 profile 2 input | Not advertised | Software | Hardware decode passed 48/48 per codec, **output is 8-bit NV12** | These RGB checks do not qualify preserved 10-bit precision |
+| Actual P010 output | Missing transport/surfaces | Missing through VA | NDK format probe succeeds; FFmpeg's tested route still outputs NV12 | [10-bit handoff](handoff/note10-codec-parity.md) |
+| MPEG-4 Part 2 | Not advertised | Software | Qualcomm software decoder returned 48/48; hardware check correctly fails | Outside the hardware target |
+| AV1 | Disabled for hardware; software available | Software | Software | No hardware on this phone |
+| 4K/8K limits, sustained rate, HDR output | Not qualified | Not qualified | Not qualified here | Declared capabilities are not acceptance results |
+
+The 10-bit probe is reproducible with
+[`probe-bytebuffer.c`](../../tests/native/codec-info/probe-bytebuffer.c).
+With YUV420Flexible requested, both hardware decoders return Qualcomm linear
+Venus P010 (`0x7fa30c0a`): 96x96, stride **256 bytes**, slice height 96,
+36864 bytes per output frame. The `--nv12` negative control returns format 21,
+stride 96, 13824 bytes and exits 1. Explicitly requesting P010 on the older
+probe had silently produced NV12; always inspect the negotiated format.
+This small grey-frame probe proves a ByteBuffer route exists, not full pixel
+precision, crop, HDR metadata, browser presentation or throughput.
+
+## Encode routes
+
+| Feature | FFmpeg VA / GStreamer VA | Chromium | Chrome | Firefox |
+| --- | --- | --- | --- | --- |
+| AVC hardware encode | Existing default | Existing WebRTC/WebCodecs default | **New WebRTC default** with the validated source-built driver | Experimental call/pixel tests pass; default remains off |
+| HEVC Main encode | Existing default | Not offered by tested VA WebCodecs path | Not qualified | Not qualified |
+| VP8 hardware encode | Missing bridge/protocol entry | Software | Software | Software |
+| VP9 / AV1 hardware encode | Not offered by daemon | Software | Software | Software |
+| Main10 / HDR10 HEVC encode | Bridge takes NV12 only | Not qualified | Not qualified | Not qualified |
+
+Firefox `159.0-101` / android-firefox-video `9.0.2-6` passed H.264 WebRTC
+(244 encoded / 243 decoded, 640x360) and WebCodecs (60/60, maximum channel
+error 4, correct BT.601 metadata). Its five fixed/frame-rate cases passed
+at 1.974–2.035 Mb/s for 2 Mb/s. **It failed the midstream bitrate decrease:**
+the remaining 60 pictures averaged 1.151 Mb/s for a 500 kb/s request. The
+daemon received 499995 b/s and reported no MediaCodec rejection. Therefore
+the proposed default was not shipped; Mali's existing opt-in remains intact.
+See [Firefox handoff](handoff/encode-firefox.md).
+
+Chromium's MediaRecorder did invoke Qualcomm's AVC encoder at 1280x720, but
+the software-decoded output failed colour checks (saturation 0.83/lightness
+0.54 instead of 0.70/0.45). Interpreting the samples as full-range BT.709
+recovers the intended colour; this diagnoses missing/wrong colour signalling,
+not an accepted workaround. Chrome's MediaRecorder control had correct colour
+but ran **no hardware encoder session**. Neither is a hardware MediaRecorder
+pass. Chrome's prebuilt WebCodecs native-pixmap crash remains unresolved.
+
+FFmpeg advertises `vp8_mediacodec`, but a direct synthetic VP8 encode attempt
+at 640x360 aborted in Android's CodecLooper with stack-protector failure
+after configuring `OMX.qcom.video.encoder.vp8`; the recording was empty.
+The advertised encoder is not a verified substitute for the missing VA path.
+
+## GPU comparison on this installation
+
+Stock `cmd gpu vkjson` reports Qualcomm Vulkan **1.1.128**, 59 device
+extensions and protected memory. The installed desktop's **device** reports
+Turnip Vulkan **1.3.354**, 169 extensions; its loader's instance version
+1.4.368 is not the GPU's version. Both report a 16384 maximum 2D image
+dimension. Stock SurfaceFlinger reports GLES 3.2; desktop Zink reports
+OpenGL 4.6 and GLES 3.2 on Turnip. Live GNOME Shell was passively checked:
+it maps `libvulkan_freedreno.so` and holds `/dev/kgsl-3d0`.
+
+| Native capability / client | Desktop evidence / gap |
+| --- | --- |
+| Graphics + Vulkan compute | Turnip exposes graphics and compute; no new compute benchmark in this continuation |
+| Android hardware buffers | `VK_ANDROID_external_memory_android_hardware_buffer` is stock-only in these dumps; desktop VA uses dma-bufs instead |
+| Android timing/presentation | Stock-only `VK_GOOGLE_display_timing`, `VK_KHR_shared_presentable_image`; X11 presentation is a different path |
+| Qualcomm render-pass extensions | Stock-only `VK_QCOM_render_pass_store_ops`, `VK_QCOM_render_pass_transform`; not supplied by launcher changes |
+| Protected graphics | Stock protectedMemory true; Turnip false; outside the non-secure media target |
+| Vulkan Video | Neither dump advertises `VK_KHR_video_*`; MediaCodec remains the video engine |
+| OpenCL | Vendor `libOpenCL.so` exists; absolute-path dlopen is denied by the app namespace. The installed ICD loader returns `CL_PLATFORM_NOT_FOUND_KHR`, zero platforms. A usable native compute route is still unqualified |
+| Shell, GTK4, browsers, mpv, Ghostty | Prior fresh-install checks cover these clients; this continuation rechecked live Shell and private Chrome, not every application's rendering |
+| WebGL / WebGPU | Installed Chrome's WebGL 1/2 probes returned the expected red pixel, no GL error or lost context, and ANGLE on glibc Turnip 1.3.363. This is a smoke test, not conformance; WebGPU remains unrun |
+
+Stock GLES exposes 99 extension names; desktop Zink 167. Stock-only names
+include Qualcomm foveation/motion-estimation/tiled-rendering extensions,
+`GL_EXT_YUV_target`, `GL_EXT_protected_textures`, and framebuffer-fetch
+variants. These counts are API inventories, not a claim that a larger count
+provides native feature parity. Raw lists are under the evidence directory's
+`gpu/`. Use [Mesa's Turnip documentation](https://docs.mesa3d.org/drivers/freedreno.html)
+for driver capabilities rather than treating this one comparison as a second
+upstream support matrix. Termux's
+[vendor OpenCL recipe](https://github.com/termux/termux-packages/blob/master/packages/opencl-vendor-driver/build.sh)
+also records that Qualcomm's vendor driver lacks the ICD extension expected
+by that route; copying a library alone does not qualify OpenCL.
+
+## Remaining work and acceptance
+
+Complete driver work is still required for VP8 and preserved 10-bit/HDR.
+The [implementation handoff](handoff/note10-codec-parity.md) identifies the
+frontend, protocol and buffer changes. Firefox rate control and Chromium
+MediaRecorder colour metadata need fixing and rerunning. High-resolution
+throughput, OpenCL, WebGPU and stock-only graphics extensions remain gaps or
+unqualified paths; no defaults were changed for those rows.
+
+Shared production file changed: `src/native/acceleration.py`, plus the
+livecd-desktop package revision. Mali uses the same source-built driver,
+reorder safeguards and encoding policy as before; its host regressions pass.
+The S20 was not accessed. No camera or Bluetooth test was run, no Android
+settings/permissions changed, and no release was edited or published.
+Temporary SSH access adopted from the paused worker was removed at completion:
+its authorized key, dedicated listener and USB forward, plus the staged setup
+script and public key. The desktop remains running. No test process started
+by this continuation remains; the predecessor's private daemon PID 23856 was
+left untouched, as was the desktop's shared video daemon. Evidence remains
+under `~/parity`, `~/p` and the host evidence directory.
+
+Reproduce the browser tests with synthetic input, their own display, daemon
+socket and profile:
 
 Reproduce a browser encoder test with synthetic input, its own display, daemon
 socket and profile:

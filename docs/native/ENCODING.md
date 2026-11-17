@@ -83,12 +83,16 @@ always requests GPU-memory-buffer input, and Chrome is prebuilt, so it cannot be
 patched. With the encoder on, a page that asks WebCodecs for hardware encoding
 crashes Chrome's GPU process. [Handoff](handoff/encode-chrome.md).
 
-**Firefox.** [`packages/firefox`](../../packages/firefox) builds Firefox with
+**Firefox.** On Adreno, Firefox `159.0-101` and android-firefox-video `9.0.2-6`
+passed private WebRTC H.264 and all 60 WebCodecs H.264 pictures, with maximum
+colour error 4. Encoding stays off: a later rate-control test requested a
+midstream decrease to 500 kb/s but measured 1.151 Mb/s for the second half.
+Mali remains opt-in.
+[`packages/firefox`](../../packages/firefox) builds Firefox with
 two patches. One labels WebCodecs output BT.601, the matrix Firefox actually
 converts with. The other lets WebRTC change a VA-API encoder's bitrate
-mid-call. The opt-in applies only on Mali, and only when the installed
-`android-firefox-video` manifest lists its encoders. The patched build has not
-been tested on the phone. [Handoff](handoff/encode-firefox.md).
+mid-call. The installed `android-firefox-video` manifest must list its encoders.
+[Handoff](handoff/encode-firefox.md).
 
 In every browser the Exynos encoders refuse MediaCodec's `low-latency` key, so
 the daemon retries without it, and call latency is unmeasured. Playback and

@@ -52,6 +52,17 @@ class AccelerationEvidence(unittest.TestCase):
             self.assertEqual(self.harness.firefox_decode_evidence(folder),
                              {'init_ok': True, 'frames': 2, 'software_codecs': ['hevc']})
 
+    def test_vendor_software_components_are_not_hardware_evidence(self):
+        decoder = load('native_mediacodec', Path(__file__).with_name('test-native-mediacodec.py'))
+        for name in (None, 'OMX.google.h264.decoder', 'c2.android.hevc.decoder',
+                     'OMX.qti.video.decoder.mpeg4sw', 'OMX.qti.video.decoder.h263sw',
+                     'OMX.qcom.video.encoder.h263sw', 'OMX.SEC.avc.sw.dec', 'c2.sec.vc1.decoder'):
+            with self.subTest(name=name):
+                self.assertFalse(decoder.hardware_codec(name))
+        for name in ('OMX.qcom.video.decoder.hevc', 'OMX.qcom.video.decoder.vp8',
+                     'OMX.Exynos.vp9.dec', 'c2.qti.hevc.decoder'):
+            self.assertTrue(decoder.hardware_codec(name))
+
 
 class PixelOracle(unittest.TestCase):
     def test_positive_and_corrupted_controls(self):
@@ -312,10 +323,10 @@ int main(int argc,char **argv) {
 
     def test_glibc_profiles_keep_bionic_environment_out(self):
         sys.path.insert(0, str(ROOT / 'src/native'))
-        try:
-            module = load('acceleration', ROOT / 'src/native/acceleration.py')
-        finally:
-            sys.path.pop(0)
+        # prepare() also imports the player backend lazily. Keep its module
+        # directory available for the calls below, then restore it at cleanup.
+        self.addCleanup(sys.path.remove, str(ROOT / 'src/native'))
+        module = load('acceleration', ROOT / 'src/native/acceleration.py')
         with tempfile.TemporaryDirectory() as temporary:
             prefix = Path(temporary)
             module.PREFIX = prefix

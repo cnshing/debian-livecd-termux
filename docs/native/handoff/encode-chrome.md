@@ -75,9 +75,12 @@ The user chose WebRTC hardware encoding over this on 2026-11-15. To turn it off,
 
 ## Next steps
 
-1. Install Bionilux 0.5.0-2 on the phone and rerun the WebRTC loopback without `BIONILUX_PRELOAD`.
-2. Done: `AcceleratedVideoEncoder` is on for Chrome on Mali (user decision, 2026-11-15).
-3. Adreno, MediaRecorder, HEVC: not run.
+1. Keep the installed-launcher acceptance in the [Note10+ report](../ADRENO-640-PARITY.md)
+   current when the glibc stack or Chrome changes.
+2. MediaRecorder on Adreno recorded correct-colour software output, with no hardware
+   session; investigate before claiming hardware recording support.
+3. HEVC encoding is unqualified. The WebCodecs native-pixmap failure above still needs
+   a different buffer integration or a patchable browser build.
 
 ## Where things are
 

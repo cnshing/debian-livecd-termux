@@ -94,7 +94,9 @@ support for the qualified devices, including the tested Galaxy S20's Mali-G77. C
 application support follows the packaged upstream drivers plus this project's patches and
 integration. See [upstream support](#upstream-support-and-local-verification),
 [our Mali integration checks](docs/native/MALI-GPU-STATUS.md#fresh-install-verification-2026-11-16)
-and [encoding integration](docs/native/ENCODING.md).
+and [encoding integration](docs/native/ENCODING.md). The dated
+[Note10+ parity investigation](docs/native/ADRENO-640-PARITY.md) records its
+Android baseline, verified defaults and remaining gaps.
 
 Chrome is downloaded from Google during installation, because its license does not allow this
 project to redistribute it.

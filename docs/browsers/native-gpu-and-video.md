@@ -9,7 +9,7 @@ Tested on the Note10+ (SM-N975U1, Android 11, Adreno 640).
 for current package selection, measured results and remaining gaps. In particular,
 H.264 decoding and Chromium hardware encoding are now defaults on Adreno, and
 Chrome uses the source-built glibc VA driver to correct encoded picture cropping.
-Firefox encoding remains off pending qualification. The dated investigation below
+Firefox encoding remains off after a bitrate-control failure. The dated investigation below
 describes earlier installations and is not the current default configuration.
 
 **Current state, 2026-11-05.** Firefox, Chromium and Google Chrome are installed by default

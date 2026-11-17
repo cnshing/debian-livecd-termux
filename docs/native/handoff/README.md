@@ -29,10 +29,11 @@ Two phones were used:
 | Native decode: mpv, FFmpeg, GStreamer | mpv passes VP9, H.264, HEVC | mpv passes on its GLES route | mpv yes; VA-API clients see decoders | [decode-native.md](decode-native.md) |
 | Native encode: FFmpeg, GStreamer, Serein | passes | passes in private tests; fresh-install blockers fixed on main, not rechecked | yes where `android-vaapi` is installed | [encode-native.md](encode-native.md) |
 | Chromium encode | WebRTC and WebCodecs H.264 pass on hardware (2026-11-16); no VP9 encoder | WebRTC and WebCodecs (H.264, VP9) pass on hardware with revision 3; rerun from CI 43676101303 on 2026-11-15 | yes, revision 3+ on both | [encode-chromium.md](encode-chromium.md) |
-| Chrome encode | off: WebRTC H.264 arrives 640x368 with a green band (prebuilt glibc driver, no crop) | WebRTC H.264/VP9 passes on Exynos (Bionilux 0.5.0-2 netlink fix); WebCodecs crash cannot be patched | yes on Mali (user decision 2026-11-15); WebCodecs pages crash Chrome's GPU process | [encode-chrome.md](encode-chrome.md) |
-| Firefox encode | not run | both Firefox bugs patched in this project's Firefox build; opt-in `firefox_encode`; not yet run on the phone | no (user's call) | [encode-firefox.md](encode-firefox.md) |
+| Chrome encode | WebRTC H.264 passes with the crop-fixed source-built glibc driver (2026-11-16) | WebRTC H.264/VP9 passes on Exynos (Bionilux 0.5.0-2 netlink fix); WebCodecs crash cannot be patched | yes with the qualified driver; WebCodecs pages still crash Chrome's GPU process | [encode-chrome.md](encode-chrome.md) |
+| Firefox encode | WebRTC/WebCodecs H.264 pictures pass; midstream bitrate reduction fails (2026-11-16) | both Firefox bugs patched in this project's Firefox build; opt-in `firefox_encode`; not yet run on the phone | off on Adreno; Mali stays opt-in | [encode-firefox.md](encode-firefox.md) |
 | `/dev/dma_heap` emulated on `/dev/ion` for kernels without DMA-BUF heaps (the S20's 4.19) | needed too (ION, no heap) | done: the preload provides the heap; bridges use only the heap; verified installed | yes, on phones with ION and no heap | [dmabuf-s20.md](dmabuf-s20.md) |
 | **Parity with the S20's codecs** | n/a | not met: H.264 decode off; VP8, MPEG-4 and H.263 not offered; 10-bit, 4K and 8K untested | n/a | [s20-codec-parity.md](s20-codec-parity.md) |
+| **Parity with the Note10+'s codecs** | incomplete: VP8 VA frontend, P010 transport/HDR, encode metadata/rate control, high resolutions | unchanged | only verified paths enabled | [Note10+ report](../ADRENO-640-PARITY.md), [remaining driver work](note10-codec-parity.md) |
 
 AV1 is disabled on every phone. Neither the Snapdragon 855 nor the S20 has an AV1 decoder, so
 software AV1 is parity.

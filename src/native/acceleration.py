@@ -121,7 +121,26 @@ def gpu_enabled(profile, abi='bionic'):
     return renderer == 'zink' and receipt
 
 
-def ensure_daemon(env):
+def upgraded_daemon(endpoint, proc_root='/proc'):
+    """The pid of the daemon serving endpoint if its binary has since been replaced (an upgrade).
+
+    The daemon holds <endpoint>.lock for its lifetime; dpkg replaces the binary by renaming,
+    so the old process's executable reads as deleted. Anything else returns None."""
+    lock = str(endpoint) + '.lock'
+    for proc in Path(proc_root).iterdir():
+        if not proc.name.isdigit():
+            continue
+        try:
+            if not os.readlink(proc / 'exe').endswith('/termux-va (deleted)'):
+                continue
+            if any(os.readlink(fd) == lock for fd in (proc / 'fd').iterdir()):
+                return int(proc.name)
+        except OSError:
+            continue
+    return None
+
+
+def ensure_daemon(env, replace_upgraded=False):
     # A supplied endpoint is caller-owned. Never use the upstream lifecycle
     # helper: it may kill other termux-va instances when a health check fails.
     if env.get('TERMUX_VA_SOCKET') or env.get('TERMUX_VA_SOCKET_DIR'):
@@ -134,6 +153,15 @@ def ensure_daemon(env):
     env['TERMUX_VA_SOCKET'] = str(endpoint)
     with (directory / 'livecd-start.lock').open('a') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
+        # At desktop start no session program is using the daemon. One left running from before
+        # an upgrade would keep serving the old code (for example, no 10-bit probe), so replace it.
+        stale = upgraded_daemon(endpoint) if replace_upgraded else None
+        if stale:
+            os.kill(stale, signal.SIGTERM)
+            for unused in range(50):
+                if not Path(f'/proc/{stale}').exists():
+                    break
+                time.sleep(.1)
         with socket.socket(socket.AF_UNIX) as client:
             client.settimeout(1)
             try:

@@ -198,7 +198,7 @@ def start_video_daemon(env):
     try:
         sys.path.insert(0, str(BASE))
         from acceleration import ensure_daemon
-        ensure_daemon(dict(env))
+        ensure_daemon(dict(env), replace_upgraded=True)
     except (ImportError, OSError, RuntimeError) as error:
         print('Hardware encoding is unavailable: ' + str(error), file=sys.stderr)
 

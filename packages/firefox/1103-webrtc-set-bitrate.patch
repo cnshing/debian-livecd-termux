@@ -1,0 +1,37 @@
+WebRTC sets its encoder target through MediaDataEncoder::SetBitrate,
+which FFmpegDataEncoder rejects, so a VA-API call kept its starting
+bitrate. Apply it as 1102 does for Reconfigure.
+
+--- a/dom/media/platforms/ffmpeg/FFmpegDataEncoder.cpp
++++ b/dom/media/platforms/ffmpeg/FFmpegDataEncoder.cpp
+@@ -246,8 +246,28 @@
+ 
+ RefPtr<GenericPromise> FFmpegDataEncoder<LIBAV_VER>::SetBitrate(
+     uint32_t aBitrate) {
+-  FFMPEG_LOG("SetBitrate");
+-  return GenericPromise::CreateAndReject(NS_ERROR_NOT_IMPLEMENTED, __func__);
++  FFMPEG_LOG("SetBitrate {}", aBitrate);
++  // WebRTC's congestion control moves its target through this call, not
++  // through Reconfigure. Apply it where Reconfigure's BitrateChange would:
++  // libx264, and FFmpeg's VA-API encoders, which follow a changed bit_rate
++  // with their next picture.
++  RefPtr<FFmpegDataEncoder<LIBAV_VER>> self = this;
++  return InvokeAsync(mTaskQueue, __func__, [self, aBitrate]() {
++    if (!self->mCodecContext || !self->mCodecContext->codec || !aBitrate) {
++      return GenericPromise::CreateAndReject(NS_ERROR_NOT_IMPLEMENTED,
++                                             __func__);
++    }
++    const char* name = self->mCodecContext->codec->name;
++    size_t length = strlen(name);
++    if (strcmp(name, "libx264") &&
++        !(length > 6 && !strcmp(name + length - 6, "_vaapi"))) {
++      return GenericPromise::CreateAndReject(NS_ERROR_NOT_IMPLEMENTED,
++                                             __func__);
++    }
++    self->mConfig.mBitrate = aBitrate;
++    self->mCodecContext->bit_rate = AssertedCast<FFmpegBitRate>(aBitrate);
++    return GenericPromise::CreateAndResolve(true, __func__);
++  });
+ }
+ 
+ RefPtr<MediaDataEncoder::EncodePromise> FFmpegDataEncoder<

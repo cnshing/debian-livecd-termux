@@ -23,6 +23,11 @@ Requirements:
   `~/.local/lib/shizuku/`. Override with `ANDROID_LEGACY_DEX_RISH` if needed.
 - A focused, fullscreen Termux:X11 task with its fullscreen preference enabled.
 
+Automatic startup requires **livecd-desktop 0.2.0-26 or newer**. Installing only
+this package alongside an older desktop leaves it stopped, even after
+`livecd stop` / `livecd start`; upgrade the desktop package too, or use the manual
+`start` command below.
+
 The desktop starts this optional integration automatically and stops the
 controller it owns during cleanup. A separately started controller is reused
 and left running. Opt out in `~/.config/livecd-native/integrations.json` with

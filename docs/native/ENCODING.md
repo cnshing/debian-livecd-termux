@@ -3,6 +3,12 @@
 Raw capture paths beginning with `temp/` refer to local files excluded from Git.
 See the [privacy notes](../privacy.md).
 
+For the underlying bridge and drivers' capabilities, consult the
+[upstream documentation and tests](../../README.md#upstream-support-and-local-verification).
+This page records our encoder patches, application integration and dated test
+results for the pinned packages. Unchanged upstream behavior should be referenced
+there rather than maintained as a second support matrix here.
+
 **Hardware encoding has limited support.** This page covers the Snapdragon phone. For Samsung
 Exynos phones, including what does not work there and why, see
 [ENCODING-EXYNOS.md](ENCODING-EXYNOS.md).

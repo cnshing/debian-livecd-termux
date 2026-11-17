@@ -2,6 +2,13 @@
 
 ## Fresh-install verification, 2026-11-16
 
+For general driver capabilities and device support, use the
+[upstream documentation and tests](../../README.md#upstream-support-and-local-verification).
+This report records this project's patched package/application paths and dated
+integration checks, not a separate upstream support matrix. The setup's device
+qualification is our deployment policy, not the full list of GPUs the upstream
+driver supports.
+
 GPU rendering and hardware video work on the tested Galaxy S20 (`x1s`, SM-G981B,
 Exynos 990, Mali-G77, Android 13, Linux 4.19.87). Adreno is not a requirement for
 these verified paths. The PanVK setup still qualifies this specific device/kernel

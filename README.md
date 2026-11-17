@@ -90,19 +90,14 @@ installs the PanVK driver and also renders through Zink ([PanVK desktop](docs/na
 elsewhere it renders in software.
 
 Firefox, Chromium and Google Chrome are installed with GPU rendering and hardware video
-support for the qualified devices. Support depends on the codec and application, rather than
-GPU brand alone. On the tested Galaxy S20 (Exynos 990, Mali-G77), the fresh-install checks passed
-GPU desktop rendering, VP9/HEVC hardware decoding in all three browsers and mpv, Chromium
-H.264/VP9 hardware encoding through WebRTC and WebCodecs, and Chrome H.264/VP9 WebRTC encoding.
-Native FFmpeg also produced H.264, HEVC and VP9 output on the Exynos hardware encoders.
-These results cover this S20 configuration, not all Mali phones. See the
-[Mali verification results](docs/native/MALI-GPU-STATUS.md#fresh-install-verification-2026-11-16).
+support for the qualified devices, including the tested Galaxy S20's Mali-G77. Codec and
+application support follows the packaged upstream drivers plus this project's patches and
+integration. See [upstream support](#upstream-support-and-local-verification),
+[our Mali integration checks](docs/native/MALI-GPU-STATUS.md#fresh-install-verification-2026-11-16)
+and [encoding integration](docs/native/ENCODING.md).
 
 Chrome is downloaded from Google during installation, because its license does not allow this
-project to redistribute it. Encoding still has application-specific limits: Chrome's WebCodecs
-hardware path fails on the S20, Firefox encoding remains opt-in, and Exynos has known quality,
-bitrate and performance limits. See [hardware encoding](docs/native/ENCODING.md) and
-[Exynos encoding](docs/native/ENCODING-EXYNOS.md).
+project to redistribute it.
 
 The desktop's Android integrations start with it: the phone microphone, or a connected Bluetooth
 headset (pair it in Android with **Calls** enabled), EasyEffects, GSConnect, whole-device CPU and
@@ -206,6 +201,29 @@ Thank you to everyone behind the projects and references below.
 | [Chromium](https://www.chromium.org/), [ANGLE](https://chromium.googlesource.com/angle/angle), [Firefox](https://github.com/mozilla-firefox/firefox), [chromium-linux-tarballs](https://github.com/chromium-linux-tarballs/chromium-tarballs), and [ungoogled-chromium-portablelinux](https://github.com/ungoogled-software/ungoogled-chromium-portablelinux) | Browser sources, source archives and the optional portable Chromium input. ANGLE's Vulkan back end gives both browsers GPU compositing and WebGL on Mali. Thanks also to licy183 and the Termux Chromium maintainers for the recipe and Android patches retained by this build. |
 | [Android Open Source Project](https://source.android.com/), [Android NDK](https://developer.android.com/ndk), and [scrcpy](https://github.com/Genymobile/scrcpy) | Camera, Binder, Bluetooth, shared-memory, buffer-allocation and MediaCodec source/API references. The camera investigation also consulted [scrcpy PR #4213](https://github.com/Genymobile/scrcpy/pull/4213). |
 | [Termux's libandroid-stub](https://github.com/termux/termux-packages/tree/master/packages/libandroid-stub) and [Capstone](https://www.capstone-engine.org/) | libandroid-stub's namespace forwarders let Termux programs reach Android's NDK libraries; understanding how they load a second libbinder led to the [Galaxy S20 camera fix](docs/camera/README.md#tested-phones). Capstone disassembled Android's libbinder to locate the Parcel abort in that investigation. |
+
+#### Upstream support and local verification
+
+The GPU drivers and hardware-video bridge come from the projects credited above.
+Use their documentation, tests and device reports for upstream capabilities and
+limitations, rather than maintaining a second general support matrix here:
+
+- [Termux:VA documentation](https://github.com/lfdevs/termux-va#readme): Android MediaCodec transport and hardware-video behavior.
+- [Mesa for Android Container](https://github.com/lfdevs/mesa-for-android-container#readme): the Android/container graphics and VA-API bridge used by our packages.
+- [PanVK kbase documentation and tests](https://github.com/zenithblue-oss/panvk-kbase-android#readme): the Mali driver, device reports and probes.
+- [Mesa driver documentation](https://docs.mesa3d.org/): Turnip, PanVK and Zink capabilities and requirements.
+
+This repository documents its package/launcher integration, patches that change
+upstream behavior, and dated checks of the combined desktop on particular devices.
+Those checks verify our integration; they are not an exhaustive driver support
+list. An untested device here may still be supported upstream. Conversely, an
+upstream result does not establish that our packaged application path has passed.
+Keep local explanations of limitations that our patches or integration introduce;
+link upstream for unchanged behavior instead of copying its support tables.
+
+Packages pin upstream revisions. When those revisions are updated, use the matching
+upstream documentation and rerun the affected integration checks. Newer upstream
+capabilities are not automatically present in an older installed package.
 
 Exact GPU/video inputs are pinned in the [android-vaapi](packages/android-vaapi/build.sh),
 [android-vaapi-glibc](packages/android-vaapi-glibc/build.sh), [mesa-vulkan-icd-panvk-kbase](packages/mesa-vulkan-icd-panvk-kbase/build.sh), [termux-va](packages/termux-va/build.sh)

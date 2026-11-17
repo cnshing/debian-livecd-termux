@@ -45,11 +45,14 @@ program (GStreamer va, FFmpeg VA-API, ...)
 On Mali (`/dev/mali0`) the launcher turns on `AcceleratedVideoEncoder` for
 Chromium and Chrome (`command_line()` in
 [`acceleration.py`](../../src/native/acceleration.py)). Firefox needs an opt-in.
-On Adreno (Note10+, 2026-11-16) it is on for Chromium only: WebCodecs H.264 passed 60 of 60
+On Adreno (Note10+, 2026-11-16) it is on for Chromium and Chrome: WebCodecs H.264 passed 60 of 60
 frames on `OMX.qcom.video.encoder.avc` (maximum colour error 10) and WebRTC H.264 287 frames,
-received picture viewed. Chrome stays off there: on Adreno it uses the prebuilt glibc driver,
-which encodes the 16-aligned surface without the crop, so a 640x360 call arrives as 640x368 with
-a green band at the bottom. The Snapdragon 855 has no VP9 encoder, and Chromium offers no
+received picture viewed. Chrome uses this project's source-built glibc VA driver,
+with Turnip for rendering, fixing the prebuilt driver's uncropped 640x368 picture
+for a 640x360 call. Its private WebRTC rerun passed 288 hardware-encoded pictures
+at the correct size and colours. Stacks without the source-built driver keep
+Adreno Chrome encoding off. [Dated phone results](ADRENO-640-PARITY.md).
+The Snapdragon 855 has no VP9 encoder, and Chromium offers no
 VA-API HEVC encoding.
 
 | Browser | Default on Mali | WebRTC H.264/VP9 | WebCodecs `VideoEncoder` |

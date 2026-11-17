@@ -5,6 +5,23 @@ patched. Shared rules and pass criteria: [README.md](README.md).
 
 ## Status
 
+**Note10+ update, 2026-11-16:** Chrome now selects the source-built glibc VA driver
+already shipped in `android-vaapi-glibc` under `mali/`, on Adreno too. Turnip
+still renders the browser. `source_built_driver()` selects this path only from a
+validated stack; older stacks without it retain their previous driver and keep
+Adreno encoding off. No device-specific opt-in is needed.
+
+The private launcher passed H.264 WebRTC at 640x360 with 288 input and output
+pictures on `OMX.qcom.video.encoder.avc`. All five colour samples, including the
+bottom rows, passed. The prebuilt-driver negative control failed the size check.
+HEVC, H.264 and fast H.264 playback also passed the private fullscreen suite.
+Evidence: `temp/parity-note10-20261116/{chrome-encode,chrome-srcdrv,resume}`;
+runner: `tests/video-encode/test-browser-encode.py`. CI package installation and
+installed-launcher verification are recorded in [the parity report](../ADRENO-640-PARITY.md).
+The WebCodecs limitation below still applies.
+
+The following records the earlier state and its diagnosis.
+
 **On by default on Mali** since 2026-11-15, by the user's decision: the launcher adds
 `AcceleratedVideoEncoder` for Chrome when the video device is `/dev/mali0` (livecd-desktop
 0.2.0-20). WebRTC encodes on the Exynos encoders. WebCodecs hardware encoding still crashes the

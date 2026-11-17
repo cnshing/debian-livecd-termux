@@ -208,13 +208,42 @@ class PanVKBrowsers(unittest.TestCase):
         self.assertNotIn('TERMUX_VA_HEVC_REORDER_PICS', env)
         self.assertNotIn('TERMUX_VA_H264_REORDER_FRAMES', env)
 
-    def test_chrome_encodes_in_hardware_only_on_mali(self):
+    def test_chrome_encodes_on_mali_or_with_the_source_built_driver(self):
         flags = acceleration.command_line('chrome', ['/chrome'], 'glibc', video=True, gpu=True)
         self.assertTrue(any('AcceleratedVideoEncoder' in arg for arg in flags))
         with mock.patch.object(acceleration, 'video_device', return_value='/dev/kgsl-3d0'):
             flags = acceleration.command_line('chrome', ['/chrome'], 'glibc', video=True, gpu=True)
         # Adreno's prebuilt glibc driver sends 640x368 for 640x360, with a green band.
         self.assertFalse(any('AcceleratedVideoEncoder' in arg for arg in flags))
+        with mock.patch.object(acceleration, 'video_device', return_value='/dev/kgsl-3d0'):
+            flags = acceleration.command_line('chrome', ['/chrome'], 'glibc',
+                video=True, gpu=True, own_driver=True)
+            self.assertTrue(any('AcceleratedVideoEncoder' in arg for arg in flags))
+            flags = acceleration.command_line('chrome', ['/chrome'], 'glibc',
+                video=False, gpu=True, own_driver=True)
+            self.assertFalse(any('AcceleratedVideoEncoder' in arg for arg in flags))
+
+    def test_adreno_chrome_uses_the_crop_fixed_driver_and_keeps_turnip(self):
+        root = self.tmp / 'va'
+        manifest = {'libraries': ['mesa/lib', 'lib'], 'preloads': [], 'driver_directory': 'mesa/dri',
+                    'vulkan_icd': 'freedreno_icd.json', 'mesa_library_directory': 'mesa/lib',
+                    'mali': {'libraries': ['mali'], 'driver_directory': 'mali/dri'}}
+        with mock.patch.object(acceleration, 'mali_usable', return_value=False), \
+                mock.patch.object(acceleration, 'panvk', return_value=None), \
+                mock.patch.object(acceleration, 'video_device', return_value='/dev/kgsl-3d0'), \
+                mock.patch.object(acceleration, 'gpu_enabled', return_value=True), \
+                mock.patch.object(acceleration, 'stack', return_value=(root, manifest)):
+            argv, env = acceleration.prepare('chrome', ['/chrome'], 'glibc', 'auto')
+        self.assertTrue(any('AcceleratedVideoEncoder' in arg for arg in argv))
+        self.assertEqual(env['LIBVA_DRIVERS_PATH'], str(root / 'mali/dri'))
+        self.assertEqual(env['BIONILUX_LIBRARY_PATH'].split(':')[:3],
+                         [str(root / 'mali'), str(root / 'mesa/lib'), str(root / 'lib')])
+        self.assertEqual(env['TERMUX_VA_GPU_BACKEND'], 'sw')
+        self.assertEqual(env['VK_DRIVER_FILES'], str(root / 'freedreno_icd.json'))
+        self.assertEqual(env['TERMUX_VA_SYNC_END_PICTURE'], '1')
+        for key in ('TERMUX_VA_CONTIGUOUS_DMABUF', 'TERMUX_VA_X11_DRI3',
+                    'TERMUX_VA_HEVC_REORDER_PICS', 'TERMUX_VA_H264_REORDER_FRAMES'):
+            self.assertNotIn(key, env)
 
     def test_completion_can_be_disabled_for_a_control_run(self):
         selected = (self.tmp / 'va', {'libraries': [], 'preloads': [], 'driver_directory': 'dri'})

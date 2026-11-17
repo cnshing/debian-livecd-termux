@@ -5,6 +5,13 @@ See the [privacy notes](../privacy.md).
 
 Tested on the Note10+ (SM-N975U1, Android 11, Adreno 640).
 
+**2026-11-16:** see the [Note10+ parity report](../native/ADRENO-640-PARITY.md)
+for current package selection, measured results and remaining gaps. In particular,
+H.264 decoding and Chromium hardware encoding are now defaults on Adreno, and
+Chrome uses the source-built glibc VA driver to correct encoded picture cropping.
+Firefox encoding remains off pending qualification. The dated investigation below
+describes earlier installations and is not the current default configuration.
+
 **Current state, 2026-11-05.** Firefox, Chromium and Google Chrome are installed by default
 by the `Browser+Chromium` overlay, and all three use the GPU and Android's hardware video unless
 `~/.config/livecd-native/acceleration.json` turns it off. Nothing is compiled on the phone any

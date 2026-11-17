@@ -168,10 +168,23 @@ def dma_heap_emulation():
             and os.path.exists('/dev/ion'))
 
 
-def video_environment(env, selected, abi, config):
+def source_built_driver(profile, abi, manifest, mali):
+    """Whether a glibc browser uses the stack's own build of the VA-API driver.
+
+    The glibc stack carries lfdevs' prebuilt Mesa (Turnip, and a VA-API driver without this
+    project's fixes) and, under the manifest's "mali" key, the driver built from the same
+    patched source as the Bionic one. Mali has always used the second. Chrome on Adreno now does
+    too: the prebuilt one encodes the 16-aligned surface uncropped (640x360 arrives as 640x368).
+    Its surfaces are CPU-written dma-bufs, which Turnip imports as it does on Mali.
+    """
+    return abi == 'glibc' and 'mali' in manifest and (mali or profile == 'chrome')
+
+
+def video_environment(env, selected, abi, config, profile='generic'):
     root, manifest = selected
     mali = mali_usable()
-    variant = manifest.get('mali', {}) if abi == 'glibc' and mali else {}
+    own = source_built_driver(profile, abi, manifest, mali)
+    variant = manifest['mali'] if own else {}
     libraries = ':'.join(str(root / p) for p in [*variant.get('libraries', []), *manifest['libraries']])
     # On ION-only kernels the bridge's dma-heap allocations need the heap emulation.
     # It stays inactive where /dev/dma_heap exists or /dev/ion does not. See dma-heap.c.
@@ -185,9 +198,9 @@ def video_environment(env, selected, abi, config):
         env['LD_PRELOAD'] = ':'.join(filter(None, [preloads, env.get('LD_PRELOAD')]))
     env.update(LIBVA_DRIVERS_PATH=str(root / variant.get('driver_directory', manifest['driver_directory'])),
                LIBVA_DRIVER_NAME='termuxva', TERMUX_VA_BRIDGE='1')
-    if mali:
+    if mali or own:
         # CPU surfaces do not disable MediaCodec hardware codec execution.
-        # The KGSL/dma-buf import settings are specific to the Adreno stack.
+        # The KGSL/dma-buf import settings are specific to the Adreno stack's KGSL drivers.
         env['TERMUX_VA_GPU_BACKEND'] = 'sw'
     else:
         env.update(TERMUX_VA_GPU_BACKEND='kgsl', TERMUX_VA_X11_DRI3='1',
@@ -314,7 +327,7 @@ def chromium_encodes_webcodecs():
     return False
 
 
-def command_line(profile, command, abi, video, gpu, mali=False):
+def command_line(profile, command, abi, video, gpu, mali=False, own_driver=False):
     flags = []
     if profile in BROWSERS:
         flags = (['--use-gl=angle', '--use-angle=vulkan', '--ignore-gpu-blocklist',
@@ -326,12 +339,14 @@ def command_line(profile, command, abi, video, gpu, mali=False):
                 '--enable-features=Vulkan,VulkanFromANGLE,DefaultANGLEVulkan,VaapiVideoDecoder,VaapiVideoDecodeLinux,PlatformHEVCDecoderSupport,AcceleratedVideoDecoder,AcceleratedVideoDecodeLinuxGL,VaapiIgnoreDriverChecks',
                 '--disable-features=VaapiVideoMinResolutionForPerformance']
             # Hardware encoding: Chromium revision 3 for WebRTC and WebCodecs, on the S20 and the
-            # Note10+; Chrome for WebRTC on Mali only. Chrome's WebCodecs hardware path crashes its
-            # GPU process (unpatchable GMB input); the user chose WebRTC hardware encoding over
-            # that. On Adreno Chrome uses the prebuilt glibc driver, which encodes the 16-aligned
-            # surface uncropped: 640x360 arrives as 640x368 with a green band (ENCODING.md).
+            # Note10+; Chrome for WebRTC. Chrome's WebCodecs hardware path crashes its GPU
+            # process (unpatchable GMB input); the user chose WebRTC hardware encoding over
+            # that. On Adreno Chrome needs this project's build of the glibc driver: the prebuilt
+            # one encodes the 16-aligned surface uncropped, so 640x360 arrives as 640x368 with a
+            # green band (ENCODING.md).
             if ((profile == 'chromium' and abi == 'bionic' and chromium_encodes_webcodecs()) or
-                    (profile == 'chrome' and abi == 'glibc' and video_device() == '/dev/mali0')):
+                    (profile == 'chrome' and abi == 'glibc' and
+                     (video_device() == '/dev/mali0' or own_driver))):
                 flags = [flag + ',AcceleratedVideoEncoder' if flag.startswith('--enable-features=') else flag
                          for flag in flags]
         if abi == 'glibc':
@@ -418,7 +433,7 @@ def prepare(profile, command, abi, video_override):
         if key in ('TERMUX_VA_SOCKET', 'TERMUX_VA_SOCKET_DIR') or key.startswith('TERMUX_VA_DISABLE_'):
             env[key] = value
     if video and profile != 'mpv':
-        video_environment(env, selected, abi, config)
+        video_environment(env, selected, abi, config, profile)
         if abi == 'bionic' and env.get('TERMUX_VA_GPU_BACKEND') == 'sw' and profile != 'firefox':
             # The private VA driver builds softpipe, not the system Mesa's LLVM
             # renderer. Before android-vaapi revision 4 it read the application's
@@ -477,7 +492,8 @@ def prepare(profile, command, abi, video_override):
     if mali_vulkan:
         # Last, so no earlier library path or ICD choice overrides it.
         use_panvk(env, abi)
-    argv = command_line(profile, command, abi, video, gpu, mali=mali)
+    own_driver = bool(video and selected and source_built_driver(profile, abi, selected[1], mali_usable()))
+    argv = command_line(profile, command, abi, video, gpu, mali=mali, own_driver=own_driver)
     if mali:
         argv[:0] = [sys.executable, str(Path(__file__).with_name('mali.py'))]
     if abi == 'glibc':

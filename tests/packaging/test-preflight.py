@@ -115,7 +115,7 @@ class Preflight(unittest.TestCase):
     def test_missing_gpu(self):
         self.gpu.unlink()
         _, levels, output = self.run_preflight()
-        self.assertEqual(self.problems(levels), {'GPU rendering and hardware video': 'WARN'}, output)
+        self.assertEqual(self.problems(levels), {'GPU rendering': 'WARN'}, output)
 
     def test_qualified_mali_counts_as_gpu(self):
         self.gpu.unlink()
@@ -123,13 +123,23 @@ class Preflight(unittest.TestCase):
         _, levels, output = self.run_preflight()
         self.assertEqual(self.problems(levels), {}, output)
         self.assertIn('qualified Mali-G77', output)
+        self.assertIn('Zink/PanVK', output)
+        self.assertNotIn('desktop uses software rendering', output)
 
     def test_other_mali_phone_renders_in_software(self):
         self.gpu.unlink()
         self.mali.write_text('')
         self.device = 'a52q'
         _, levels, output = self.run_preflight()
-        self.assertEqual(self.problems(levels), {'GPU rendering and hardware video': 'WARN'}, output)
+        self.assertEqual(self.problems(levels), {'GPU rendering': 'WARN'}, output)
+
+    def test_unqualified_mali_kernel_does_not_claim_gpu_support(self):
+        self.gpu.unlink()
+        self.mali.write_text('')
+        self.kernel = '5.10.0'
+        _, levels, output = self.run_preflight()
+        self.assertEqual(self.problems(levels), {'GPU rendering': 'WARN'}, output)
+        self.assertIn('This does not determine hardware video support', output)
 
     def test_missing_termux_x11_stops(self):
         self.apps(['com.termux.api', 'moe.shizuku.privileged.api'])

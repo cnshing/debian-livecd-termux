@@ -104,12 +104,14 @@ else
     report STOP 'Desktop display' 'needs the Termux:X11 app, from the same source as Termux.'
 fi
 if test -e "$gpu"; then
-    report ok 'GPU rendering and hardware video (Qualcomm Adreno)'
+    report ok 'GPU rendering (Qualcomm Adreno, Zink/Turnip)'
 elif qualified_mali; then
-    report ok 'GPU rendering and hardware video (qualified Mali-G77, Galaxy S20)'
+    report ok 'GPU rendering (qualified Mali-G77, Galaxy S20, Zink/PanVK)'
 else
-    report WARN 'GPU rendering and hardware video' 'need a Qualcomm Adreno GPU or the qualified Galaxy S20 Mali-G77, which were not found; the desktop renders in software.'
+    report WARN 'GPU rendering' 'no supported Adreno or qualified Galaxy S20 Mali-G77 rendering path was detected; the desktop uses software rendering. This does not determine hardware video support.'
 fi
+# GPU identity alone cannot establish codec support or application integration.
+echo 'Hardware video decoding/encoding depends on the codec and application; see docs/native/MALI-GPU-STATUS.md and docs/native/ENCODING.md.'
 api_permission 'Phone microphone' RECORD_AUDIO Microphone
 if test -n "$shell"; then
     report WARN 'Bluetooth headset microphone' "needs Shizuku, which routes Android's call audio. $shell"

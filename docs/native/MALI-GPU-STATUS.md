@@ -1,5 +1,47 @@
 # Mali GPU and hardware video: one stack, and where each piece stands
 
+## Fresh-install verification, 2026-11-16
+
+GPU rendering and hardware video work on the tested Galaxy S20 (`x1s`, SM-G981B,
+Exynos 990, Mali-G77, Android 13, Linux 4.19.87). Adreno is not a requirement for
+these verified paths. The PanVK setup still qualifies this specific device/kernel
+interface; these results do not establish support for other Mali phones.
+Hardware video uses Android's media codecs, independently of whether rendering
+uses Turnip, PanVK or VirGL.
+
+| Check on the fresh installation | Result |
+| --- | --- |
+| Desktop, Zink on PanVK | 30/30 validation; ten lifecycle cycles, crash recovery and safe→normal recovery passed |
+| Ghostty | GPU rendering with the packaged PanVK GTK/dma-buf route; menu and New Window passed |
+| Chromium and Chrome VP9/HEVC decode | Hardware decoder and windowed/fullscreen picture checks passed; the earlier Chrome VP9 comparison miss did not recur |
+| Firefox VP9/HEVC decode | VA-API frames, WebRender, PanVK GPU access and numbered pictures passed after the launcher receipt fix (96979df) |
+| mpv VP9/HEVC decode | OMX.Exynos hardware components and numbered pictures passed; rendering uses VirGL on the vendor Mali GLES driver, verified by the owned renderer's library and /dev/mali0 access |
+| Chromium WebCodecs H.264/VP9 encode | 60 encoded and decoded frames per case, maximum colour error 12 |
+| Chromium and Chrome WebRTC H.264/VP9 encode | Exynos hardware encoders, received frames and colour checks passed |
+| Native FFmpeg | VP9/HEVC hardware decode matched software frame hashes; H.264/HEVC/VP9 Exynos encoders produced 60 packets each |
+
+The installation used the v0.12.0 offline tarball plus livecd-desktop 0.2.0-22 and
+GSConnect revision 3 fixes installed through the local repository. This does not
+mean the original v0.12.0 tarball contains those fixes. No new release was made.
+mpv's earlier test failure required a test correction (978df8e): it expected
+PanVK in mpv, although the qualified mpv route uses VirGL.
+
+H.264 browser decoding on Mali is not established by this run. Chrome WebCodecs
+hardware encoding still fails, Firefox encoding remains opt-in, and the Exynos
+encoder limitations in [ENCODING-EXYNOS.md](ENCODING-EXYNOS.md) still apply. These
+checks do not establish long-soak stability or performance parity with Adreno.
+
+Local evidence (excluded from Git): `temp/fresh-x1s-20261116/`, including
+`video/{c1,c2,gvp9,ghevc,f2vp9,f2hevc}/result.json`, `encode/*/result.json`,
+`native-ffmpeg-daemon.txt`, `native-ffmpeg/*chart*.md5`, `remaining-mpv/`,
+`remaining-evidence/validate-final.json` and `REMAINING-RESULTS.md`.
+
+## Earlier investigation
+
+The sections below record the earlier package versions, failures and remaining
+work as of their stated dates; the fresh-install results above supersede them
+where a check has since passed.
+
 State on 2026-11-12 (encoding updated 2026-11-15), Galaxy S20 (SM-G981B `x1s`, Exynos 990, Mali-G77 MC11, Android 13, stock
 kernel, no root). This page is the entry point for the Mali work; the pages it links hold the
 evidence. Everything below is on `main`: the work that was spread over the PanVK research, Zink,

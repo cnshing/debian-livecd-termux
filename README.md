@@ -89,12 +89,19 @@ Turnip driver and the desktop renders through Zink. On the qualified Mali phone 
 installs the PanVK driver and also renders through Zink ([PanVK desktop](docs/native/PANVK-DESKTOP.md));
 elsewhere it renders in software.
 
-Firefox, Chromium and Google Chrome are installed with GPU rendering and Android's hardware video
-decoding. Chrome is downloaded from Google during installation, because its license does not
-allow this project to redistribute it. Hardware video **encoding** has limited support: native
-programs can use it on Snapdragon phones, Exynos phones have known faults, and on Mali phones
-Chromium and Chrome hardware-encode WebRTC by default, as
-Chromium also does on Snapdragon phones. See [hardware encoding](docs/native/ENCODING.md) and
+Firefox, Chromium and Google Chrome are installed with GPU rendering and hardware video
+support for the qualified devices. Support depends on the codec and application, rather than
+GPU brand alone. On the tested Galaxy S20 (Exynos 990, Mali-G77), the fresh-install checks passed
+GPU desktop rendering, VP9/HEVC hardware decoding in all three browsers and mpv, Chromium
+H.264/VP9 hardware encoding through WebRTC and WebCodecs, and Chrome H.264/VP9 WebRTC encoding.
+Native FFmpeg also produced H.264, HEVC and VP9 output on the Exynos hardware encoders.
+These results cover this S20 configuration, not all Mali phones. See the
+[Mali verification results](docs/native/MALI-GPU-STATUS.md#fresh-install-verification-2026-11-16).
+
+Chrome is downloaded from Google during installation, because its license does not allow this
+project to redistribute it. Encoding still has application-specific limits: Chrome's WebCodecs
+hardware path fails on the S20, Firefox encoding remains opt-in, and Exynos has known quality,
+bitrate and performance limits. See [hardware encoding](docs/native/ENCODING.md) and
 [Exynos encoding](docs/native/ENCODING-EXYNOS.md).
 
 The desktop's Android integrations start with it: the phone microphone, or a connected Bluetooth

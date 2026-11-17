@@ -54,7 +54,11 @@ root and a changed SELinux policy.
 ### On a fresh installation
 
 Three packaging problems kept a fresh install from encoding at all. All three are fixed on main
-([handoff](handoff/encode-native.md)); a fresh install has not been rechecked since:
+([handoff](handoff/encode-native.md)). The 2026-11-16 fresh-install run subsequently
+confirmed native FFmpeg H.264, HEVC and VP9 encoding on the Exynos hardware
+components (60 packets each), plus Chromium WebCodecs and Chromium/Chrome WebRTC
+H.264/VP9 encoding. See the [fresh-install results](MALI-GPU-STATUS.md#fresh-install-verification-2026-11-16).
+The original packaging faults were:
 
 - This project's VA-API `ffmpeg` was missing from the release (a build-order bug), so the S20
   got Termux's FFmpeg, which has no VA-API encoders.

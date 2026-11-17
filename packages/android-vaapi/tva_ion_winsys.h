@@ -72,15 +72,15 @@ tva_ion_ws_alloc(size_t size)
  * allocations to the emulated heaps.  So the bridge loads the same library privately with
  * dlopen, which interposes nothing, and only these allocations come from ION.  The library
  * declines (ENOENT) where real heaps exist, without /dev/ion, or with LIVECD_DMA_HEAP_ION=0.
- * It sits beside the driver's directory: <stack>/libandroid-dma-heap.so for the Bionic
- * package, <stack>/lib/ for the glibc one. */
+ * This code is linked into libgallium, which sits in <stack>/ beside the library for the
+ * Bionic package, and in <stack>/mali/ with the library in <stack>/lib/ for the glibc one. */
 static int (*tva_scoped_heap)(const char *, uint64_t, uint32_t);
 
 static void
 tva_scoped_heap_load(void)
 {
    static const char *const names[] = {
-      "../libandroid-dma-heap.so", "../../lib/libandroid-dma-heap.so",
+      "libandroid-dma-heap.so", "../lib/libandroid-dma-heap.so",
    };
    Dl_info info;
    char driver[PATH_MAX], path[PATH_MAX + 64];
@@ -110,7 +110,7 @@ static int
 tva_scoped_heap_alloc(size_t size)
 {
    static pthread_once_t once = PTHREAD_ONCE_INIT;
-   if (errno != ENOENT || access("/dev/ion", R_OK))
+   if (access("/dev/ion", F_OK))
       return -1;
    pthread_once(&once, tva_scoped_heap_load);
    if (!tva_scoped_heap)

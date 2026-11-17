@@ -121,6 +121,74 @@ def gpu_enabled(profile, abi='bionic'):
     return renderer == 'zink' and receipt
 
 
+def daemon_endpoint(env):
+    """The shared Termux:VA socket of this environment, as ensure_daemon() chooses it."""
+    if env.get('TERMUX_VA_SOCKET'):
+        return Path(env['TERMUX_VA_SOCKET'])
+    if env.get('TERMUX_VA_SOCKET_DIR'):
+        return Path(env['TERMUX_VA_SOCKET_DIR']) / 'termux-va.sock'
+    return Path(env.get('TMPDIR', str(PREFIX / 'tmp'))) / 'termux-va' / 'termux-va.sock'
+
+
+def outdated_daemons(endpoint, proc=Path('/proc')):
+    """Shared Termux:VA daemons on this endpoint that run a replaced binary.
+
+    A running daemon outlives package upgrades: dpkg replaces the file, and the old
+    process keeps serving the session socket with the deleted binary. Daemons given
+    their own socket (--sock, or another TERMUX_VA_SOCKET) are never included.
+    """
+    installed = {os.path.realpath(path) for path in (PREFIX / 'bin/termux-va', ROOT / 'service/bin/termux-va')
+                 if path.is_file()}
+    for entry in proc.iterdir():
+        if not entry.name.isdigit():
+            continue
+        try:
+            exe = os.readlink(entry / 'exe')
+            args = (entry / 'cmdline').read_bytes().split(b'\0')
+            environ = dict(item.split('=', 1) for item in
+                           (entry / 'environ').read_bytes().decode(errors='replace').split('\0') if '=' in item)
+        except OSError:
+            continue
+        deleted = exe.endswith(' (deleted)')
+        binary = exe.removesuffix(' (deleted)')
+        if os.path.basename(binary).split('.')[0] != 'termux-va':
+            continue
+        if any(arg == b'--sock' or arg.startswith(b'--sock=') for arg in args):
+            continue
+        if daemon_endpoint(environ) != endpoint:
+            continue
+        if deleted or binary not in installed:
+            yield int(entry.name)
+
+
+def replace_outdated_daemons(env):
+    """Stop shared daemons left running from before an upgrade, so that the next
+    ensure_daemon() starts the installed one. Called when the desktop starts."""
+    if env.get('TERMUX_VA_SOCKET') or env.get('TERMUX_VA_SOCKET_DIR'):
+        return []  # A supplied endpoint is caller-owned, as in ensure_daemon().
+    endpoint = daemon_endpoint(env)
+    stopped = []
+    for pid in outdated_daemons(endpoint):
+        try:
+            os.kill(pid, signal.SIGTERM)
+            stopped.append(pid)
+        except OSError:
+            pass
+    for pid in stopped:
+        for unused in range(50):
+            if not Path(f'/proc/{pid}').exists():
+                break
+            time.sleep(.1)
+        else:
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except OSError:
+                pass
+    if stopped:
+        print('Replaced an outdated Termux:VA daemon: ' + ' '.join(map(str, stopped)), file=sys.stderr)
+    return stopped
+
+
 def ensure_daemon(env):
     # A supplied endpoint is caller-owned. Never use the upstream lifecycle
     # helper: it may kill other termux-va instances when a health check fails.

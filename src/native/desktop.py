@@ -192,12 +192,15 @@ def native_encode(env, preload):
 
 def start_video_daemon(env):
     # The shared Termux:VA daemon serves both encoding and opt-in decoding. A
-    # running one is reused; none is ever stopped here.
+    # running one is reused unless it runs a binary an upgrade replaced.
     if acceleration_settings().get('native_encode') is False:
         return
     try:
         sys.path.insert(0, str(BASE))
-        from acceleration import ensure_daemon
+        from acceleration import ensure_daemon, replace_outdated_daemons
+        # The desktop is starting, so no session program uses the shared daemon yet:
+        # one left from before a termux-va upgrade is replaced by the installed one.
+        replace_outdated_daemons(env)
         ensure_daemon(dict(env))
     except (ImportError, OSError, RuntimeError) as error:
         print('Hardware encoding is unavailable: ' + str(error), file=sys.stderr)

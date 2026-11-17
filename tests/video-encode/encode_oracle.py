@@ -138,3 +138,55 @@ def probe_frames(path):
     out = run(['ffprobe', '-v', 'error', '-select_streams', 'v:0', '-show_entries',
                'frame=key_frame,pict_type', '-of', 'json', path]).stdout
     return [(f.get('key_frame') == 1, f.get('pict_type')) for f in json.loads(out)['frames']]
+
+
+# Colour signalling. Four solid bars whose colours move far apart between
+# BT.601 and BT.709 and between full and limited range, so a stream that
+# signals anything other than what its samples are in decodes visibly wrong.
+COLOR_BARS = ((220, 40, 40), (40, 200, 60), (40, 60, 220), (230, 200, 60))
+# (primaries, transfer, matrix) VUI code points (ITU-T H.273).
+COLOR_SPACES = {'bt601': (6, 6, 6), 'bt709': (1, 1, 1)}
+COLOR_TOLERANCE = 10
+
+
+def rgb_to_yuv(rgb, matrix, full):
+    kr, kb = (0.299, 0.114) if matrix == 'bt601' else (0.2126, 0.0722)
+    r, g, b = (v / 255 for v in rgb)
+    y = kr * r + (1 - kr - kb) * g + kb * b
+    cb, cr = (b - y) / (2 * (1 - kb)), (r - y) / (2 * (1 - kr))
+    scale_y, scale_c, base = (255, 255, 0) if full else (219, 224, 16)
+    clip = lambda v: max(0, min(255, round(v)))
+    return clip(base + scale_y * y), clip(128 + scale_c * cb), clip(128 + scale_c * cr)
+
+
+def color_bars_nv12(width, height, matrix, full):
+    """One NV12 picture of COLOR_BARS, its samples in the given matrix and range."""
+    bar = width // len(COLOR_BARS)
+    yuv = [rgb_to_yuv(rgb, matrix, full) for rgb in COLOR_BARS]
+    luma = bytes(yuv[min(x // bar, len(yuv) - 1)][0] for x in range(width))
+    chroma = b''.join(bytes(yuv[min(2 * x // bar, len(yuv) - 1)][1:]) for x in range(width // 2))
+    return luma * height + chroma * (height // 2)
+
+
+def stream_color(path):
+    """The colour signalling FFmpeg reads from a stream or file."""
+    out = run(['ffprobe', '-v', 'error', '-select_streams', 'v:0', '-show_entries',
+               'stream=color_range,color_space,color_primaries,color_transfer', '-of', 'json', path]).stdout
+    return (json.loads(out).get('streams') or [{}])[0]
+
+
+def bar_errors(path, width, height, frame=5):
+    """Decode one picture to RGB as its signalling says and return each bar's
+    centre colour and the largest channel error against COLOR_BARS."""
+    raw = run(['ffmpeg', '-v', 'error', '-nostdin', '-i', path, '-vf', f'select=eq(n\\,{frame})',
+               '-frames:v', '1', '-pix_fmt', 'rgb24', '-f', 'rawvideo', '-']).stdout
+    if len(raw) != width * height * 3:
+        return None, None
+    bar = width // len(COLOR_BARS)
+    found, worst = [], 0
+    for index, want in enumerate(COLOR_BARS):
+        x, y = index * bar + bar // 2, height // 2
+        got = tuple(raw[(y * width + x) * 3:(y * width + x) * 3 + 3])
+        found.append(got)
+        worst = max(worst, *(abs(a - b) for a, b in zip(got, want)))
+    return found, worst

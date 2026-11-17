@@ -1,0 +1,175 @@
+Termux:VA encoder colour aspects: the bridge reads the colour a VA-API client
+signals in its packed SPS VUI (H.264, HEVC) and announces it in the encoder
+handshake (ENC_XFER_COLOR), because MediaCodec writes its own parameter sets.
+A changed colour on an IDR reopens the session. Without this, full range
+input (Chromium canvas capture) was signalled as limited BT.601.
+
+diff --git a/src/gallium/frontends/va/tva_bridge.c b/src/gallium/frontends/va/tva_bridge.c
+index 4357032..d333b64 100644
+--- a/src/gallium/frontends/va/tva_bridge.c
++++ b/src/gallium/frontends/va/tva_bridge.c
+@@ -529,6 +529,8 @@ struct tva_codec {
+     unsigned encode_x, encode_y;
+     /* Target bitrate the daemon is using. */
+     uint32_t encode_sent_bitrate;
++    uint32_t encode_color;      /* ENC_XFER_COLOR bits of the client's VUI */
++    uint32_t encode_sent_color; /* what the current session was opened with */
+ 
+     struct pipe_context *pipe;    /* real context, for resource writes */
+ 
+@@ -3077,6 +3079,7 @@ tva_encoder_ensure_session(struct tva_codec *c, struct pipe_video_buffer *source
+     cfg.bitrate = c->encode_bitrate;
+     cfg.fps_num = c->encode_fps_num;
+     cfg.fps_den = c->encode_fps_den;
++    cfg.enc_color = c->encode_color;
+     cfg.want_shm = 0;
+     if (cfg.codec < 0)
+         return -1;
+@@ -3090,8 +3093,9 @@ tva_encoder_ensure_session(struct tva_codec *c, struct pipe_video_buffer *source
+         return -1;
+     }
+     c->encode_sent_bitrate = cfg.bitrate;
+-    TVA_TRACE("encoder session ready codec=%d %ux%u bitrate=%u",
+-              cfg.codec, cfg.width, cfg.height, cfg.bitrate);
++    c->encode_sent_color = cfg.enc_color;
++    TVA_TRACE("encoder session ready codec=%d %ux%u bitrate=%u colour=%#x",
++              cfg.codec, cfg.width, cfg.height, cfg.bitrate, cfg.enc_color);
+     return 0;
+ }
+ 
+@@ -3193,6 +3197,21 @@ tva_encode_set_crop(struct tva_codec *c, unsigned left, unsigned right,
+     c->encode_height = c->base.height - h;
+ }
+ 
++/* The colour the client's samples are in, from the VUI of its sequence
++ * parameters (VA-API clients send it in a packed SPS).  MediaCodec writes
++ * its own parameter sets, so the daemon must be told, or the stream keeps
++ * the encoder's default signalling whatever the samples are. */
++static uint32_t
++tva_encode_vui_color(bool signal_type, bool full_range, bool description,
++                     uint32_t primaries, uint32_t transfer, uint32_t matrix)
++{
++    if (!signal_type)
++        return 0;
++    if (!description)
++        primaries = transfer = matrix = 2; /* unspecified */
++    return ENC_XFER_COLOR_BITS(full_range, primaries, transfer, matrix);
++}
++
+ static void
+ tva_codec_begin_frame(struct pipe_video_codec *codec,
+                       struct pipe_video_buffer *target,
+@@ -3226,6 +3245,7 @@ tva_codec_begin_frame(struct pipe_video_codec *codec,
+     }
+ 
+     if (c->encoder && picture) {
++        uint32_t color = 0;
+         if (u_reduce_video_profile(c->base.profile) == PIPE_VIDEO_FORMAT_VP9) {
+             const struct vlVaVP9EncPictureDesc *vp9 =
+                 (const struct vlVaVP9EncPictureDesc *)picture;
+@@ -3239,6 +3259,13 @@ tva_codec_begin_frame(struct pipe_video_codec *codec,
+             const struct pipe_h264_enc_picture_desc *h264 =
+                 (const struct pipe_h264_enc_picture_desc *)picture;
+             c->encode_key = h264->picture_type == PIPE_H2645_ENC_PICTURE_TYPE_IDR;
++            color = tva_encode_vui_color(
++                h264->seq.vui_parameters_present_flag &&
++                    h264->seq.vui_flags.video_signal_type_present_flag,
++                h264->seq.video_full_range_flag,
++                h264->seq.vui_flags.colour_description_present_flag,
++                h264->seq.colour_primaries, h264->seq.transfer_characteristics,
++                h264->seq.matrix_coefficients);
+             /* 4:2:0 crop offsets count pairs of samples. */
+             if (h264->seq.enc_frame_cropping_flag)
+                 tva_encode_set_crop(c, h264->seq.enc_frame_crop_left_offset,
+@@ -3251,6 +3278,13 @@ tva_codec_begin_frame(struct pipe_video_codec *codec,
+             const struct pipe_h265_enc_picture_desc *h265 =
+                 (const struct pipe_h265_enc_picture_desc *)picture;
+             c->encode_key = h265->picture_type == PIPE_H2645_ENC_PICTURE_TYPE_IDR;
++            color = tva_encode_vui_color(
++                h265->seq.vui_parameters_present_flag &&
++                    h265->seq.vui_flags.video_signal_type_present_flag,
++                h265->seq.video_full_range_flag,
++                h265->seq.vui_flags.colour_description_present_flag,
++                h265->seq.colour_primaries, h265->seq.transfer_characteristics,
++                h265->seq.matrix_coefficients);
+             if (h265->seq.conformance_window_flag)
+                 tva_encode_set_crop(c, h265->seq.conf_win_left_offset,
+                                     h265->seq.conf_win_right_offset,
+@@ -3265,6 +3299,16 @@ tva_codec_begin_frame(struct pipe_video_codec *codec,
+             c->encode_key = false;
+             break;
+         }
++        c->encode_color = color;
++        /* MediaCodec takes colour aspects only when it is configured: a
++         * client that changes them starts a new sequence with an IDR, and
++         * the session is reopened for it. */
++        if (c->sess && c->encode_key && color != c->encode_sent_color) {
++            TVA_TRACE("encoder colour %#x -> %#x, reopening the session",
++                      c->encode_sent_color, color);
++            tva_session_destroy(c->sess);
++            c->sess = NULL;
++        }
+         uint32_t bitrate = tva_encode_picture_bitrate(c, picture);
+         if (bitrate)
+             c->encode_bitrate = bitrate;
+diff --git a/src/gallium/frontends/va/tva_client.c b/src/gallium/frontends/va/tva_client.c
+index bdc80c9..b1ad53c 100644
+--- a/src/gallium/frontends/va/tva_client.c
++++ b/src/gallium/frontends/va/tva_client.c
+@@ -515,6 +515,10 @@ static int do_handshake(struct tva_session *s,
+     hello[4] = htonl((uint32_t)cfg->height);
+     hello[5] = htonl(cfg->want_shm ? (uint32_t)XFER_SHM
+                                    : (uint32_t)XFER_INLINE);
++    /* Encoders announce the colour of their samples in the transport word,
++     * which daemons without colour support ignore for encoder sessions. */
++    if (codec_is_encoder(cfg->codec) && (cfg->enc_color & ENC_XFER_COLOR))
++        hello[5] = htonl(cfg->enc_color | (uint32_t)XFER_INLINE);
+     hello[6] = htonl(cfg->bitrate);
+     hello[7] = htonl(cfg->fps_num);
+     hello[8] = htonl(cfg->fps_den);
+diff --git a/src/gallium/frontends/va/tva_client.h b/src/gallium/frontends/va/tva_client.h
+index 353075d..88bcded 100644
+--- a/src/gallium/frontends/va/tva_client.h
++++ b/src/gallium/frontends/va/tva_client.h
+@@ -106,6 +106,7 @@ struct tva_session_config {
+     uint32_t bitrate;           /* encoder target, bits per second; 0 = default */
+     uint32_t fps_num;            /* encoder input frame rate; 0 = 30/1 */
+     uint32_t fps_den;
++    uint32_t enc_color;         /* encoder: ENC_XFER_COLOR bits, 0 = encoder default */
+     int      want_shm;          /* non-0 = request SHM (daemon may downgrade) */
+     int      connect_timeout_ms;/* <=0 = TVA_DEF_CONNECT_MS */
+     int      io_timeout_ms;     /* <=0 = TVA_DEF_IO_MS */
+diff --git a/src/gallium/frontends/va/tva_protocol.h b/src/gallium/frontends/va/tva_protocol.h
+index 0d4a462..f11f81f 100644
+--- a/src/gallium/frontends/va/tva_protocol.h
++++ b/src/gallium/frontends/va/tva_protocol.h
+@@ -163,6 +163,29 @@ typedef enum {
+ #define ENC_UNIT_FORCE_KEY   0x80000000u
+ #define ENC_UNIT_SET_BITRATE 0x40000000u
+ 
++/* Encoder colour aspects (debian-livecd-termux).  Encoder sessions are always
++ * inline, and daemons before this ignore the handshake's transport word for
++ * them, so its upper bits carry the colour the client's samples are in.  The
++ * values are the H.264/HEVC VUI code points (ITU-T H.273); the daemon passes
++ * them to MediaCodec (KEY_COLOR_RANGE/STANDARD/TRANSFER), whose encoder then
++ * signals them in its own parameter sets:
++ *   bit 31      ENC_XFER_COLOR: the rest of this layout is valid
++ *   bit 30      full range (video_full_range_flag)
++ *   bits 29..22 colour_primaries
++ *   bits 21..14 transfer_characteristics
++ *   bits 13..6  matrix_coefficients
++ *   bits 1..0   the transport (XFER_INLINE). */
++#define ENC_XFER_COLOR       0x80000000u
++#define ENC_XFER_FULL_RANGE  0x40000000u
++#define ENC_XFER_COLOR_BITS(full, primaries, transfer, matrix)                \
++    (ENC_XFER_COLOR | ((full) ? ENC_XFER_FULL_RANGE : 0) |                    \
++     ((uint32_t)((primaries) & 0xff) << 22) |                                \
++     ((uint32_t)((transfer) & 0xff) << 14) | ((uint32_t)((matrix) & 0xff) << 6))
++#define ENC_XFER_PRIMARIES(x) (((x) >> 22) & 0xffu)
++#define ENC_XFER_TRANSFER(x)  (((x) >> 14) & 0xffu)
++#define ENC_XFER_MATRIX(x)    (((x) >> 6) & 0xffu)
++#define ENC_XFER_MODE(x)      ((x) & 0x3u)
++
+ /* Max concurrent decode sessions the daemon accepts (hardware supports 16). */
+ #define MAX_CLIENTS 8
+ 

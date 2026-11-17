@@ -11,6 +11,11 @@ termux-va daemon. Nothing touches the live desktop, its browser profiles or the 
                  pictures of the sent size and colours.
   webcodecs      60 canvas pictures are encoded, software decoded and checked against their
                  original colours, including the metadata supplied by the encoder.
+  colour         known colour bars in full/limited range BT.601/BT.709 (I420 VideoFrames with
+                 that colour space) go through MediaRecorder (MediaStreamTrackGenerator) and
+                 WebCodecs; FFmpeg decodes each stream as its own signalling says and must get
+                 the bars' RGB back. Control: the same streams with the signalling removed
+                 must decode wrong for the full range sources.
 
 With --expect hardware (the default) the private daemon must also have run an encoder session
 on a hardware component with pictures in and out. With --expect software it must have run none.
@@ -134,9 +139,43 @@ async function webcodecs(codec) {
     frames_over_16: errors.filter(e => e > 16).length, decoderConfig: metadata, error: failure, png,
     picture_ok: chunks.length === 60 && decoded === 60 && errors.every(e => e <= 16) && !failure};
 }
+const CONTROLS = %(controls)s;
+function barFrame(control, timestamp) {
+  const y = new Uint8Array(W * H), u = new Uint8Array(W * H / 4), v = new Uint8Array(W * H / 4);
+  const bar = Math.floor(W / control.yuv.length), pick = x => control.yuv[Math.min(Math.floor(x / bar), control.yuv.length - 1)];
+  for (let x = 0; x < W; x++) { const c = pick(x); for (let r = 0; r < H; r++) y[r * W + x] = c[0]; }
+  for (let x = 0; x < W / 2; x++) { const c = pick(2 * x); for (let r = 0; r < H / 2; r++) { u[r * W / 2 + x] = c[1]; v[r * W / 2 + x] = c[2]; } }
+  const data = new Uint8Array(W * H * 3 / 2); data.set(y); data.set(u, W * H); data.set(v, W * H * 5 / 4);
+  return new VideoFrame(data, {format: 'I420', codedWidth: W, codedHeight: H, timestamp, colorSpace: control.space});
+}
+const b64 = bytes => { let s = ''; for (let i = 0; i < bytes.length; i += 32768) s += String.fromCharCode.apply(null, bytes.subarray(i, i + 32768)); return btoa(s); };
+async function colour(codec) {
+  const out = [];
+  for (const control of CONTROLS) {
+    // MediaRecorder from a generated track.
+    const gen = new MediaStreamTrackGenerator({kind: 'video'}), writer = gen.writable.getWriter();
+    const recorder = new MediaRecorder(new MediaStream([gen]), {mimeType: 'video/mp4;codecs=avc1.42E01E', videoBitsPerSecond: 4000000});
+    const parts = []; recorder.ondataavailable = e => parts.push(e.data);
+    const stopped = new Promise(r => recorder.onstop = r); recorder.start();
+    for (let i = 0; i < 60; i++) { await writer.write(barFrame(control, i * 33333)); await sleep(33); }
+    recorder.stop(); await stopped; writer.close();
+    const rec = new Uint8Array(await new Blob(parts).arrayBuffer());
+    // WebCodecs, Annex B chunks.
+    const chunks = []; let meta = null, failure = null;
+    const enc = new VideoEncoder({output: (c, m) => { const b = new Uint8Array(c.byteLength); c.copyTo(b); chunks.push(b);
+      if (m && m.decoderConfig) meta = m.decoderConfig; }, error: e => { failure = String(e); }});
+    enc.configure({codec: 'avc1.42001f', width: W, height: H, bitrate: 4000000, framerate: 30,
+      hardwareAcceleration: 'prefer-hardware', bitrateMode: 'constant', avc: {format: 'annexb'}});
+    for (let i = 0; i < 30; i++) { const f = barFrame(control, i * 33333); enc.encode(f, {keyFrame: i === 0}); f.close(); }
+    await enc.flush(); enc.close();
+    const all = new Uint8Array(chunks.reduce((n, c) => n + c.length, 0)); let o = 0; for (const c of chunks) { all.set(c, o); o += c.length; }
+    out.push({codec, control: control.name, recording: b64(rec), annexb: b64(all), decoderConfig: meta, error: failure});
+  }
+  return out;
+}
 (async () => { const q = new URLSearchParams(location.search), r = [];
   for (const k of q.get('codecs').split(',')) {
-    try { r.push(await ({mediarecorder, webcodecs, webrtc}[q.get('mode')](k))); }
+    try { const x = await ({mediarecorder, webcodecs, webrtc, colour}[q.get('mode')](k)); Array.isArray(x) ? r.push(...x) : r.push(x); }
     catch (e) { r.push({codec: k, error: String(e)}); } }
   window.RESULT = r; })();
 </script>'''
@@ -196,6 +235,48 @@ def decoded_recording(path, width, height):
     return info
 
 
+COLOR_SPACE_JS = {'bt601': {'primaries': 'smpte170m', 'transfer': 'smpte170m', 'matrix': 'smpte170m'},
+                  'bt709': {'primaries': 'bt709', 'transfer': 'bt709', 'matrix': 'bt709'}}
+
+
+def colour_controls():
+    import encode_oracle as oracle
+    return [{'name': f'{"full" if full else "limited"}-{matrix}', 'matrix': matrix, 'full': full,
+             'space': {**COLOR_SPACE_JS[matrix], 'fullRange': full},
+             'yuv': [oracle.rgb_to_yuv(rgb, matrix, full) for rgb in oracle.COLOR_BARS]}
+            for matrix in ('bt601', 'bt709') for full in (False, True)]
+
+
+def check_colour_case(case, out, width, height):
+    """Decode a colour case's recording and WebCodecs stream with FFmpeg as signalled."""
+    import encode_oracle as oracle
+    name = case['control']
+    case['full'] = name.startswith('full-')
+    case['streams'] = {}
+    ok = not case.get('error')
+    for kind, suffix in (('recording', '.mp4'), ('annexb', '.h264')):
+        path = out / f'colour-{name}-{kind}{suffix}'
+        path.write_bytes(base64.b64decode(case.pop(kind)))
+        found, worst = oracle.bar_errors(path, width, height)
+        info = {'signalled': oracle.stream_color(path), 'bars': found, 'error': worst}
+        subprocess.run(['ffmpeg', '-v', 'error', '-nostdin', '-y', '-i', str(path), '-vf', 'select=eq(n\\,5)',
+                        '-frames:v', '1', str(path.with_suffix('.png'))], timeout=120, check=False)
+        if case['full'] and kind == 'annexb':
+            # Control: strip the signalling; a full range source must then decode wrong.
+            bare = out / f'colour-{name}-unsignalled.h264'
+            subprocess.run(['ffmpeg', '-v', 'error', '-nostdin', '-y', '-i', str(path), '-c', 'copy', '-bsf:v',
+                            'h264_metadata=video_full_range_flag=0:colour_primaries=2:'
+                            'transfer_characteristics=2:matrix_coefficients=2', str(bare)], timeout=120, check=False)
+            unused, bare_worst = oracle.bar_errors(bare, width, height)
+            info['control_unsignalled_error'] = bare_worst
+            info['control_fails'] = bare_worst is not None and bare_worst > oracle.COLOR_TOLERANCE
+            ok = ok and info['control_fails']
+        info['ok'] = worst is not None and worst <= oracle.COLOR_TOLERANCE
+        ok = ok and info['ok']
+        case['streams'][kind] = info
+    case['picture_ok'] = ok
+
+
 def encoder_sessions(log):
     """Hardware encoder sessions in a termux-va log: (component, pictures in, packets out)."""
     names, sessions = {}, []
@@ -213,10 +294,11 @@ def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument('browser', choices=('chromium', 'chrome', 'firefox'))
     p.add_argument('--out', type=lambda value: Path(value).resolve(), required=True)
-    p.add_argument('--mode', choices=('webrtc', 'mediarecorder', 'webcodecs'), default='webrtc')
+    p.add_argument('--mode', choices=('webrtc', 'mediarecorder', 'webcodecs', 'colour'), default='webrtc')
     p.add_argument('--codec', action='append', help='h264 (default), vp8, vp9 or hevc; repeatable')
     p.add_argument('--expect', choices=('hardware', 'software'), default='hardware')
-    p.add_argument('--size', default='640x360')
+    # Colour mode needs 640x480 or more: smaller MediaRecorder tracks use Chromium's software encoder.
+    p.add_argument('--size', default=None)
     p.add_argument('--firefox-encode', action='store_true',
                    help='experiment with Firefox encoding without changing the installed default')
     p.add_argument('--modules', default=str(Path.home() / '.local/lib/livecd-native'),
@@ -238,6 +320,7 @@ def main():
         env['LIVECD_ENCODE_TEST_BUS'] = '1'
         os.execvpe('dbus-run-session', ['dbus-run-session', '--', sys.executable, *sys.argv], env)
     codecs = args.codec or ['h264']
+    args.size = args.size or ('1280x720' if args.mode == 'colour' else '640x360')
     width, height = (int(value) for value in args.size.split('x'))
     out = args.out
     out.mkdir(parents=True)
@@ -303,7 +386,7 @@ def main():
                                                binary=str(binary), abi='glibc' if args.browser == 'chrome' else 'bionic',
                                                record=str(out / 'argv.json')))
             command.chmod(0o700)
-        page = (PAGE % {'width': width, 'height': height}).encode()
+        page = (PAGE % {'width': width, 'height': height, 'controls': json.dumps(colour_controls())}).encode()
 
         class Page(http.server.BaseHTTPRequestHandler):
             def do_GET(self):
@@ -343,6 +426,10 @@ def main():
         cases = wait(lambda: browser.evaluate('window.RESULT'), 240, 'the page')
         browser.quit()
         for case in cases:
+            if args.mode == 'colour':
+                if 'control' in case:
+                    check_colour_case(case, out, width, height)
+                continue
             if case.get('png'):
                 (out / f'received-{case["codec"]}.png').write_bytes(base64.b64decode(case.pop('png').split(',', 1)[1]))
             if case.get('recording'):

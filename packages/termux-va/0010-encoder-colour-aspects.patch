@@ -1,0 +1,150 @@
+Encoder colour aspects: the client announces the colour of its samples in the
+upper bits of the encoder handshake's transport word (ENC_XFER_COLOR), and the
+daemon passes them to MediaCodec as KEY_COLOR_RANGE/STANDARD/TRANSFER, so the
+encoder's own parameter sets signal them. Old clients send none and keep the
+encoder default; old daemons ignore the bits.
+
+diff --git a/common/tva_protocol.h b/common/tva_protocol.h
+index 0d4a462..f11f81f 100644
+--- a/common/tva_protocol.h
++++ b/common/tva_protocol.h
+@@ -163,6 +163,29 @@ typedef enum {
+ #define ENC_UNIT_FORCE_KEY   0x80000000u
+ #define ENC_UNIT_SET_BITRATE 0x40000000u
+ 
++/* Encoder colour aspects (debian-livecd-termux).  Encoder sessions are always
++ * inline, and daemons before this ignore the handshake's transport word for
++ * them, so its upper bits carry the colour the client's samples are in.  The
++ * values are the H.264/HEVC VUI code points (ITU-T H.273); the daemon passes
++ * them to MediaCodec (KEY_COLOR_RANGE/STANDARD/TRANSFER), whose encoder then
++ * signals them in its own parameter sets:
++ *   bit 31      ENC_XFER_COLOR: the rest of this layout is valid
++ *   bit 30      full range (video_full_range_flag)
++ *   bits 29..22 colour_primaries
++ *   bits 21..14 transfer_characteristics
++ *   bits 13..6  matrix_coefficients
++ *   bits 1..0   the transport (XFER_INLINE). */
++#define ENC_XFER_COLOR       0x80000000u
++#define ENC_XFER_FULL_RANGE  0x40000000u
++#define ENC_XFER_COLOR_BITS(full, primaries, transfer, matrix)                \
++    (ENC_XFER_COLOR | ((full) ? ENC_XFER_FULL_RANGE : 0) |                    \
++     ((uint32_t)((primaries) & 0xff) << 22) |                                \
++     ((uint32_t)((transfer) & 0xff) << 14) | ((uint32_t)((matrix) & 0xff) << 6))
++#define ENC_XFER_PRIMARIES(x) (((x) >> 22) & 0xffu)
++#define ENC_XFER_TRANSFER(x)  (((x) >> 14) & 0xffu)
++#define ENC_XFER_MATRIX(x)    (((x) >> 6) & 0xffu)
++#define ENC_XFER_MODE(x)      ((x) & 0x3u)
++
+ /* Max concurrent decode sessions the daemon accepts (hardware supports 16). */
+ #define MAX_CLIENTS 8
+ 
+diff --git a/daemon/termux-va.c b/daemon/termux-va.c
+index 98a5811..d69ea59 100644
+--- a/daemon/termux-va.c
++++ b/daemon/termux-va.c
+@@ -492,6 +492,7 @@ typedef struct {
+     int              encoder_stride;
+     int              encoder_slice_height;
+     int              avc_profile_verified; /* explicit profile matched an output SPS */
++    uint32_t         enc_color;        /* ENC_XFER_COLOR bits from the handshake, or 0 */
+     int              csd_used;         /* saved parameter sets went out with a packet */
+     int              negotiated;       /* 1 = client completed the handshake */
+ 
+@@ -694,6 +695,12 @@ static int do_handshake(Session *s)
+     uint32_t w     = ntohl(rest[2]);
+     uint32_t h     = ntohl(rest[3]);
+     uint32_t xfer  = ntohl(rest[4]);   /* requested transport, may be downgraded */
++    uint32_t enc_color = 0;
++    /* Encoders take the colour aspects from the transport word's upper bits. */
++    if (codec_is_encoder((int)ntohl(rest[1])) && (xfer & ENC_XFER_COLOR)) {
++        enc_color = xfer;
++        xfer = ENC_XFER_MODE(xfer);
++    }
+     uint32_t bitrate = 0;
+     uint32_t fps_num = 30, fps_den = 1;
+ 
+@@ -763,6 +770,7 @@ static int do_handshake(Session *s)
+     s->bitrate    = bitrate;
+     s->fps_num    = fps_num;
+     s->fps_den    = fps_den;
++    s->enc_color  = enc_color;
+     s->w          = (int)w;
+     s->h          = (int)h;
+     s->negotiated = 1;
+@@ -836,9 +844,9 @@ static int do_handshake(Session *s)
+      * TCP removed the naming is unambiguous: SHM or inline.  The control
+      * transport is always the Unix socket printed by "listening on ...". */
+     if (s->encoder)
+-        dlog(1, "[%d] handshake ok: encoder %s %ux%u transport=%s bitrate=%u fps=%u/%u",
++        dlog(1, "[%d] handshake ok: encoder %s %ux%u transport=%s bitrate=%u fps=%u/%u%s",
+              s->id, mime, w, h, s->xfer == XFER_SHM ? "SHM" : "inline",
+-             s->bitrate, s->fps_num, s->fps_den);
++             s->bitrate, s->fps_num, s->fps_den, s->enc_color ? " colour" : "");
+     else
+         dlog(1, "[%d] handshake ok: decoder %s %ux%u transport=%s",
+              s->id, mime, w, h, s->xfer == XFER_SHM ? "SHM" : "inline");
+@@ -1806,6 +1814,56 @@ static void client_release(void)
+  * on the target have no B-frame requirement when max-bframes=0, so one output
+  * packet is available for each input frame.
+  */
++/* MediaFormat colour values (MediaFormat.COLOR_* and the framework's
++ * ColorUtils, which also accepts sRGB = 2) for H.273 code points.  Zero
++ * leaves a key unset, so the encoder keeps its default for it. */
++static int encoder_color_standard(unsigned primaries, unsigned matrix)
++{
++    switch (matrix) {
++    case 1:  return 1;                          /* BT709 */
++    case 5:  return 2;                          /* BT601_PAL */
++    case 6:  return primaries == 5 ? 2 : 4;     /* BT601_NTSC */
++    case 9:  return 6;                          /* BT2020 */
++    }
++    switch (primaries) {
++    case 1:  return 1;
++    case 5:  return 2;
++    case 6: case 7: return 4;
++    case 9:  return 6;
++    }
++    return 0;
++}
++
++static int encoder_color_transfer(unsigned transfer)
++{
++    switch (transfer) {
++    case 1: case 6: case 14: case 15: return 3; /* SDR_VIDEO (BT.709/601/2020) */
++    case 8:  return 1;                          /* LINEAR */
++    case 13: return 2;                          /* sRGB */
++    case 16: return 6;                          /* ST2084 */
++    case 18: return 7;                          /* HLG */
++    }
++    return 0;
++}
++
++static void encoder_set_color(Session *s, AMediaFormat *fmt)
++{
++    uint32_t c = s->enc_color;
++    if (!(c & ENC_XFER_COLOR))
++        return;
++    int range = (c & ENC_XFER_FULL_RANGE) ? 1 : 2;
++    int standard = encoder_color_standard(ENC_XFER_PRIMARIES(c), ENC_XFER_MATRIX(c));
++    int transfer = encoder_color_transfer(ENC_XFER_TRANSFER(c));
++    AMediaFormat_setInt32(fmt, "color-range", range);
++    if (standard)
++        AMediaFormat_setInt32(fmt, "color-standard", standard);
++    if (transfer)
++        AMediaFormat_setInt32(fmt, "color-transfer", transfer);
++    dlog(1, "[%d] encoder colour: range=%d standard=%d transfer=%d "
++            "(primaries=%u transfer=%u matrix=%u)", s->id, range, standard, transfer,
++         ENC_XFER_PRIMARIES(c), ENC_XFER_TRANSFER(c), ENC_XFER_MATRIX(c));
++}
++
+ static int encoder_avc_profile(int codec_id)
+ {
+     /* MediaCodecInfo.CodecProfileLevel values, also used by FFmpeg. */
+@@ -2295,6 +2353,7 @@ static void *session_thread(void *arg)
+         AMediaFormat_setInt32(enc_fmt, "max-bframes", 0);
+         if (low_latency)
+             AMediaFormat_setInt32(enc_fmt, "low-latency", 1);
++        encoder_set_color(s, enc_fmt);
+         int avc_profile = encoder_avc_profile(s->codec_id);
+         if (avc_profile) {
+             AMediaFormat_setInt32(enc_fmt, "profile", avc_profile);

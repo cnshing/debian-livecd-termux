@@ -22,6 +22,7 @@ import encode_oracle as oracle
 
 HELLO_MAGIC, HELLO_VERSION = 0x444D4400, 3
 FORCE_KEY, SET_BITRATE = 0x80000000, 0x40000000
+XFER_COLOR, XFER_FULL_RANGE = 0x80000000, 0x40000000
 CODECS = {'avc-baseline': (8, 'h264', 66), 'avc-main': (9, 'h264', 77),
           'avc-high': (10, 'h264', 100), 'hevc-main': (6, 'hevc', None)}
 SOFTWARE = ('OMX.google.', 'c2.android.')
@@ -45,11 +46,12 @@ def recv_exact(sock, count):
 
 
 class Session:
-    def __init__(self, endpoint, codec, width, height, bitrate, fps=30):
+    def __init__(self, endpoint, codec, width, height, bitrate, fps=30, color=0):
         self.sock = socket.socket(socket.AF_UNIX)
         self.sock.settimeout(15)
         self.sock.connect(str(endpoint))
-        self.sock.sendall(struct.pack('!9I', HELLO_MAGIC, HELLO_VERSION, codec, width, height, 0,
+        # color: the colour aspects in the transport word (ENC_XFER_COLOR).
+        self.sock.sendall(struct.pack('!9I', HELLO_MAGIC, HELLO_VERSION, codec, width, height, color,
                                       bitrate, fps, 1))
         status, mode, name_len = struct.unpack('!3I', recv_exact(self.sock, 12))
         if status:
@@ -76,8 +78,15 @@ def frames_of(path, size):
     return [data[i:i + size] for i in range(0, len(data), size)]
 
 
-def encode_clip(endpoint, codec, frames, width, height, keys, bitrate=4_000_000, swap=False):
-    session = Session(endpoint, codec, width, height, bitrate)
+def color_word(matrix, full):
+    """The handshake transport word announcing samples in a matrix and range."""
+    primaries, transfer, coefficients = oracle.COLOR_SPACES[matrix]
+    return (XFER_COLOR | (XFER_FULL_RANGE if full else 0) | primaries << 22 | transfer << 14 |
+            coefficients << 6)
+
+
+def encode_clip(endpoint, codec, frames, width, height, keys, bitrate=4_000_000, swap=False, color=0):
+    session = Session(endpoint, codec, width, height, bitrate, color=color)
     packets, flags, times = [], [], []
     try:
         for index, frame in enumerate(frames):
@@ -152,6 +161,8 @@ def run(args, endpoint):
               oracle.summary(scores) + ('; ' + '; '.join(bad[:3]) if bad else ''))
         print(f'  {name}: median round trip {statistics.median(times) * 1000:.1f} ms at {width}x{height}')
 
+    check_color(args, endpoint, width, height)
+
     # Negative controls: the same checks must catch a shifted frame and
     # swapped chroma planes.
     stream = args.out / 'avc-high.h264'
@@ -210,6 +221,35 @@ def run(args, endpoint):
             check(f'{h}p round trip fits a 30 fps frame', median < 1000 / 30, f'median {median:.1f} ms')
         else:
             print(f'  {h}p round trip: median {median:.1f} ms against {1000 / 30:.1f} ms per frame at 30 fps')
+
+
+def check_color(args, endpoint, width, height):
+    """Colour aspects from the handshake must reach the bitstream: each of
+    full/limited BT.601/BT.709 bars decodes to its RGB through the stream's own
+    signalling. Controls: the same samples without the announcement, and with a
+    wrong one, must decode wrong."""
+    for name, codec, kind in (('avc-high', 10, 'h264'), ('hevc-main', 6, 'hevc')):
+        for matrix in ('bt601', 'bt709'):
+            for full in (False, True):
+                label = f'{name} {"full" if full else "limited"} {matrix}'
+                frames = [oracle.color_bars_nv12(width, height, matrix, full)] * 10
+                packets, unused, unused = encode_clip(endpoint, codec, frames, width, height, {0},
+                                                      color=color_word(matrix, full))
+                stream = args.out / f'color-{name}-{"full" if full else "limited"}-{matrix}.{kind}'
+                stream.write_bytes(b''.join(packets))
+                signalled = oracle.stream_color(stream)
+                found, worst = oracle.bar_errors(stream, width, height)
+                check(f'{label}: signalled and decoded colour', worst is not None and
+                      worst <= oracle.COLOR_TOLERANCE, f'{signalled}, bars {found}, error {worst}')
+        frames = [oracle.color_bars_nv12(width, height, 'bt709', True)] * 10
+        for control, color in (('no announcement', 0), ('limited BT.601 announced', color_word('bt601', False))):
+            packets, unused, unused = encode_clip(endpoint, codec, frames, width, height, {0}, color=color)
+            stream = args.out / f'color-{name}-control-{color:x}.{kind}'
+            stream.write_bytes(b''.join(packets))
+            found, worst = oracle.bar_errors(stream, width, height)
+            check(f'control: {name} full BT.709 samples with {control} decode wrong',
+                  worst is not None and worst > oracle.COLOR_TOLERANCE,
+                  f'{oracle.stream_color(stream)}, error {worst}')
 
 
 if __name__ == '__main__':

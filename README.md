@@ -109,7 +109,8 @@ in Files. See [session integrations](docs/native/README.md#session-integrations)
 Samsung Android 11 ARM64 devices also receive
 [`android-legacy-dex-fullscreen`](packages/android-legacy-dex-fullscreen/README.md),
 which makes the existing Termux:X11 fullscreen preference hide the DeX title bar.
-It requires a debuggable Termux:X11 build and Shizuku; the APK stays unchanged.
+It uses Shizuku to control the existing window; no debuggable build, APK patch, or
+additional Android app is required.
 
 ### Optional applications
 

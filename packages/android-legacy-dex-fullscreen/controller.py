@@ -1,11 +1,12 @@
 #!/data/data/com.termux/files/usr/bin/python
-"""Attach a preference-following DeX caption helper to debuggable Termux:X11."""
+"""Control the focused Termux:X11 DeX window through shell Binder APIs."""
 import argparse
 import base64
 import fcntl
 import hashlib
 import json
 import os
+import re
 from pathlib import Path
 import shlex
 import signal
@@ -17,8 +18,8 @@ NAME = 'android-legacy-dex-fullscreen'
 PREFIX = Path(os.environ.get('PREFIX', '/data/data/com.termux/files/usr'))
 FILES = PREFIX / 'libexec' / NAME
 STATE = Path.home() / '.local/state' / NAME
-APP = 'com.termux.x11'
-APPDIR = f'/data/user/0/{APP}/files/{NAME}'
+REMOTE_PREFIX = f'/data/local/tmp/{NAME}.'
+HELPER_CLASS = 'org.livecd.dexfullscreen.Helper'
 
 
 def identity(pid):
@@ -69,77 +70,107 @@ def record(output):
 
 
 def guard():
-    return f'''set -eu
-[ "$(id -u)" = 2000 ] || {{ echo 'Shizuku must run as Android shell UID 2000' >&2; exit 1; }}
-run-as {APP} id >/dev/null || {{ echo 'Termux:X11 must be debuggable; its APK will not be changed' >&2; exit 1; }}
-'''
+    return """set -eu
+[ "$(id -u)" = 2000 ] || { echo 'Shizuku must run as Android shell UID 2000' >&2; exit 1; }
+"""
 
 
-def payload_id():
-    return hashlib.sha256((FILES / 'libdexfullscreen.so').read_bytes()
-                          + (FILES / 'helper.dex').read_bytes()).hexdigest()[:20]
+def remote_path(directory):
+    if not isinstance(directory, str) or not re.fullmatch(re.escape(REMOTE_PREFIX) + r'[A-Za-z0-9]+', directory):
+        raise ValueError('Invalid remote helper session directory')
+    return shlex.quote(directory)
 
 
 def staging():
-    """Embed public payload bytes: rish variants may lose piped stdin."""
-    parts = [guard(), f'run-as {APP} mkdir -p files/{NAME}/{payload_id()} code_cache\n']
-    for source, name in [('libdexfullscreen.so', 'libdexfullscreen.so'), ('helper.dex', 'helper.dex')]:
-        data = (FILES / source).read_bytes()
-        encoded = base64.b64encode(data).decode()
-        digest = hashlib.sha256(data).hexdigest()
-        parts.append(f'''base64 -d <<'DEX_PAYLOAD' | run-as {APP} sh -c 'cat > files/{NAME}/{payload_id()}/{name}.new'
+    """Only public DEX bytes cross rish; no app-private access or attachment."""
+    data = (FILES / 'helper.dex').read_bytes()
+    encoded = base64.b64encode(data).decode()
+    digest = hashlib.sha256(data).hexdigest()
+    return guard() + f'''umask 077
+directory=$(mktemp -d {REMOTE_PREFIX}XXXXXXXX)
+trap 'rm -rf "$directory"' EXIT
+base64 -d > "$directory/helper.dex" <<'DEX_PAYLOAD'
 {encoded}
 DEX_PAYLOAD
-actual=$(run-as {APP} sha256sum files/{NAME}/{payload_id()}/{name}.new)
-[ "${{actual%% *}}" = {shlex.quote(digest)} ] || {{ echo 'Helper checksum mismatch' >&2; exit 1; }}
-run-as {APP} chmod 444 files/{NAME}/{payload_id()}/{name}.new
-run-as {APP} mv files/{NAME}/{payload_id()}/{name}.new files/{NAME}/{payload_id()}/{name}
+actual=$(sha256sum "$directory/helper.dex")
+[ "${{actual%% *}}" = {digest} ] || {{ echo 'Helper checksum mismatch' >&2; exit 1; }}
+chmod 444 "$directory/helper.dex"
+touch "$directory/lease"
+printf '{{"pid":0,"phase":"staged","directory":"%s"}}\\n' "$directory"
+trap - EXIT
+'''
+
+
+def stage():
+    data = record(shell(staging()))
+    remote_path(data.get('directory'))
+    return data['directory']
+
+
+def launch(directory):
+    path = remote_path(directory)
+    shell(guard() + f'''touch {path}/lease
+CLASSPATH={path}/helper.dex app_process / {HELPER_CLASS} spawn {path}
 ''')
-    return ''.join(parts)
 
 
-def probe():
-    output = shell(guard() + f'''printf 'DEXPID=%s\\n' "$(pidof {APP} || true)"
-run-as {APP} cat files/{NAME}/status.json 2>/dev/null || true
+def probe(directory):
+    path = remote_path(directory)
+    output = shell(guard() + f'''touch {path}/lease
+if test -f {path}/status.json; then
+    if grep -q '\"phase\":\"running\"' {path}/status.json; then
+        pid=$(sed -n 's/.*"pid":\\([0-9][0-9]*\\).*/\\1/p' {path}/status.json)
+        birth=$(sed -n 's/.*"start":"\\([0-9][0-9]*\\)".*/\\1/p' {path}/status.json)
+        proc=$(cat /proc/$pid/stat 2>/dev/null || true)
+        proc=${{proc##*) }}
+        set -- $proc
+        if [ -z "$birth" ] || [ "$#" -lt 20 ] || [ "${{1:-Z}}" = Z ] || [ "${{20:-}}" != "$birth" ]; then
+            printf '{{"pid":0,"phase":"failed","detail":"shell-helper-exited"}}\\n'
+            exit 0
+        fi
+    fi
+    cat {path}/status.json
+else
+    printf '{{"pid":0,"phase":"starting"}}\\n'
+fi
 ''')
-    pid = None
-    for line in output.splitlines():
-        if line.startswith('DEXPID='):
-            value = line.partition('=')[2].strip()
-            if value:
-                if not value.isdigit():
-                    raise RuntimeError('Ambiguous Termux:X11 process ID')
-                pid = int(value)
-    try:
-        status = record(output)
-    except RuntimeError:
-        status = None
-    return pid, status
+    return record(output)
 
 
-def attach(pid):
-    if not isinstance(pid, int) or pid <= 0:
-        raise ValueError('Invalid app PID')
-    payload = f'{APPDIR}/{payload_id()}'
-    output = shell(guard() + f'''run-as {APP} touch files/{NAME}/stop
-sleep 0.4
-run-as {APP} rm -f files/{NAME}/stop files/{NAME}/status.json
-am attach-agent {pid} {payload}/libdexfullscreen.so={payload}/helper.dex
-for attempt in 1 2 3 4 5 6 7 8 9 10; do
-    if run-as {APP} test -f files/{NAME}/status.json; then break; fi
-    sleep 0.1
+def detach(directory):
+    path = remote_path(directory)
+    output = shell(guard() + f'''if ! test -d {path}; then
+    printf '{{"pid":0,"phase":"stopped"}}\\n'
+    exit 0
+fi
+touch {path}/stop
+for attempt in $(seq 1 40); do
+    if test -f {path}/status.json && grep -q '\"phase\":\"stopped\"' {path}/status.json; then
+        cat {path}/status.json
+        rm -rf {path}
+        exit 0
+    fi
+    sleep 0.25
 done
-run-as {APP} cat files/{NAME}/status.json
-''')
+cat {path}/status.json 2>/dev/null || true
+tail -c 2000 {path}/helper.log >&2 || true
+exit 1
+''', timeout=13)
     status = record(output)
-    if status['pid'] != pid or status['phase'] != 'running':
-        raise RuntimeError('Runtime helper refused this app/framework: ' + json.dumps(status))
-    return status
+    if status['phase'] != 'stopped':
+        raise RuntimeError('Window restoration did not finish: ' + json.dumps(status))
 
 
-def detach():
-    # Files and loaded agent stay available for a later start; scheduled work stops.
-    shell(guard() + f'run-as {APP} touch files/{NAME}/stop\n', timeout=4)
+def check():
+    directory = stage()
+    path = remote_path(directory)
+    try:
+        status = record(shell(guard() + f'CLASSPATH={path}/helper.dex app_process / {HELPER_CLASS} check\n', timeout=12))
+        if status['phase'] != 'checked':
+            raise RuntimeError('Window Binder capability check failed')
+        return status
+    finally:
+        shell(guard() + f'rm -rf {path}\n')
 
 
 def write_state(data):
@@ -168,23 +199,26 @@ def run():
         signal.signal(signal.SIGINT, stop)
         data = {'pid': os.getpid(), 'start': identity(os.getpid())[1], 'phase': 'starting'}
         write_state(data)
-        attached = None
+        directory = None
         try:
-            shell(staging())
+            directory = stage()
+            data['shell_dir'] = directory
+            write_state(data)
+            launch(directory)
+            deadline = time.monotonic() + 15
             while not stopping:
-                pid, current = probe()
-                if pid is not None and pid != attached:
-                    current = attach(pid)
-                    attached = pid
-                if pid is None:
-                    attached = None
-                    current = {'phase': 'waiting-for-termux-x11', 'active': False}
-                elif current is None or current.get('pid') != pid or current.get('phase') != 'running':
-                    raise RuntimeError('Attached helper stopped: ' + json.dumps(current))
-                data.update(phase='ready', helper=current, app_pid=pid)
+                current = probe(directory)
+                if current['phase'] == 'starting' and time.monotonic() < deadline:
+                    time.sleep(0.2)
+                    continue
+                if current['phase'] != 'running':
+                    path = remote_path(directory)
+                    detail = shell(guard() + f'tail -c 2000 {path}/helper.log\n')
+                    raise RuntimeError('Window Binder helper stopped: ' + json.dumps(current) + '\n' + detail)
+                data.update(phase='ready', helper=current)
                 write_state(data)
-                # Only PID/restart supervision crosses Shizuku; the UI helper runs in-app.
-                for _ in range(50):
+                # The shell helper handles focus/window changes. Renew its lease every 3 s.
+                for _ in range(30):
                     if stopping:
                         break
                     time.sleep(0.1)
@@ -193,13 +227,17 @@ def run():
             write_state(data)
             raise
         finally:
-            if attached is not None:
+            restored = True
+            if directory is not None:
                 try:
-                    detach()
-                except (OSError, RuntimeError, subprocess.SubprocessError) as error:
-                    print('Could not request helper shutdown: ' + str(error), file=sys.stderr)
-            if data['phase'] != 'failed':
-                data['phase'] = 'stopped'
+                    detach(directory)
+                except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as error:
+                    restored = False
+                    data.update(phase='failed', error='Window restoration unconfirmed: ' + str(error))
+                    write_state(data)
+                    print(data['error'], file=sys.stderr)
+            if data['phase'] != 'failed' and restored:
+                data.update(phase='stopped', helper={'phase': 'stopped', 'active': False})
                 write_state(data)
 
 
@@ -223,21 +261,35 @@ def start():
             raise RuntimeError('DeX fullscreen helper failed; see ' + str(STATE / 'controller.log'))
         time.sleep(0.1)
     process.terminate()
-    raise RuntimeError('Timed out attaching DeX fullscreen helper; see ' + str(STATE / 'controller.log'))
+    raise RuntimeError('Timed out starting DeX fullscreen helper; see ' + str(STATE / 'controller.log'))
 
 
 def stop():
     data = owner()
     if data:
         os.kill(data['pid'], signal.SIGTERM)
-        deadline = time.monotonic() + 13
+        deadline = time.monotonic() + 28
         while owner() and time.monotonic() < deadline:
             time.sleep(0.1)
         if owner():
             raise RuntimeError('Controller shutdown did not finish; check controller.log')
     else:
-        # Also allow stopping an agent whose supervisor was killed.
-        detach()
+        # A killed supervisor leaves its directory for explicit cleanup; the lease also expires.
+        try:
+            previous = json.loads((STATE / 'session.json').read_text())
+        except (OSError, ValueError):
+            previous = {}
+        if previous.get('shell_dir'):
+            detach(previous['shell_dir'])
+            previous.update(phase='stopped', helper={'phase': 'stopped', 'active': False})
+            previous.pop('error', None)
+            write_state(previous)
+    try:
+        final = json.loads((STATE / 'session.json').read_text())
+    except (OSError, ValueError):
+        final = {}
+    if final.get('phase') == 'failed':
+        raise RuntimeError(final.get('error', 'Window restoration unconfirmed'))
     print(json.dumps({'phase': 'stopped'}))
 
 
@@ -249,10 +301,21 @@ def main():
         if args.command == 'check':
             if not supported():
                 return 1
-            shell(guard())
-            print(json.dumps({'supported': True}))
+            current = owner()
+            print(json.dumps({'supported': True, 'helper': current.get('helper')
+                              if current and current['phase'] == 'ready' else check()}))
         elif args.command == 'status':
-            print(json.dumps(owner() or {'phase': 'stopped'}))
+            data = owner()
+            if data is None:
+                try:
+                    previous = json.loads((STATE / 'session.json').read_text())
+                except (OSError, ValueError):
+                    previous = {}
+                if previous.get('phase') == 'failed':
+                    data = previous
+                elif previous.get('phase') in ('ready', 'starting'):
+                    data = {'phase': 'controller-not-running', 'detail': 'Shell helper lease expires within 15 seconds'}
+            print(json.dumps(data or {'phase': 'stopped'}))
         else:
             globals()[args.command]()
         return 0

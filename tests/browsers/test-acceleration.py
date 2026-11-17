@@ -61,6 +61,16 @@ def gpu_processes(tag, expected_driver):
     for pid in probe.tagged(tag):
         try:
             record = process_gpu(pid)
+            if expected_driver == 'virgl':
+                # The owned VirGL server holds the Mali device; mpv is its
+                # client and therefore does not map PanVK or open /dev/mali0.
+                proc = Path('/proc') / str(pid)
+                command = (proc / 'cmdline').read_bytes().split(b'\0')[0]
+                libraries = sorted({line.split()[-1] for line in
+                    (proc / 'maps').read_text().splitlines() if 'libGLES_mali.so' in line})
+                if (Path(os.fsdecode(command)).name == 'virgl_test_server_android'
+                        and record['mali_devices'] and libraries):
+                    record.update(driver='virgl', libraries=libraries)
             if record['driver'] == expected_driver:
                 found.append(record)
         except (OSError, ValueError, UnicodeError):
@@ -111,7 +121,9 @@ def worker(args):
               'decoder_expectation': 'software' if args.expect_software else 'hardware',
               'display': os.environ['DISPLAY'], 'started': False,
               'hardware_verified': False, 'ok': False, 'command': sys.argv}
-    result['expected_gpu_driver'] = zink_driver()
+    from mali import available as mali_available
+    result['expected_gpu_driver'] = ('virgl' if args.application == 'mpv' and mali_available()
+                                     else zink_driver())
     browser = ipc = server = None
     code = 1
     try:
@@ -220,6 +232,11 @@ def worker(args):
             if not components or any(c.lower().startswith(('omx.google.', 'c2.android.')) for c in components):
                 raise RuntimeError('mpv did not identify an Android hardware codec component')
             result['android_codecs'] = components
+            if result['expected_gpu_driver'] == 'virgl':
+                renderer = re.search(r"GL_RENDERER='([^']+)'", log)
+                result['gl_renderer'] = renderer.group(1) if renderer else None
+                if not renderer or not re.search(r'virgl.*Mali', renderer.group(1), re.I):
+                    raise RuntimeError('mpv did not render through VirGL on Mali')
             ipc.call('screenshot-to-file', str(args.out / 'video.png'), 'video')
             box = {'left': 0, 'top': 0, 'width': selected['width'], 'height': selected['height']}
         result['pixels'] = compare(args.out / 'video.png', box, args.fixtures, selected,

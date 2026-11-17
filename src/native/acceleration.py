@@ -313,8 +313,8 @@ def firefox_preferences(profile, gpu, video, encode=False):
             # Adreno 640 with tests/browsers/test-web-graphics.py (render, compute, presentation).
             values.update({'dom.webgpu.enabled': True, 'gfx.webgpu.ignore-blocklist': True})
         if encode:
-            # One preference gates WebCodecs and WebRTC hardware encoding. Opt-in only
-            # (firefox_encode in acceleration.json): see docs/native/handoff/encode-firefox.md.
+            # One preference gates WebCodecs and WebRTC hardware encoding; the policy is
+            # firefox_encode_ready(). See docs/native/handoff/encode-firefox.md.
             values['media.use-remote-encoder.video.platform'] = True
         block = '\n'.join(f'user_pref({json.dumps(key)}, {json.dumps(value)});' for key, value in values.items())
         temporary = path.with_name('user.js.livecd-next')
@@ -365,9 +365,45 @@ def firefox_video_runtime():
     return None, reason
 
 
-def firefox_encode_ready():
-    """Whether the user opted in and the installed runtime carries the encoders."""
-    if settings().get('firefox_encode') is not True:
+def installed_version(package):
+    """(upstream version tuple, Debian revision) of an installed package, or None."""
+    try:
+        status = DPKG_STATUS.read_text(errors='replace')
+    except OSError:
+        return None
+    for entry in status.split('\n\n'):
+        fields = dict(line.split(': ', 1) for line in entry.splitlines() if ': ' in line and not line.startswith(' '))
+        if fields.get('Package') == package and 'installed' in fields.get('Status', '').split():
+            match = re.fullmatch(r'(?:\d+:)?([\d.]+)(?:-(\d+))?', fields.get('Version', ''))
+            return (tuple(int(part) for part in match.group(1).split('.')), int(match.group(2) or 0)) if match else None
+    return None
+
+
+def hardware_h264_encoder(socket):
+    """Whether the termux-va daemon at this socket listed a hardware H.264 encoder."""
+    try:
+        return any(line.split()[:1] == ['video/avc']
+                   for line in Path(str(socket) + '.encoders').read_text().splitlines())
+    except (OSError, TypeError):
+        return False
+
+
+def firefox_encode_ready(socket=None):
+    """Whether Firefox's hardware encoding (WebRTC and WebCodecs) is on.
+
+    Adreno: on by default when the session's daemon lists a hardware H.264 encoder and
+    android-firefox-video is revision 7 or later. That runtime is built beside a Firefox
+    with the WebRTC bitrate fix (packages/firefox 1103), and firefox_video_runtime() checks
+    that this very Firefox is installed. "firefox_encode": false turns it off.
+    Mali: opt-in only ("firefox_encode": true), as qualified on the S20; not re-qualified.
+    """
+    choice = settings().get('firefox_encode')
+    if mali_usable():
+        if choice is not True:
+            return False
+    elif choice is False or not os.path.exists('/dev/kgsl-3d0') or not hardware_h264_encoder(socket):
+        return False
+    elif choice is not True and (installed_version('android-firefox-video') or ((), 0)) < ((9, 0, 2), 7):
         return False
     runtime, _ = firefox_video_runtime()
     try:
@@ -389,22 +425,10 @@ def chromium_encodes_webcodecs():
     and revision 3 lets VA-API upload them (NV12). Earlier builds crash or fail every frame,
     so AcceleratedVideoEncoder stays off for them. The package receipt has no revision field.
     """
-    try:
-        status = DPKG_STATUS.read_text(errors='replace')
-    except OSError:
-        return False
-    for entry in status.split('\n\n'):
-        fields = dict(line.split(': ', 1) for line in entry.splitlines() if ': ' in line and not line.startswith(' '))
-        if fields.get('Package') == 'chromium' and 'installed' in fields.get('Status', '').split():
-            match = re.fullmatch(r'(?:\d+:)?([\d.]+)(?:-(\d+))?', fields.get('Version', ''))
-            if not match:
-                return False
-            version = tuple(int(part) for part in match.group(1).split('.'))
-            return (version, int(match.group(2) or 0)) >= ((156, 0, 8078, 79), 3)
-    return False
+    return (installed_version('chromium') or ((), 0)) >= ((156, 0, 8078, 79), 3)
 
 
-def command_line(profile, command, abi, video, gpu, mali=False, own_driver=False):
+def command_line(profile, command, abi, video, gpu, mali=False, own_driver=False, firefox_encode=False):
     flags = []
     if profile in BROWSERS:
         flags = (['--use-gl=angle', '--use-angle=vulkan', '--ignore-gpu-blocklist',
@@ -434,7 +458,7 @@ def command_line(profile, command, abi, video, gpu, mali=False, own_driver=False
             flags.append('--user-data-dir=' + str(Path.home() / '.config/livecd-native' / name))
     elif profile == 'firefox' and not any(arg in ('--profile', '-profile', '-P') or arg.startswith('--profile=') for arg in command[1:]):
         owned = Path.home() / '.config/livecd-native/firefox'
-        firefox_preferences(owned, gpu, video, encode=bool(video) and mali_usable() and firefox_encode_ready())
+        firefox_preferences(owned, gpu, video, encode=bool(video) and firefox_encode)
         flags = ['--profile', str(owned)]
     elif profile == 'mpv':
         flags = (['--vo=gpu-next', '--gpu-api=opengl', '--gpu-context=x11egl', '--opengl-es=yes']
@@ -574,7 +598,9 @@ def prepare(profile, command, abi, video_override):
         # Last, so no earlier library path or ICD choice overrides it.
         use_panvk(env, abi)
     own_driver = bool(video and selected and source_built_driver(profile, abi, selected[1], mali_usable()))
-    argv = command_line(profile, command, abi, video, gpu, mali=mali, own_driver=own_driver)
+    firefox_encode = bool(profile == 'firefox' and video and firefox_encode_ready(env.get('TERMUX_VA_SOCKET')))
+    argv = command_line(profile, command, abi, video, gpu, mali=mali, own_driver=own_driver,
+                        firefox_encode=firefox_encode)
     if mali:
         argv[:0] = [sys.executable, str(Path(__file__).with_name('mali.py'))]
     if abi == 'glibc':

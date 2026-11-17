@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """Device qualification, Binder lifecycle, and reversible window policy checks."""
 import importlib.util
+import contextlib
+import io
+import sys
 import json
 import os
 from pathlib import Path
@@ -40,6 +43,58 @@ esac
                     result = subprocess.run(['sh', str(PACKAGE / 'device.sh')], env={**os.environ,
                         'ANDROID_LEGACY_DEX_GETPROP': str(getprop), 'MANUFACTURER': vendor, 'SDK': sdk, 'ABI': abi})
                     self.assertEqual(result.returncode == 0, accepted)
+
+    def test_actual_installer_adds_the_package_only_for_matching_hardware(self):
+        source = (ROOT / 'install.sh').read_text()
+        first = source.index('mapfile -t packages < "$repo/src/native/packages.txt"')
+        last = source.index('"${apt[@]}" install --no-install-recommends "${packages[@]}"', first)
+        snippet = source[first:last] + '"${apt[@]}" install --no-install-recommends "${packages[@]}"\n'
+        with tempfile.TemporaryDirectory() as directory:
+            getprop = Path(directory) / 'getprop'
+            getprop.write_text('#!/bin/sh\ncase $1 in\nro.product.manufacturer) echo "$VENDOR";;\n'
+                              'ro.build.version.sdk) echo "$SDK";;\nro.product.cpu.abi) echo "$ABI";;\nesac\n')
+            getprop.chmod(0o755)
+            for vendor, sdk, abi, expected in [
+                ('samsung', '30', 'arm64-v8a', True), ('SAMSUNG', '30', 'arm64-v8a', True),
+                ('samsung', '29', 'arm64-v8a', False), ('samsung', '31', 'arm64-v8a', False),
+                ('samsung', '33', 'arm64-v8a', False), ('samsung', '34', 'arm64-v8a', False),
+                ('samsung', '35', 'arm64-v8a', False), ('google', '30', 'arm64-v8a', False),
+                ('samsung', '30', 'armeabi-v7a', False), ('', '', '', False),
+            ]:
+                with self.subTest(vendor=vendor, sdk=sdk, abi=abi):
+                    command = 'repo=' + shlex.quote(str(ROOT)) + '\napt=(capture)\ncapture() { printf "%s\\n" "$@"; }\n' + snippet
+                    result = subprocess.run(['bash', '-eu', '-c', command], check=True, capture_output=True, text=True,
+                        env={**os.environ, 'ANDROID_LEGACY_DEX_GETPROP': str(getprop),
+                             'VENDOR': vendor, 'SDK': sdk, 'ABI': abi})
+                    arguments = result.stdout.splitlines()
+                    self.assertEqual(arguments[:2], ['install', '--no-install-recommends'])
+                    self.assertEqual(arguments.count(controller.NAME), int(expected))
+
+    def test_installed_cli_is_inert_on_android13_and_later_even_with_stale_state(self):
+        with tempfile.TemporaryDirectory() as directory:
+            directory = Path(directory)
+            getprop = directory / 'getprop'
+            getprop.write_text('#!/bin/sh\ncase $1 in\nro.product.manufacturer) echo samsung;;\n'
+                              'ro.build.version.sdk) echo "$TEST_SDK";;\nro.product.cpu.abi) echo arm64-v8a;;\nesac\n')
+            getprop.chmod(0o755)
+            real_run = subprocess.run
+            def local_gate_only(arguments, **kwargs):
+                self.assertEqual(arguments, ['/system/bin/sh', str(PACKAGE / 'device.sh')])
+                return real_run(['sh', str(PACKAGE / 'device.sh')], **kwargs)
+            for sdk in ['33', '34', '35', '36']:
+                for command in ['check', 'start', 'run', 'stop', 'status']:
+                    with self.subTest(sdk=sdk, command=command), \
+                         mock.patch.dict(os.environ, {'ANDROID_LEGACY_DEX_GETPROP': str(getprop), 'TEST_SDK': sdk}), \
+                         mock.patch.object(controller, 'FILES', PACKAGE), \
+                         mock.patch.object(controller, 'STATE', directory / 'must-not-be-created'), \
+                         mock.patch.object(controller.subprocess, 'run', side_effect=local_gate_only), \
+                         mock.patch.object(controller, 'owner', side_effect=AssertionError('Read stale state')), \
+                         mock.patch.object(controller, 'shell', side_effect=AssertionError('Called Shizuku')), \
+                         mock.patch.object(sys, 'argv', ['controller', command]), \
+                         contextlib.redirect_stdout(io.StringIO()) as output:
+                        self.assertEqual(controller.main(), 0)
+                        self.assertEqual(json.loads(output.getvalue())['phase'], 'unsupported')
+                    self.assertFalse((directory / 'must-not-be-created').exists())
 
     def test_shell_permission_is_required_but_debuggable_is_not(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -10,7 +10,11 @@ Termux:X11 build. It does not attach an agent or access the app's private files.
 The runtime enforces the same gate and shell UID 2000. Verified on Note10+
 SM-N975U1, firmware N975U1UES7FUI5. Hidden Android interfaces and Samsung's window
 dump format vary across firmware; other builds remain unverified and unsupported
-layouts are refused.
+layouts are refused. If manually installed on Android 13+ (or any other unsupported
+platform), every command exits successfully with `phase: unsupported`, without
+starting Shizuku, creating controller state, or modifying windows. The same gate
+runs before cleanup commands, so a stale session record cannot activate it after
+an OS upgrade.
 
 Requirements:
 

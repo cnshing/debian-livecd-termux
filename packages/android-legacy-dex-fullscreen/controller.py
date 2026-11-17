@@ -298,9 +298,13 @@ def main():
     parser.add_argument('command', choices=['check', 'start', 'run', 'stop', 'status'])
     args = parser.parse_args()
     try:
+        # An installed package must remain inert after an OS upgrade or on a newer device.
+        # Do this before reading old sessions, launching rish, or creating any state.
+        if not supported():
+            print(json.dumps({'supported': False, 'phase': 'unsupported', 'active': False,
+                              'detail': 'Requires Samsung Android 11 ARM64'}))
+            return 0
         if args.command == 'check':
-            if not supported():
-                return 1
             current = owner()
             print(json.dumps({'supported': True, 'helper': current.get('helper')
                               if current and current['phase'] == 'ready' else check()}))

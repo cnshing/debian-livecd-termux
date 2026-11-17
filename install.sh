@@ -136,8 +136,8 @@ apt-get update
 # An on-device UPower build holds upower, which would stop android-upower replacing it.
 if dpkg -s upower >/dev/null 2>&1; then apt-mark unhold upower; fi
 mapfile -t packages < "$repo/src/native/packages.txt"
-# Legacy Samsung DeX needs app-local legacy flags in addition to insets requests.
-# The package checks Shizuku and the app's debuggable flag at runtime; no APK is replaced.
+# Samsung Android 11 DeX needs legacy window flags in addition to insets requests.
+# The package uses shell Binder APIs through Shizuku; no APK patch/debuggable build is needed.
 if sh "$repo/packages/android-legacy-dex-fullscreen/device.sh"; then
     packages+=(android-legacy-dex-fullscreen)
 fi

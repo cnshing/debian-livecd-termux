@@ -23,6 +23,23 @@ Mali retains its existing opt-in policy. The tests use synthetic input, a
 private display, bus, profile and daemon; no camera is opened.
 See [the dated report](../ADRENO-640-PARITY.md).
 
+The earlier x1s fix is already present in this test build: commit `675ee1c`
+adds Firefox's `1102-vaapi-bitrate-reconfigure.patch` and the private FFmpeg's
+`0103-follow-caller-bitrate.patch` (android-firefox-video revision 6). Those
+fix the refusal to change the initial target and forward the new target
+between pictures. The logged daemon update confirms that forwarding worked
+on the Note10+. Chromium's separate `bitrateMode: "constant"` requirement
+selects a rate-control mode; it does not require the target to remain fixed.
+
+The regression added in `b7ed860` measures bytes returned immediately after
+submitting the bitrate change. It does not partition packets by output PTS
+or allow a settling interval. The older `test-daemon.py` deliberately skips
+15 pictures after its change before measuring. Buffered output and encoder
+convergence therefore need separating from an ignored update. The 1.151 Mb/s
+result is a failed short-window acceptance check, not proof that the prior
+x1s bug recurred or that Qualcomm cannot change bitrate. Keep encoding off
+until a longer timestamp-aligned check qualifies the response.
+
 The private harness initially hung with the session resource preload. Like
 `test-acceleration.py`, it now sets `ANDROID_PROCFS_COMPAT=0` before constructing
 its private desktop environment. It retains the render-node preload needed

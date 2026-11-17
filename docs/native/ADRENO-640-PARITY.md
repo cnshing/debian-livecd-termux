@@ -151,6 +151,11 @@ at 1.974–2.035 Mb/s for 2 Mb/s. **It failed the midstream bitrate decrease:**
 the remaining 60 pictures averaged 1.151 Mb/s for a 500 kb/s request. The
 daemon received 499995 b/s and reported no MediaCodec rejection. Therefore
 the proposed default was not shipped; Mali's existing opt-in remains intact.
+The earlier x1s reconfiguration fixes (`675ee1c`) were already included.
+This test measures immediately after submission without aligning output
+packet timestamps or allowing convergence, whereas the older daemon test
+skips 15 pictures after a target change. The result does not establish an
+ignored bitrate update; a longer timestamp-aligned trace is still needed.
 See [Firefox handoff](handoff/encode-firefox.md).
 
 Chromium's MediaRecorder did invoke Qualcomm's AVC encoder at 1280x720, but
@@ -204,8 +209,8 @@ by that route; copying a library alone does not qualify OpenCL.
 
 Complete driver work is still required for VP8 and preserved 10-bit/HDR.
 The [implementation handoff](handoff/note10-codec-parity.md) identifies the
-frontend, protocol and buffer changes. Firefox rate control and Chromium
-MediaRecorder colour metadata need fixing and rerunning. High-resolution
+frontend, protocol and buffer changes. Firefox rate control needs further
+qualification; Chromium MediaRecorder colour metadata needs fixing and rerunning. High-resolution
 throughput, OpenCL, WebGPU and stock-only graphics extensions remain gaps or
 unqualified paths; no defaults were changed for those rows.
 

@@ -290,5 +290,23 @@ class PanVKBrowsers(unittest.TestCase):
         self.assertIn('--disable-gpu', argv)
 
 
+
+class FirefoxWebGPUTest(unittest.TestCase):
+    def prefs(self, kgsl, mali, gpu=True):
+        import tempfile
+        with tempfile.TemporaryDirectory() as folder, \
+                mock.patch.object(acceleration.os.path, 'exists', side_effect=lambda p: kgsl if p == '/dev/kgsl-3d0' else os.path.lexists(p)), \
+                mock.patch.object(acceleration, 'mali_usable', return_value=mali), \
+                mock.patch.object(acceleration, 'ICD', mock.Mock(is_file=lambda: True)):
+            acceleration.firefox_preferences(Path(folder), gpu, False)
+            return (Path(folder) / 'user.js').read_text()
+
+    def test_adreno_turns_webgpu_on(self):
+        self.assertIn('"dom.webgpu.enabled", true', self.prefs(True, False))
+
+    def test_mali_and_software_keep_firefox_default(self):
+        self.assertNotIn('webgpu', self.prefs(False, True))
+        self.assertNotIn('webgpu', self.prefs(True, False, gpu=False))
+
 if __name__ == '__main__':
     unittest.main()

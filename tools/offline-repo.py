@@ -37,6 +37,8 @@ HOOK_SCRIPTS = ['hooks/termux/*', 'browsers/install.sh']
 # them: Turnip at the installed Mesa's own version, and vulkan-tools.
 TURNIP = ('mesa-vulkan-icd-freedreno', 'mesa')
 DOWNLOADED = ['vulkan-tools']
+# install.sh adds these on Adreno phones (/dev/kgsl-3d0): OpenCL through clvk on Turnip.
+ADRENO = ['ocl-icd', 'clvk', 'clinfo']
 
 
 def listed(path):
@@ -133,7 +135,7 @@ def main():
     livecd = index_field(next(lists.glob('*_dists_livecd_main_binary-aarch64_Packages')), 'Package')
     overlays = ROOT / 'overlays'
     default = listed(overlays / 'termux.yaml')
-    first = [*bootstrap(termux), *essential, 'x11-repo', *(ROOT / 'src/native/packages.txt').read_text().split()]
+    first = [*bootstrap(termux), *essential, 'x11-repo', *(ROOT / 'src/native/packages.txt').read_text().split(), *ADRENO]
     for name in default:
         first += listed(overlays / name / 'packages/termux.yaml') + hook_packages(overlays / name)
     first = list(dict.fromkeys(first))

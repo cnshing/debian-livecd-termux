@@ -189,9 +189,8 @@ it maps `libvulkan_freedreno.so` and holds `/dev/kgsl-3d0`.
 | Qualcomm render-pass extensions | Stock-only `VK_QCOM_render_pass_store_ops`, `VK_QCOM_render_pass_transform`; not supplied by launcher changes |
 | Protected graphics | Stock protectedMemory true; Turnip false; outside the non-secure media target |
 | Vulkan Video | Neither dump advertises `VK_KHR_video_*`; MediaCodec remains the video engine |
-| OpenCL | Vendor `libOpenCL.so` exists; absolute-path dlopen is denied by the app namespace. The installed ICD loader returns `CL_PLATFORM_NOT_FOUND_KHR`, zero platforms. A usable native compute route is still unqualified |
-| Shell, GTK4, browsers, mpv, Ghostty | Prior fresh-install checks cover these clients; this continuation rechecked live Shell and private Chrome, not every application's rendering |
-| WebGL / WebGPU | Installed Chrome's WebGL 1/2 probes returned the expected red pixel, no GL error or lost context, and ANGLE on glibc Turnip 1.3.363. This is a smoke test, not conformance; WebGPU remains unrun |
+| OpenCL | Stock: vendor OpenCL 2.0, unreachable from Termux (namespace). Desktop: Termux's `clvk` (OpenCL 3.0, OpenCL C 1.2) on Turnip through `ocl-icd`, installed by `install.sh` only when `/dev/kgsl-3d0` exists. Debug-staged run (2026-11-17): exact hash/SAXPY/local-memory reduction/matmul, wrong-reference control fails, FFmpeg `avgblur_opencl` 43.9 dB and `unsharp_opencl` 49.5 dB against the CPU filters; no-ICD control finds no platform (`tests/native/test-opencl.py`). Rusticl was not chosen: it pulls in clang (~190 MB installed) against clvk's 91 MB |
+| WebGL / WebGPU | `tests/browsers/test-web-graphics.py`: exact WebGL 1/2 pictures (incl. float targets, transform feedback) and compositor presentation pass on Turnip in Chromium, Chrome and Firefox. WebGPU: Firefox (wgpu/Vulkan) passes render, compute (matmul, 2^20 hash, workgroup reduction) and canvas presentation; the launcher now sets `dom.webgpu.enabled` on Adreno only. Chromium and Chrome return no adapter by default, and with `--enable-unsafe-webgpu` their GPU process crashes (SIGSEGV/exit 7) at the first buffer map after a render+copy submit; disabling Dawn's Vulkan memory model does not help. Left off |
 
 Stock GLES exposes 99 extension names; desktop Zink 167. Stock-only names
 include Qualcomm foveation/motion-estimation/tiled-rendering extensions,

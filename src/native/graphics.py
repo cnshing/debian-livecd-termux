@@ -82,7 +82,7 @@ def legacy_drawing(renderer):
 def process_gpu(pid):
     """Inspect the actual process, rather than inferring GPU use from its launcher."""
     proc = Path('/proc') / str(pid)
-    maps = (proc / 'maps').read_text().splitlines()
+    maps = (proc / 'maps').read_text(errors='replace').splitlines()
     turnip = sorted({line.split()[-1] for line in maps if 'libvulkan_freedreno.so' in line})
     panfrost = sorted({line.split()[-1] for line in maps if 'libvulkan_panfrost.so' in line})
     devices = []

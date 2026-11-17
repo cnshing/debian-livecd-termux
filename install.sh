@@ -144,6 +144,11 @@ fi
 if test -r /dev/mali0 && test -w /dev/mali0; then
     packages+=(mesa-vulkan-icd-panvk-kbase)
 fi
+# OpenCL on Adreno: clvk runs OpenCL 3.0 kernels on the desktop's Turnip Vulkan driver, through
+# the ICD loader (tests/native/test-opencl.py). Mali keeps no OpenCL platform, as before.
+if test -e /dev/kgsl-3d0; then
+    packages+=(ocl-icd clvk clinfo)
+fi
 "${apt[@]}" install --no-install-recommends "${packages[@]}"
 python "$repo/tools/install-panvk-desktop.py"
 # The measured G77 stack has a specific device/kernel/JM ABI. Reuse its guard

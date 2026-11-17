@@ -20,7 +20,7 @@ import subprocess
 import sys
 import time
 
-from graphics import apply_renderer, mali_usable, panvk, preferred_renderer, use_panvk
+from graphics import ICD, apply_renderer, mali_usable, panvk, preferred_renderer, use_panvk
 
 PREFIX = Path('/data/data/com.termux/files/usr')
 DPKG_STATUS = PREFIX / 'var/lib/dpkg/status'
@@ -240,6 +240,10 @@ def firefox_preferences(profile, gpu, video, encode=False):
                   'media.ffmpeg.vaapi.enabled': video,
                   'media.hardware-video-decoding.force-enabled': video,
                   'widget.dmabuf.force-enabled': video}
+        if gpu and firefox_webgpu_ready():
+            # WebGPU (wgpu on Vulkan) on Turnip: off by default in Firefox on Linux. Qualified on the
+            # Adreno 640 with tests/browsers/test-web-graphics.py (render, compute, presentation).
+            values.update({'dom.webgpu.enabled': True, 'gfx.webgpu.ignore-blocklist': True})
         if encode:
             # One preference gates WebCodecs and WebRTC hardware encoding. Opt-in only
             # (firefox_encode in acceleration.json): see docs/native/handoff/encode-firefox.md.
@@ -249,6 +253,11 @@ def firefox_preferences(profile, gpu, video, encode=False):
         temporary.write_text(previous.rstrip() + '\n' + start + '\n' + block + '\n' + end + '\n')
         temporary.chmod(0o600)
         temporary.replace(path)
+
+
+def firefox_webgpu_ready():
+    """Adreno with the desktop's Turnip driver; Mali (PanVK) keeps Firefox's default."""
+    return os.path.exists('/dev/kgsl-3d0') and ICD.is_file() and not mali_usable()
 
 
 def firefox_video_runtime():

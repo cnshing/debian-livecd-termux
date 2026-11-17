@@ -1,0 +1,290 @@
+<!doctype html><meta charset="utf-8"><title>web graphics probe</title>
+<style>body{margin:0;background:#202020}canvas{position:absolute;width:256px;height:256px;image-rendering:pixelated}</style>
+<body><script>
+// WebGL 1, WebGL 2 and WebGPU checks with exact references computed here on the CPU.
+// Every case reports `ok` from pixel or buffer comparisons, never from an API merely existing,
+// and a control compares the same pixels against a deliberately wrong reference: it must fail,
+// or the comparison could not have caught anything. Visible canvases stay on screen at fixed
+// places so the test can also check what the compositor presented.
+const W = 256, H = 256;
+// Reference picture: red = x, green = 255 - y (top row bright), blue = (x XOR y) on WebGL 2 and
+// WebGPU, (x + y) mod 256 on WebGL 1 (no integer operators in GLSL ES 1.0).
+const ref = (x, y, xor) => [x, 255 - y, xor ? (x ^ y) & 255 : (x + y) & 255, 255];
+function compare(pixels, xor, flipped, wrong) {
+  let bad = 0, worst = 0, first = null;
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const row = flipped ? H - 1 - y : y, want = ref(x, y, xor);
+    if (wrong) want[2] = (want[2] + 3) & 255;
+    for (let c = 0; c < 4; c++) {
+      const d = Math.abs(pixels[(row * W + x) * 4 + c] - want[c]);
+      if (d > worst) worst = d;
+      if (d > 1) { bad++; if (!first) first = {x, y, c, got: pixels[(row * W + x) * 4 + c], want: want[c]}; }
+    }
+  }
+  return {bad, worst, first};
+}
+function place(canvas, left, top) {
+  canvas.width = W; canvas.height = H; canvas.style.left = left + 'px'; canvas.style.top = top + 'px';
+  document.body.append(canvas); return canvas;
+}
+const png = canvas => canvas.toDataURL('image/png');
+
+function glProgram(gl, vs, fs) {
+  const p = gl.createProgram();
+  for (const [type, src] of [[gl.VERTEX_SHADER, vs], [gl.FRAGMENT_SHADER, fs]]) {
+    const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s);
+    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error('shader: ' + gl.getShaderInfoLog(s));
+    gl.attachShader(p, s);
+  }
+  return p;
+}
+function glInfo(gl) {
+  const debug = gl.getExtension('WEBGL_debug_renderer_info');
+  return {version: gl.getParameter(gl.VERSION), glsl: gl.getParameter(gl.SHADING_LANGUAGE_VERSION),
+    vendor: debug ? gl.getParameter(debug.UNMASKED_VENDOR_WEBGL) : gl.getParameter(gl.VENDOR),
+    renderer: debug ? gl.getParameter(debug.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER),
+    max_texture: gl.getParameter(gl.MAX_TEXTURE_SIZE), extensions: gl.getSupportedExtensions()};
+}
+function fullscreenQuad(gl, program) {
+  const b = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, b);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW);
+  const at = gl.getAttribLocation(program, 'p'); gl.enableVertexAttribArray(at);
+  gl.vertexAttribPointer(at, 2, gl.FLOAT, false, 0, 0);
+}
+
+function webgl(version, left) {
+  const canvas = place(document.createElement('canvas'), left, 0);
+  const gl = canvas.getContext(version === 2 ? 'webgl2' : 'webgl', {antialias: false, preserveDrawingBuffer: true});
+  if (!gl) return {available: false};
+  const out = {available: true, ...glInfo(gl), checks: {}};
+  const xor = version === 2;
+  const vs = version === 2 ? '#version 300 es\nin vec2 p; void main() { gl_Position = vec4(p, 0.0, 1.0); }'
+                           : 'attribute vec2 p; void main() { gl_Position = vec4(p, 0.0, 1.0); }';
+  // gl_FragCoord.y counts from the bottom; the reference row y is counted from the top.
+  const fs = version === 2 ? `#version 300 es
+precision highp float; precision highp int; out vec4 o;
+void main() { uint x = uint(gl_FragCoord.x), y = uint(${H}.0 - gl_FragCoord.y);
+  o = vec4(float(x), float(255u - y), float((x ^ y) & 255u), 255.0) / 255.0; }`
+    : `precision highp float;
+void main() { float x = floor(gl_FragCoord.x), y = floor(${H}.0 - gl_FragCoord.y);
+  gl_FragColor = vec4(x, 255.0 - y, mod(x + y, 256.0), 255.0) / 255.0; }`;
+  const program = glProgram(gl, vs, fs); gl.linkProgram(program);
+  if (!gl.getProgramParameter(program, gl.LINK_STATUS)) throw new Error('link: ' + gl.getProgramInfoLog(program));
+  gl.useProgram(program); fullscreenQuad(gl, program);
+  gl.viewport(0, 0, W, H); gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+  const pixels = new Uint8Array(W * H * 4); gl.readPixels(0, 0, W, H, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+  const gradient = compare(pixels, xor, true, false);
+  out.checks.gradient = {...gradient, ok: gradient.bad === 0};
+  out.control_detects_error = compare(pixels, xor, true, true).bad > 0;
+
+  // Texture upload, nearest sampling and alpha blending onto a cleared target.
+  const tex = gl.createTexture(), data = new Uint8Array(16 * 16 * 4);
+  for (let i = 0; i < 256; i++) data.set([i, (i * 7) & 255, (i * 13) & 255, 255], i * 4);
+  gl.bindTexture(gl.TEXTURE_2D, tex);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 16, 16, 0, gl.RGBA, gl.UNSIGNED_BYTE, data);
+  for (const k of [gl.TEXTURE_MIN_FILTER, gl.TEXTURE_MAG_FILTER]) gl.texParameteri(gl.TEXTURE_2D, k, gl.NEAREST);
+  for (const k of [gl.TEXTURE_WRAP_S, gl.TEXTURE_WRAP_T]) gl.texParameteri(gl.TEXTURE_2D, k, gl.CLAMP_TO_EDGE);
+  const fb = gl.createFramebuffer(), target = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, target);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 16, 16, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, target, 0);
+  const sampler = glProgram(gl, vs, (version === 2 ? '#version 300 es\nprecision highp float; out vec4 o; uniform sampler2D t;\nvoid main() { o = texture(t, gl_FragCoord.xy / 16.0) * vec4(1, 1, 1, 0.5); }'
+    : 'precision highp float; uniform sampler2D t;\nvoid main() { gl_FragColor = texture2D(t, gl_FragCoord.xy / 16.0) * vec4(1, 1, 1, 0.5); }'));
+  gl.linkProgram(sampler); gl.useProgram(sampler); fullscreenQuad(gl, sampler);
+  gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, tex); gl.uniform1i(gl.getUniformLocation(sampler, 't'), 0);
+  gl.viewport(0, 0, 16, 16); gl.clearColor(0, 0, 1, 1); gl.clear(gl.COLOR_BUFFER_BIT);
+  gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA); gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+  gl.disable(gl.BLEND);
+  const small = new Uint8Array(16 * 16 * 4); gl.readPixels(0, 0, 16, 16, gl.RGBA, gl.UNSIGNED_BYTE, small);
+  let worst = 0;
+  for (let i = 0; i < 256; i++) {
+    const want = [data[i * 4] * 0.5, data[i * 4 + 1] * 0.5, data[i * 4 + 2] * 0.5 + 127.5];
+    for (let c = 0; c < 3; c++) worst = Math.max(worst, Math.abs(small[i * 4 + c] - want[c]));
+  }
+  out.checks.texture_blend = {worst, ok: worst <= 1.5};
+
+  if (version === 2) {
+    // Float render target (EXT_color_buffer_float) with values an 8-bit target cannot hold.
+    const fext = gl.getExtension('EXT_color_buffer_float');
+    const ft = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, ft);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, 64, 64, 0, gl.RGBA, gl.FLOAT, null);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, ft, 0);
+    const complete = gl.checkFramebufferStatus(gl.FRAMEBUFFER) === gl.FRAMEBUFFER_COMPLETE;
+    const fp = glProgram(gl, vs, '#version 300 es\nprecision highp float; out vec4 o;\nvoid main() { vec2 c = floor(gl_FragCoord.xy); o = vec4(c.x * 1.5 + c.y * 0.25, -c.y * 1024.0, c.x * c.y, 1e6); }');
+    gl.linkProgram(fp); gl.useProgram(fp); fullscreenQuad(gl, fp); gl.viewport(0, 0, 64, 64);
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    const f = new Float32Array(64 * 64 * 4); gl.readPixels(0, 0, 64, 64, gl.RGBA, gl.FLOAT, f);
+    let fbad = 0;
+    for (let y = 0; y < 64; y++) for (let x = 0; x < 64; x++) {
+      const want = [x * 1.5 + y * 0.25, -y * 1024, x * y, 1e6], i = (y * 64 + x) * 4;
+      for (let c = 0; c < 4; c++) if (f[i + c] !== want[c]) fbad++;
+    }
+    out.checks.float_target = {extension: !!fext, complete, bad: fbad, ok: !!fext && complete && fbad === 0};
+    // Transform feedback: 4096 vertices through integer and float arithmetic, read back.
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    const tf = gl.createProgram();
+    const tvs = gl.createShader(gl.VERTEX_SHADER);
+    gl.shaderSource(tvs, '#version 300 es\nflat out uint h; out float q;\nvoid main() { uint i = uint(gl_VertexID); h = (i * 2654435761u) ^ (i >> 3u); q = float(i) * 0.5 + 1.0; }');
+    gl.compileShader(tvs);
+    const tfs = gl.createShader(gl.FRAGMENT_SHADER);
+    gl.shaderSource(tfs, '#version 300 es\nprecision highp float; out vec4 o; void main() { o = vec4(0); }'); gl.compileShader(tfs);
+    gl.attachShader(tf, tvs); gl.attachShader(tf, tfs);
+    gl.transformFeedbackVaryings(tf, ['h', 'q'], gl.INTERLEAVED_ATTRIBS); gl.linkProgram(tf);
+    const n = 4096, buf = gl.createBuffer();
+    gl.bindBuffer(gl.TRANSFORM_FEEDBACK_BUFFER, buf); gl.bufferData(gl.TRANSFORM_FEEDBACK_BUFFER, n * 8, gl.STATIC_READ);
+    gl.useProgram(tf); gl.enable(gl.RASTERIZER_DISCARD);
+    gl.bindBufferBase(gl.TRANSFORM_FEEDBACK_BUFFER, 0, buf);
+    gl.beginTransformFeedback(gl.POINTS); gl.drawArrays(gl.POINTS, 0, n); gl.endTransformFeedback();
+    gl.disable(gl.RASTERIZER_DISCARD);
+    const back = new ArrayBuffer(n * 8); gl.getBufferSubData(gl.TRANSFORM_FEEDBACK_BUFFER, 0, new Uint8Array(back));
+    const u = new Uint32Array(back), q = new Float32Array(back); let tbad = 0;
+    for (let i = 0; i < n; i++) if (u[i * 2] !== ((Math.imul(i, 2654435761) ^ (i >>> 3)) >>> 0) || q[i * 2 + 1] !== i * 0.5 + 1) tbad++;
+    out.checks.transform_feedback = {bad: tbad, ok: tbad === 0};
+  }
+  out.error = gl.getError(); out.lost = gl.isContextLost();
+  // The visible canvas keeps the reference picture for the compositor check.
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null); gl.useProgram(program); fullscreenQuad(gl, program);
+  gl.viewport(0, 0, W, H); gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+  out.png = png(canvas);
+  out.ok = Object.values(out.checks).every(c => c.ok) && out.error === 0 && !out.lost && out.control_detects_error;
+  return out;
+}
+
+const WGSL_PICTURE = `
+@vertex fn vs(@builtin(vertex_index) i: u32) -> @builtin(position) vec4f {
+  let p = array(vec2f(-1, -1), vec2f(3, -1), vec2f(-1, 3)); return vec4f(p[i], 0, 1); }
+@fragment fn fs(@builtin(position) c: vec4f) -> @location(0) vec4f {
+  let x = u32(c.x); let y = u32(c.y);
+  return vec4f(f32(x), f32(255u - y), f32((x ^ y) & 255u), 255.0) / 255.0; }`;
+const WGSL_COMPUTE = `
+@group(0) @binding(0) var<storage, read> a: array<f32>;
+@group(0) @binding(1) var<storage, read> b: array<f32>;
+@group(0) @binding(2) var<storage, read_write> c: array<f32>;
+@group(0) @binding(3) var<storage, read_write> h: array<u32>;
+const N = 128u;
+@compute @workgroup_size(8, 8) fn mm(@builtin(global_invocation_id) g: vec3u) {
+  var s = 0.0;
+  for (var k = 0u; k < N; k++) { s = s + a[g.y * N + k] * b[k * N + g.x]; }
+  c[g.y * N + g.x] = s; }
+@compute @workgroup_size(64) fn hash(@builtin(global_invocation_id) g: vec3u) {
+  let i = g.x; if (i < arrayLength(&h)) { h[i] = (i * 2654435761u) ^ (i >> 3u); } }
+var<workgroup> partial: array<u32, 256>;
+@compute @workgroup_size(256) fn reduce(@builtin(local_invocation_index) l: u32, @builtin(workgroup_id) w: vec3u) {
+  partial[l] = h[w.x * 256u + l] & 1023u; workgroupBarrier();
+  for (var s = 128u; s > 0u; s = s >> 1u) { if (l < s) { partial[l] = partial[l] + partial[l + s]; } workgroupBarrier(); }
+  if (l == 0u) { c[w.x] = f32(partial[0]); } }`;
+
+// Progress lines in the browser log locate a GPU process crash.
+const step = name => console.log('webgpu step: ' + name);
+async function webgpu(left) {
+  step('adapter');
+  if (!navigator.gpu) return {available: false, reason: 'navigator.gpu missing'};
+  const adapter = await navigator.gpu.requestAdapter({powerPreference: 'high-performance'});
+  if (!adapter) return {available: false, reason: 'requestAdapter returned null'};
+  const info = adapter.info || (adapter.requestAdapterInfo ? await adapter.requestAdapterInfo() : {});
+  const out = {available: true, adapter: {vendor: info.vendor, architecture: info.architecture, device: info.device,
+    description: info.description, fallback: adapter.isFallbackAdapter ?? info.isFallbackAdapter ?? null},
+    features: [...adapter.features].sort(), limits: {}, checks: {}};
+  for (const k of ['maxTextureDimension2D', 'maxBufferSize', 'maxStorageBufferBindingSize',
+                   'maxComputeWorkgroupSizeX', 'maxComputeInvocationsPerWorkgroup', 'maxComputeWorkgroupStorageSize'])
+    out.limits[k] = adapter.limits[k];
+  step('device');
+  const device = await adapter.requestDevice();
+  const errors = []; device.addEventListener('uncapturederror', e => errors.push(String(e.error.message)));
+  let lost = null; device.lost.then(i => { lost = i.message || i.reason; });
+  device.pushErrorScope('validation');
+
+  step('render');
+  // Offscreen render to a texture, then copied to a buffer and compared.
+  const tex = device.createTexture({size: [W, H], format: 'rgba8unorm',
+    usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.COPY_SRC});
+  const module = device.createShaderModule({code: WGSL_PICTURE});
+  const pipeline = format => device.createRenderPipeline({layout: 'auto', vertex: {module, entryPoint: 'vs'},
+    fragment: {module, entryPoint: 'fs', targets: [{format}]}});
+  const readback = device.createBuffer({size: W * H * 4, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ});
+  let enc = device.createCommandEncoder();
+  let pass = enc.beginRenderPass({colorAttachments: [{view: tex.createView(), loadOp: 'clear', storeOp: 'store',
+    clearValue: [0, 0, 0, 1]}]});
+  pass.setPipeline(pipeline('rgba8unorm')); pass.draw(3); pass.end();
+  enc.copyTextureToBuffer({texture: tex}, {buffer: readback, bytesPerRow: W * 4}, [W, H]);
+  device.queue.submit([enc.finish()]);
+  step('map render');
+  await readback.mapAsync(GPUMapMode.READ);
+  const pixels = new Uint8Array(readback.getMappedRange().slice(0)); readback.unmap();
+  const picture = compare(pixels, true, false, false);
+  out.checks.render = {...picture, ok: picture.bad === 0};
+  out.control_detects_error = compare(pixels, true, false, true).bad > 0;
+
+  step('compute');
+  // Compute: 128x128 matrix product, an integer hash over 2^20 elements, a workgroup reduction.
+  const N = 128, M = 1 << 20;
+  const A = new Float32Array(N * N), B = new Float32Array(N * N);
+  for (let i = 0; i < N * N; i++) { A[i] = ((i * 37) % 17 - 8) / 8; B[i] = ((i * 53) % 13 - 6) / 4; }
+  const storage = (data, size) => { const b = device.createBuffer({size: size || data.byteLength,
+    usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST});
+    if (data) device.queue.writeBuffer(b, 0, data); return b; };
+  const a = storage(A), b = storage(B), c = storage(null, N * N * 4), h = storage(null, M * 4);
+  const cm = device.createShaderModule({code: WGSL_COMPUTE});
+  const layout = device.createBindGroupLayout({entries: [0, 1, 2, 3].map(binding => ({binding,
+    visibility: GPUShaderStage.COMPUTE, buffer: {type: binding < 2 ? 'read-only-storage' : 'storage'}}))});
+  const pl = device.createPipelineLayout({bindGroupLayouts: [layout]});
+  const group = device.createBindGroup({layout, entries: [a, b, c, h].map((buffer, binding) => ({binding, resource: {buffer}}))});
+  const compute = entryPoint => device.createComputePipeline({layout: pl, compute: {module: cm, entryPoint}});
+  const read = async (src, size) => {
+    const r = device.createBuffer({size, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ});
+    const e = device.createCommandEncoder(); e.copyBufferToBuffer(src, 0, r, 0, size); device.queue.submit([e.finish()]);
+    await r.mapAsync(GPUMapMode.READ); const copy = r.getMappedRange().slice(0); r.unmap(); return copy; };
+  const t0 = performance.now();
+  enc = device.createCommandEncoder(); pass = enc.beginComputePass(); pass.setBindGroup(0, group);
+  pass.setPipeline(compute('mm')); pass.dispatchWorkgroups(N / 8, N / 8);
+  pass.setPipeline(compute('hash')); pass.dispatchWorkgroups(M / 64); pass.end(); device.queue.submit([enc.finish()]);
+  step('compute read');
+  const C = new Float32Array(await read(c, N * N * 4)), Hs = new Uint32Array(await read(h, M * 4));
+  out.compute_ms = +(performance.now() - t0).toFixed(1);
+  let mbad = 0, worst = 0;
+  for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
+    let s = 0; for (let k = 0; k < N; k++) s += A[y * N + k] * B[k * N + x];
+    const d = Math.abs(C[y * N + x] - s); worst = Math.max(worst, d); if (d > 1e-3) mbad++;
+  }
+  out.checks.matmul = {bad: mbad, worst, ok: mbad === 0};
+  let hbad = 0; for (let i = 0; i < M; i++) if (Hs[i] !== ((Math.imul(i, 2654435761) ^ (i >>> 3)) >>> 0)) hbad++;
+  out.checks.hash = {bad: hbad, ok: hbad === 0};
+  enc = device.createCommandEncoder(); pass = enc.beginComputePass(); pass.setBindGroup(0, group);
+  pass.setPipeline(compute('reduce')); pass.dispatchWorkgroups(64); pass.end(); device.queue.submit([enc.finish()]);
+  const R = new Float32Array(await read(c, 64 * 4)); let rbad = 0;
+  for (let w = 0; w < 64; w++) { let s = 0; for (let l = 0; l < 256; l++) s += Hs[w * 256 + l] & 1023; if (R[w] !== s) rbad++; }
+  out.checks.workgroup_reduce = {bad: rbad, ok: rbad === 0};
+
+  step('canvas');
+  // A visible WebGPU canvas, presented by the compositor.
+  const canvas = place(document.createElement('canvas'), left, 0);
+  const context = canvas.getContext('webgpu'), format = navigator.gpu.getPreferredCanvasFormat();
+  context.configure({device, format, alphaMode: 'opaque'});
+  enc = device.createCommandEncoder();
+  pass = enc.beginRenderPass({colorAttachments: [{view: context.getCurrentTexture().createView(), loadOp: 'clear',
+    storeOp: 'store', clearValue: [0, 0, 0, 1]}]});
+  pass.setPipeline(pipeline(format)); pass.draw(3); pass.end(); device.queue.submit([enc.finish()]);
+  step('canvas submitted');
+  await device.queue.onSubmittedWorkDone();
+  out.canvas_format = format;
+  const validation = await device.popErrorScope();
+  out.validation = validation ? validation.message : null;
+  out.errors = errors; out.lost = lost;
+  out.ok = Object.values(out.checks).every(c => c.ok) && !validation && !errors.length && !lost && out.control_detects_error;
+  return out;
+}
+
+(async () => {
+  const q = new URLSearchParams(location.search), result = {userAgent: navigator.userAgent};
+  for (const [name, run] of [['webgl1', () => webgl(1, 0)], ['webgl2', () => webgl(2, 272)], ['webgpu', () => webgpu(544)]]) {
+    if (!(q.get('cases') || 'webgl1,webgl2,webgpu').split(',').includes(name)) continue;
+    try { result[name] = await run(); } catch (e) { result[name] = {available: 'error', error: String(e && e.stack || e)}; }
+  }
+  // Two animation frames so every canvas has been composited before the screenshot.
+  await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+  window.RESULT = result;
+  const pre = document.createElement('pre'); pre.id = 'result'; pre.hidden = true;
+  pre.textContent = JSON.stringify(result); document.body.append(pre);
+})();
+</script>

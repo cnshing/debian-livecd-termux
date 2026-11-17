@@ -12,6 +12,18 @@ termux-va daemon. Nothing touches the live desktop, its browser profiles or the 
   webcodecs      60 canvas pictures are encoded, software decoded and checked against their
                  original colours, including the metadata supplied by the encoder.
 
+  step           a WebRTC call whose sender is capped at 500 kb/s (RTCRtpSender maxBitrate)
+                 for 15 s, then uncapped: the sent rate must stay within 25% of the cap from
+                 3 s after the change, with no stall.
+  adapt          the same call with its media through a shaping UDP relay limited to 400 kb/s
+                 for 20 s (packets over 150 ms of queue are dropped), then unlimited: congestion
+                 control must bring the sent rate under 125% of the limit within 8 s, keep the
+                 pictures moving (no second without a picture, at least 10 a second once
+                 adapted), keep at least 320x180 with correct colours, keep loss under 5% once
+                 adapted, and climb back above 1.5 times the limit afterwards.
+                 The canvas carries two bands of low-contrast noise in these modes, so the
+                 encoder cannot meet a lower target by its content alone.
+
 With --expect hardware (the default) the private daemon must also have run an encoder session
 on a hardware component with pictures in and out. With --expect software it must have run none.
 The received picture is saved as PNG: open it, a metric alone is not a pass.
@@ -45,7 +57,18 @@ const c = document.createElement('canvas'); c.width = W; c.height = H;
 const g = c.getContext('2d'); let n = 0;
 // A hue field with a moving white bar: every row carries the same colour, so a band of
 // padding at the bottom of a received picture shows as a different colour there.
+// With texture=1, two bands of fresh low-contrast blocks away from the sampled rows cost
+// bits at any target, so an encoder cannot meet a lower target by its content alone.
+const texture = new URLSearchParams(location.search).get('texture') === '1';
+const noise = new ImageData(W >> 2, 16), tile = new OffscreenCanvas(W >> 2, 16);
 setInterval(() => { g.fillStyle = `hsl(${(n * 7) %% 360} 70%% 45%%)`; g.fillRect(0, 0, W, H);
+  if (texture) {
+    crypto.getRandomValues(noise.data);
+    for (let i = 0; i < noise.data.length; i += 4) { const v = 108 + (noise.data[i] & 31);
+      noise.data[i] = noise.data[i + 1] = noise.data[i + 2] = v; noise.data[i + 3] = 255; }
+    tile.getContext('2d').putImageData(noise, 0, 0); g.imageSmoothingEnabled = false;
+    for (const y of [H >> 3, (H * 5) >> 3]) g.drawImage(tile, 0, y, W, H >> 3);
+  }
   g.fillStyle = 'white'; g.fillRect((n * 8) %% W, 0, 48, H); n++; }, 33);
 const stream = c.captureStream(30);
 function sample(source, width, height) {
@@ -84,6 +107,63 @@ async function webrtc(codec) {
       framesEncoded: s.framesEncoded, frameWidth: s.frameWidth, frameHeight: s.frameHeight}); });
   (await pc2.getStats()).forEach(s => { if (s.type === 'inbound-rtp' && s.kind === 'video')
     Object.assign(out, {decoder: s.decoderImplementation, framesDecoded: s.framesDecoded}); });
+  pc1.close(); pc2.close(); v.remove();
+  return out;
+}
+// The call runs a plan of phases [{seconds, limit (b/s on the relay, 0 for none), maxBitrate}].
+// With relay=1 the media direction goes through the harness's shaping UDP relay: the sender
+// gets only the relay's address as its remote candidate and the receiver learns the relay
+// as a peer-reflexive one, so every RTP packet passes the shaper.
+async function adapt(codec) {
+  const q = new URLSearchParams(location.search), plan = JSON.parse(q.get('plan')), relay = q.get('relay') === '1';
+  const pc1 = new RTCPeerConnection(), pc2 = new RTCPeerConnection(); let relayed = false;
+  pc1.onicecandidate = e => { if (e.candidate && e.candidate.candidate && !relay) pc2.addIceCandidate(e.candidate); };
+  pc2.onicecandidate = async e => {
+    if (!e.candidate || !e.candidate.candidate) return;
+    if (!relay) return pc1.addIceCandidate(e.candidate);
+    const f = e.candidate.candidate.split(' ');
+    if (relayed || f[2].toLowerCase() !== 'udp' || f[7] !== 'host' || !/^[0-9.]+$/.test(f[4])) return;
+    relayed = true;
+    const r = await (await fetch(`/relay?ip=${f[4]}&port=${f[5]}`)).json(); f[5] = String(r.port);
+    pc1.addIceCandidate({candidate: f.join(' '), sdpMid: e.candidate.sdpMid, sdpMLineIndex: e.candidate.sdpMLineIndex});
+  };
+  const tr = pc1.addTransceiver(stream.getVideoTracks()[0], {direction: 'sendonly'});
+  const caps = RTCRtpSender.getCapabilities('video').codecs.filter(x => x.mimeType.toLowerCase() === 'video/' + codec);
+  if (!caps.length) return {codec, error: 'codec not offered'};
+  tr.setCodecPreferences(caps);
+  const o = await pc1.createOffer(); await pc1.setLocalDescription(o); await pc2.setRemoteDescription(o);
+  const a = await pc2.createAnswer(); await pc2.setLocalDescription(a); await pc1.setRemoteDescription(a);
+  const v = document.createElement('video'); v.muted = true; v.autoplay = true; document.body.append(v);
+  pc2.getReceivers().forEach(r => { v.srcObject = new MediaStream([r.track]); });
+  let presented = 0;
+  const count = () => { presented++; v.requestVideoFrameCallback(count); };
+  if (v.requestVideoFrameCallback) v.requestVideoFrameCallback(count);
+  const seconds = [], phases = []; let t = 0;
+  for (const phase of plan) {
+    if (relay) await fetch(`/limit?bps=${phase.limit || 0}`);
+    if ('maxBitrate' in phase) {
+      const p = tr.sender.getParameters(); if (!p.encodings || !p.encodings.length) p.encodings = [{}];
+      if (phase.maxBitrate) p.encodings[0].maxBitrate = phase.maxBitrate; else delete p.encodings[0].maxBitrate;
+      await tr.sender.setParameters(p);
+    }
+    for (let i = 0; i < phase.seconds; i++, t++) {
+      await sleep(1000);
+      const row = {t, limit: phase.limit || 0, maxBitrate: phase.maxBitrate || 0, presented,
+                   width: v.videoWidth, height: v.videoHeight};
+      (await pc1.getStats()).forEach(s => { if (s.type === 'outbound-rtp' && s.kind === 'video')
+        Object.assign(row, {bytesSent: s.bytesSent, framesEncoded: s.framesEncoded, sentWidth: s.frameWidth,
+          sentHeight: s.frameHeight, encoder: s.encoderImplementation, qpSum: s.qpSum, nack: s.nackCount, pli: s.pliCount}); });
+      (await pc2.getStats()).forEach(s => { if (s.type === 'inbound-rtp' && s.kind === 'video')
+        Object.assign(row, {bytesReceived: s.bytesReceived, framesDecoded: s.framesDecoded, packetsLost: s.packetsLost,
+          framesDropped: s.framesDropped, decoder: s.decoderImplementation}); });
+      if (relay) Object.assign(row, await (await fetch('/relaystats')).json());
+      seconds.push(row);
+    }
+    const shot = sample(v, v.videoWidth || W, v.videoHeight || H);
+    phases.push({limit: phase.limit || 0, maxBitrate: phase.maxBitrate || 0, received: [v.videoWidth, v.videoHeight],
+                 samples: shot.samples, picture_ok: shot.samples.every(good), png: shot.png});
+  }
+  const out = {codec, relay, ice: pc1.iceConnectionState, seconds, phases};
   pc1.close(); pc2.close(); v.remove();
   return out;
 }
@@ -136,7 +216,7 @@ async function webcodecs(codec) {
 }
 (async () => { const q = new URLSearchParams(location.search), r = [];
   for (const k of q.get('codecs').split(',')) {
-    try { r.push(await ({mediarecorder, webcodecs, webrtc}[q.get('mode')](k))); }
+    try { r.push(await ({mediarecorder, webcodecs, webrtc, adapt}[q.get('mode')](k))); }
     catch (e) { r.push({codec: k, error: String(e)}); } }
   window.RESULT = r; })();
 </script>'''
@@ -209,11 +289,143 @@ def encoder_sessions(log):
     return sessions
 
 
+class Relay:
+    """A UDP relay between a WebRTC sender and receiver that shapes the sender's direction.
+
+    Socket "near" faces the sender, which has it as its only remote candidate; socket "far"
+    faces the receiver. Sender-to-receiver packets leave through a queue drained at the current
+    limit; one that would wait more than MAX_QUEUE seconds is dropped, as at a congested link.
+    Receiver-to-sender packets (RTCP feedback, STUN answers) pass at once."""
+    MAX_QUEUE = 0.15
+
+    def __init__(self, ip, port):
+        import socket
+        self.target, self.sender = (ip, port), None
+        self.near = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.far = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        for sock in (self.near, self.far):
+            sock.bind((ip, 0))
+        self.port = self.near.getsockname()[1]
+        self.limit, self.departure, self.lock = 0, 0.0, threading.Lock()
+        self.queue, self.ready = [], threading.Condition(self.lock)
+        self.stats = {'relayed_bytes': 0, 'relayed_packets': 0, 'dropped_packets': 0, 'feedback_packets': 0}
+        self.running = True
+        for target in (self.forward, self.back, self.drain):
+            threading.Thread(target=target, daemon=True).start()
+
+    def set_limit(self, bps):
+        with self.lock:
+            self.limit = bps
+
+    def forward(self):
+        while self.running:
+            data, self.sender = self.near.recvfrom(65536)
+            now = time.monotonic()
+            with self.lock:
+                if not self.limit:
+                    self.queue.append((now, data))
+                else:
+                    start = max(now, self.departure)
+                    if start - now > self.MAX_QUEUE:
+                        self.stats['dropped_packets'] += 1
+                        continue
+                    # IP and UDP headers count against the link too.
+                    self.departure = start + (len(data) + 28) * 8 / self.limit
+                    self.queue.append((self.departure, data))
+                self.ready.notify()
+
+    def drain(self):
+        while self.running:
+            with self.lock:
+                while not self.queue:
+                    self.ready.wait()
+                when, data = self.queue[0]
+                delay = when - time.monotonic()
+                if delay > 0:
+                    self.ready.wait(delay)
+                    continue
+                self.queue.pop(0)
+                self.stats['relayed_bytes'] += len(data)
+                self.stats['relayed_packets'] += 1
+            self.far.sendto(data, self.target)
+
+    def back(self):
+        while self.running:
+            data, _ = self.far.recvfrom(65536)
+            if self.sender:
+                self.stats['feedback_packets'] += 1
+                self.near.sendto(data, self.sender)
+
+
+PLANS = {'step': [{'seconds': 12, 'maxBitrate': 0}, {'seconds': 15, 'maxBitrate': 500000},
+                  {'seconds': 12, 'maxBitrate': 0}],
+         'adapt': [{'seconds': 12, 'limit': 0}, {'seconds': 20, 'limit': 400000}, {'seconds': 20, 'limit': 0}]}
+
+
+def judge_adaptation(case, mode):
+    """Per-second rates and the pass criteria described at the top."""
+    rows, failures = case.get('seconds') or [], []
+    if not rows:
+        return {'ok': False, 'failures': ['no statistics']}
+
+    def delta(key, i):
+        now, before = rows[i].get(key), rows[i - 1].get(key) if i else 0
+        return None if now is None or before is None else now - before
+    sent = [round((delta('bytesSent', i) or 0) * 8 / 1000, 1) for i in range(len(rows))]
+    received = [round((delta('bytesReceived', i) or 0) * 8 / 1000, 1) for i in range(len(rows))]
+    pictures = [delta('presented', i) if rows[i].get('presented') else delta('framesDecoded', i) for i in range(len(rows))]
+    plan, start, report = PLANS[mode], 0, {'sent_kbps': sent, 'received_kbps': received, 'pictures_per_second': pictures}
+    constrained = next(i for i, phase in enumerate(plan) if phase.get('limit') or phase.get('maxBitrate'))
+    for index, phase in enumerate(plan):
+        span = range(start, start + phase['seconds'])
+        start += phase['seconds']
+        target = (phase.get('limit') or phase.get('maxBitrate') or 0) / 1000
+        if index == constrained:
+            allowed = 8 if mode == 'adapt' else 3
+            reach = next((i - span[0] for i in span if all(sent[j] <= 1.25 * target for j in range(i, span[-1] + 1))), None)
+            report['reach_seconds'] = reach
+            if reach is None or reach > allowed:
+                failures.append(f'sent rate not under {1.25 * target:g} kb/s within {allowed} s of the change (after {reach})')
+            else:
+                steady = [sent[j] for j in range(span[0] + reach, span[-1] + 1)]
+                if mode == 'step' and min(steady) < 0.75 * target:
+                    failures.append(f'sent rate fell to {min(steady)} kb/s under a {target:g} kb/s cap')
+                if mode == 'adapt':
+                    late = received[span[-1] - 9:span[-1] + 1]
+                    if sum(late) / len(late) < 0.5 * target:
+                        failures.append(f'received only {sum(late) / len(late):.0f} kb/s through a {target:g} kb/s link')
+                    first, last = rows[span[0] + reach - 1], rows[span[-1]]
+                    sent_packets = last['relayed_packets'] + last['dropped_packets'] - first['relayed_packets'] - first['dropped_packets']
+                    loss = (last['dropped_packets'] - first['dropped_packets']) / max(sent_packets, 1)
+                    report['loss_after_reach'] = round(loss, 4)
+                    if loss > 0.05:
+                        failures.append(f'{loss:.1%} of packets dropped after adapting')
+                slow = [pictures[j] for j in range(span[0] + reach, span[-1] + 1)]
+                if min(p or 0 for p in slow) < 10:
+                    failures.append(f'only {min(p or 0 for p in slow)} pictures in a second once adapted')
+        if index == constrained + 1:
+            late = sent[span[-1] - 4:span[-1] + 1]
+            previous = (plan[constrained].get('limit') or plan[constrained].get('maxBitrate')) / 1000
+            report['recovered_kbps'] = max(late)
+            if max(late) < 1.5 * previous:
+                failures.append(f'sent rate did not climb back above {1.5 * previous:g} kb/s ({max(late)})')
+    stalls = [i for i in range(3, len(rows)) if not pictures[i]]
+    if stalls:
+        failures.append(f'no picture in seconds {stalls}')
+    for phase in case.get('phases', []):
+        if not phase.get('picture_ok') or phase['received'][0] < 320 or phase['received'][1] < 180:
+            failures.append(f'picture at limit {phase["limit"]} / cap {phase["maxBitrate"]}: {phase["received"]} '
+                            f'{"colours wrong" if not phase.get("picture_ok") else "too small"}')
+    report['failures'] = failures
+    report['ok'] = not failures
+    return report
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument('browser', choices=('chromium', 'chrome', 'firefox'))
     p.add_argument('--out', type=lambda value: Path(value).resolve(), required=True)
-    p.add_argument('--mode', choices=('webrtc', 'mediarecorder', 'webcodecs'), default='webrtc')
+    p.add_argument('--mode', choices=('webrtc', 'mediarecorder', 'webcodecs', 'step', 'adapt'), default='webrtc')
     p.add_argument('--codec', action='append', help='h264 (default), vp8, vp9 or hevc; repeatable')
     p.add_argument('--expect', choices=('hardware', 'software'), default='hardware')
     p.add_argument('--size', default='640x360')
@@ -304,13 +516,27 @@ def main():
                                                record=str(out / 'argv.json')))
             command.chmod(0o700)
         page = (PAGE % {'width': width, 'height': height}).encode()
+        relays = []
 
         class Page(http.server.BaseHTTPRequestHandler):
             def do_GET(self):
+                from urllib.parse import parse_qs, urlsplit
+                url = urlsplit(self.path)
+                query = {key: values[0] for key, values in parse_qs(url.query).items()}
+                body, kind = page, 'text/html'
+                if url.path == '/relay':
+                    relays.append(Relay(query['ip'], int(query['port'])))
+                    body, kind = json.dumps({'port': relays[-1].port}).encode(), 'application/json'
+                elif url.path == '/limit':
+                    for relay in relays:
+                        relay.set_limit(int(query['bps']))
+                    body, kind = b'{}', 'application/json'
+                elif url.path == '/relaystats':
+                    body, kind = json.dumps(relays[-1].stats if relays else {}).encode(), 'application/json'
                 self.send_response(200)
-                self.send_header('Content-Type', 'text/html')
+                self.send_header('Content-Type', kind)
                 self.end_headers()
-                self.wfile.write(page)
+                self.wfile.write(body)
 
             def log_message(self, *unused):
                 pass
@@ -325,24 +551,36 @@ def main():
             # to this disposable one the same way.
             sys.path.insert(0, args.modules)
             import acceleration
-            from graphics import mali_usable
-            encode = args.firefox_encode or (mali_usable() and acceleration.firefox_encode_ready())
+            encode = args.firefox_encode or acceleration.firefox_encode_ready(os.environ['TERMUX_VA_SOCKET'])
             result['launcher_firefox_encode'] = encode
             result['experimental_firefox_encode'] = args.firefox_encode
             acceleration.firefox_preferences(profile, True, True, encode=encode)
             browser = probe.Firefox(command, profile, tag, prefs=(
                 ('extensions.enabledScopes', 1), ('extensions.autoDisableScopes', 15),
-                ('media.navigator.permission.disabled', True), ('media.navigator.streams.fake', False)),
+                ('media.navigator.permission.disabled', True), ('media.navigator.streams.fake', False),
+                # The relay needs the receiver's real address, not an mDNS name.
+                ('media.peerconnection.ice.obfuscate_host_addresses', False)),
                 preserve_prefs=True)
         else:
             browser = probe.Chromium(command, profile, tag, (
                 '--enable-logging=stderr', '--vmodule=*vaapi*=2,*video_encode*=2', '--ozone-platform=x11',
                 '--disable-extensions', '--password-store=basic', '--disable-breakpad', '--disable-crash-reporter'))
         result['version'] = browser.version
-        browser.open(f'http://127.0.0.1:{server.server_address[1]}/?mode={args.mode}&codecs=' + ','.join(codecs))
+        query = f'mode={args.mode}&codecs=' + ','.join(codecs)
+        if args.mode in PLANS:
+            from urllib.parse import quote
+            query = (f'mode=adapt&codecs={",".join(codecs)}&texture=1&relay={int(args.mode == "adapt")}'
+                     f'&plan={quote(json.dumps(PLANS[args.mode]))}')
+        browser.open(f'http://127.0.0.1:{server.server_address[1]}/?' + query)
         cases = wait(lambda: browser.evaluate('window.RESULT'), 240, 'the page')
         browser.quit()
         for case in cases:
+            for number, phase in enumerate(case.get('phases', [])):
+                (out / f'received-{case["codec"]}-phase{number}.png').write_bytes(
+                    base64.b64decode(phase.pop('png').split(',', 1)[1]))
+            if args.mode in PLANS and 'seconds' in case:
+                case['adaptation'] = judge_adaptation(case, args.mode)
+                case['picture_ok'] = case['adaptation']['ok']
             if case.get('png'):
                 (out / f'received-{case["codec"]}.png').write_bytes(base64.b64decode(case.pop('png').split(',', 1)[1]))
             if case.get('recording'):

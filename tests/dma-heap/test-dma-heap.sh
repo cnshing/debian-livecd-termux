@@ -7,6 +7,7 @@ cc=${CC:-cc}
 $cc -O2 -Wall -Wextra -Werror -shared -fPIC -o "$work/libandroid-dma-heap.so" "$src" -ldl
 $cc -O2 -Wall -shared -fPIC -o "$work/libfake-ion.so" "$here/fake-ion.c" -ldl
 $cc -O2 -Wall -o "$work/client" "$here/heap-client.c"
+$cc -O2 -Wall -o "$work/scoped" "$here/scoped-client.c" -ldl
 : > "$work/ion"; export FAKE_ION="$work/ion" FAKE_ION_LOG="$work/log" HEAP_DIR="$work/dma_heap"
 export LIVECD_DMA_HEAP_ION_DEVICE="$work/ion" LIVECD_DMA_HEAP_DIR="$work/dma_heap"
 pre="$work/libandroid-dma-heap.so:$work/libfake-ion.so"
@@ -31,4 +32,21 @@ check "real heap directory wins" "stat No such file or directory" ""
 rmdir "$work/dma_heap"
 got=$(LD_PRELOAD="$pre" cat "$here/heap-client.c" | head -1)
 case $got in "// Uses only"*) echo "PASS other files pass through";; *) echo "FAIL passthrough"; fail=1;; esac
+# dlopen'd, not preloaded, as the session's VA bridge loads it (only ION is preloaded, as a fake).
+scoped() { # name expected-output expected-log env...
+    name=$1 want=$2 wantlog=$3; shift 3
+    : > "$work/log"
+    got=$(env LD_PRELOAD="$work/libfake-ion.so" "$@" "$work/scoped" "$work/libandroid-dma-heap.so" ${HEAP:-system} 1048576 || true)
+    log=$(head -1 "$work/log")
+    if [ "$got" = "$want" ] && [ "$log" = "$wantlog" ]; then echo "PASS scoped: $name"
+    else echo "FAIL scoped: $name: got '$got' log '$log', want '$want' '$wantlog'"; fail=1; fi
+}
+scoped "allocates cached ION without interposing" ok "mask=0x20 flags=1"
+HEAP=system-uncached scoped "uncached" ok "mask=0x20 flags=0"
+HEAP=bogus scoped "unknown heap" "alloc No such file or directory" ""
+scoped "disabled by LIVECD_DMA_HEAP_ION=0" "alloc No such file or directory" "" LIVECD_DMA_HEAP_ION=0
+scoped "no ION device" "alloc No such file or directory" "" LIVECD_DMA_HEAP_ION_DEVICE="$work/missing"
+mkdir "$work/dma_heap"
+scoped "real heap directory wins" "alloc No such file or directory" ""
+rmdir "$work/dma_heap"
 exit $fail

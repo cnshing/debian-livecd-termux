@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Add dma-heap surfaces to the pinned Bionic and glibc VA bridge (ION comes from dma-heap.c)."""
+"""Add dma-heap surfaces to the pinned Bionic and glibc VA bridge (ION comes from dma-heap.c,
+preloaded by the launcher or dlopened by the bridge itself)."""
 import sys
 from pathlib import Path
 path = Path(sys.argv[1]); text = path.read_text()
@@ -17,7 +18,14 @@ for before, after in (('#include <linux/dma-heap.h>',
                        '        return !strcmp(e, "1") || !strcmp(e, "true") || !strcmp(e, "on");\n'
                        '    /* Browsers import an NV12 frame as one dma-buf object. */\n'
                        '    if (tva_ion_winsys_active)\n'
-                       '        return true;\n')):
+                       '        return true;\n'),
+                      # The session's Adreno surfaces on ION-only kernels: tva_scoped_heap_alloc.
+                      ('   int heap_fd = open("/dev/dma_heap/system", O_RDONLY | O_CLOEXEC);\n'
+                       '   if (heap_fd < 0)\n'
+                       '      return -1;\n',
+                       '   int heap_fd = open("/dev/dma_heap/system", O_RDONLY | O_CLOEXEC);\n'
+                       '   if (heap_fd < 0)\n'
+                       '      return tva_scoped_heap_alloc(size);\n')):
     if text.count(before) != 1:
         sys.exit('The pinned Termux:VA bridge changed near: ' + before)
     text = text.replace(before, after)

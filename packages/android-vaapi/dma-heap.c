@@ -19,6 +19,11 @@
 // descriptor is one of ours, since libc calls these wrappers during start-up.
 // Raw syscall() and statically linked programs are not covered.
 //
+// A library that must not change the whole process (the VA bridge inside the desktop session,
+// where Turnip and PanVK would also pick up the emulated heaps) can dlopen this file without
+// preloading it and call livecd_dma_heap_alloc(): dlopen'd symbols interpose nothing, so only
+// that caller's allocations come from ION.
+//
 // Environment (read once at load):
 //   LIVECD_DMA_HEAP_ION=0            disable emulation
 //   LIVECD_DMA_HEAP_ION_DEVICE=path  ION device (default /dev/ion; for tests)
@@ -32,6 +37,7 @@
 #include <stdatomic.h>
 #include <stdbool.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/ioctl.h>
@@ -91,7 +97,17 @@ static char heap_dir[256] = HEAP_DIR;
 static _Atomic int64_t heap_mask = -1; // -1 unknown, 0 none
 static struct stat ion_st;
 
-static void *sym(const char *name) { return dlsym(RTLD_NEXT, name); }
+// Preloaded, we are in the global scope and the real definitions come next. Loaded with dlopen
+// (livecd_dma_heap_alloc), we are not, and use what the rest of the process calls.
+static bool ours(void *f) {
+    Dl_info a, b;
+    return f && dladdr(f, &a) && dladdr((void *)ours, &b) && a.dli_fbase == b.dli_fbase;
+}
+static void *sym(const char *name) {
+    static void *global; // the program's handle searches only the global scope
+    if (!global) global = dlopen(NULL, RTLD_NOW);
+    return dlsym(ours(dlsym(global, "livecd_dma_heap_alloc")) ? RTLD_NEXT : global, name);
+}
 // Bionic runs these wrappers before constructors, so each resolves on first use.
 static void *lazy(void **slot, const char *name) {
     if (!*slot) *slot = sym(name);
@@ -291,3 +307,22 @@ static int do_access(int dirfd, const char *path, int mode, int flags) {
 }
 EXPORT int access(const char *path, int mode) { return do_access(AT_FDCWD, path, mode, 0); }
 EXPORT int faccessat(int dirfd, const char *path, int mode, int flags) { return do_access(dirfd, path, mode, flags); }
+
+// Allocates from heap "system" or "system-uncached" exactly as open() + DMA_HEAP_IOCTL_ALLOC
+// on the emulated node would, for a caller that was not preloaded. Returns the dma-buf FD, or
+// -1 with errno ENOENT when nothing is emulated (real heaps exist, no ION system heap, no
+// /dev/ion, or LIVECD_DMA_HEAP_ION=0).
+EXPORT int livecd_dma_heap_alloc(const char *heap, uint64_t len, uint32_t fd_flags) {
+    char path[sizeof heap_dir + 32];
+    snprintf(path, sizeof path, "%s/%s", heap_dir, heap ? heap : "");
+    int k = heap_of(path);
+    if (!k) { errno = ENOENT; return -1; }
+    int fd = open_heap(k, O_CLOEXEC);
+    if (fd < 0) return -1;
+    struct dma_heap_allocation_data d = {.len = len, .fd_flags = fd_flags};
+    int r = heap_alloc(fd, k, &d), e = errno;
+    set_kind(fd, NONE);
+    NEXT(close)(fd);
+    errno = e;
+    return r ? -1 : (int)d.fd;
+}

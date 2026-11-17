@@ -19,7 +19,12 @@
 #ifndef LIVECD_TVA_ION_WINSYS_H
 #define LIVECD_TVA_ION_WINSYS_H
 
+#include <dlfcn.h>
+#include <errno.h>
 #include <fcntl.h>
+#include <limits.h>
+#include <pthread.h>
+#include <stdio.h>
 #include <linux/dma-heap.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -59,6 +64,61 @@ tva_ion_ws_alloc(size_t size)
    int ret = ioctl(heap, DMA_HEAP_IOCTL_ALLOC, &alloc);
    close(heap);
    return ret == 0 ? (int)alloc.fd : -1;
+}
+
+/* The Adreno bridge's contiguous NV12 surfaces when /dev/dma_heap/system is missing.
+ * Browsers get the heap from ION through the launcher's preload of libandroid-dma-heap.so.
+ * The desktop session cannot preload it: Turnip and PanVK would then switch their own
+ * allocations to the emulated heaps.  So the bridge loads the same library privately with
+ * dlopen, which interposes nothing, and only these allocations come from ION.  The library
+ * declines (ENOENT) where real heaps exist, without /dev/ion, or with LIVECD_DMA_HEAP_ION=0.
+ * It sits beside the driver's directory: <stack>/libandroid-dma-heap.so for the Bionic
+ * package, <stack>/lib/ for the glibc one. */
+static int (*tva_scoped_heap)(const char *, uint64_t, uint32_t);
+
+static void
+tva_scoped_heap_load(void)
+{
+   static const char *const names[] = {
+      "../libandroid-dma-heap.so", "../../lib/libandroid-dma-heap.so",
+   };
+   Dl_info info;
+   char driver[PATH_MAX], path[PATH_MAX + 64];
+   if (!dladdr((void *)tva_scoped_heap_load, &info) || !info.dli_fname ||
+       !realpath(info.dli_fname, driver))
+      return;
+   char *slash = strrchr(driver, '/');
+   if (!slash)
+      return;
+   *slash = 0;
+   for (unsigned i = 0; i < sizeof(names) / sizeof(names[0]); i++) {
+      snprintf(path, sizeof(path), "%s/%s", driver, names[i]);
+      if (access(path, R_OK))
+         continue;
+      void *lib = dlopen(path, RTLD_NOW | RTLD_LOCAL);
+      if (lib)
+         tva_scoped_heap = (int (*)(const char *, uint64_t, uint32_t))
+            dlsym(lib, "livecd_dma_heap_alloc");
+      if (getenv("DMD_VA_LOG"))
+         fprintf(stderr, "tva: bridge-scoped dma-heap %s: %s\n", path,
+                 tva_scoped_heap ? "loaded" : "unusable");
+      return;
+   }
+}
+
+static int
+tva_scoped_heap_alloc(size_t size)
+{
+   static pthread_once_t once = PTHREAD_ONCE_INIT;
+   if (errno != ENOENT || access("/dev/ion", R_OK))
+      return -1;
+   pthread_once(&once, tva_scoped_heap_load);
+   if (!tva_scoped_heap)
+      return -1;
+   int fd = tva_scoped_heap("system", size, O_RDWR | O_CLOEXEC);
+   if (fd >= 0 && getenv("DMD_VA_LOG"))
+      fprintf(stderr, "tva: contiguous surface from ION (bridge-scoped) size=%zu\n", size);
+   return fd;
 }
 
 static struct sw_displaytarget *

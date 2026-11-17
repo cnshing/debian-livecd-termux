@@ -106,6 +106,11 @@ headset (pair it in Android with **Calls** enabled), EasyEffects, GSConnect, who
 process readings for Mission Center, battery status, and internal storage, SD card and USB drives
 in Files. See [session integrations](docs/native/README.md#session-integrations) to switch one off.
 
+Samsung Android 11 ARM64 devices also receive
+[`android-legacy-dex-fullscreen`](packages/android-legacy-dex-fullscreen/README.md),
+which makes the existing Termux:X11 fullscreen preference hide the DeX title bar.
+It requires a debuggable Termux:X11 build and Shizuku; the APK stays unchanged.
+
 ### Optional applications
 
 ```sh

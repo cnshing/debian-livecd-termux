@@ -150,6 +150,7 @@ class Integrations:
                     self.options = json.loads(path.read_text())
                     if not isinstance(self.options, dict):
                         raise ValueError('Expected an object in ' + str(path))
+                self.service('dex-fullscreen', 'android-legacy-dex-fullscreen')
                 self.microphone()
                 self.service('audio', 'easyeffects-bridge', '--pulse-server', self.env['PULSE_SERVER'])
                 self.service('gsconnect', 'gsconnect')

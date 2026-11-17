@@ -136,6 +136,11 @@ apt-get update
 # An on-device UPower build holds upower, which would stop android-upower replacing it.
 if dpkg -s upower >/dev/null 2>&1; then apt-mark unhold upower; fi
 mapfile -t packages < "$repo/src/native/packages.txt"
+# Legacy Samsung DeX needs app-local legacy flags in addition to insets requests.
+# The package checks Shizuku and the app's debuggable flag at runtime; no APK is replaced.
+if sh "$repo/packages/android-legacy-dex-fullscreen/device.sh"; then
+    packages+=(android-legacy-dex-fullscreen)
+fi
 if test -r /dev/mali0 && test -w /dev/mali0; then
     packages+=(mesa-vulkan-icd-panvk-kbase)
 fi

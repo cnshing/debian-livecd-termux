@@ -75,7 +75,7 @@ def ours(repo=None):
         return (repo / 'pins').read_text().split()
     names = []
     for recipe in sorted((ROOT / 'packages').iterdir()):
-        if recipe.is_dir():
+        if (recipe / 'build.sh').is_file():
             names += [recipe.name] + [s.name[:-len('.subpackage.sh')] for s in recipe.glob('*.subpackage.sh')]
     return names
 

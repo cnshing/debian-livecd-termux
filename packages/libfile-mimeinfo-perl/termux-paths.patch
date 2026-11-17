@@ -1,0 +1,18 @@
+--- a/File-BaseDir-0.09/lib/File/BaseDir.pm
++++ b/File-BaseDir-0.09/lib/File/BaseDir.pm
+@@ -46,6 +46,6 @@
+ sub xdg_data_dirs {
+   ( $ENV{XDG_DATA_DIRS}
+     ? _adapt($ENV{XDG_DATA_DIRS})
+-    : (File::Spec->catdir(_rootdir(), qw/usr local share/), File::Spec->catdir(_rootdir(), qw/usr share/))
++    : '@TERMUX_PREFIX@/share'
+   )
+ }
+@@ -55,6 +55,6 @@
+ sub xdg_config_dirs {
+   ( $ENV{XDG_CONFIG_DIRS}
+     ? _adapt($ENV{XDG_CONFIG_DIRS})
+-    : File::Spec->catdir(_rootdir(), qw/etc xdg/)
++    : '@TERMUX_PREFIX@/etc/xdg'
+   )
+ }

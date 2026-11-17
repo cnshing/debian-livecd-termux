@@ -67,6 +67,17 @@ Google Chrome is the exception: Google does not allow redistributing it, so the 
 the Termux packages it needs. An offline install still downloads Chrome from Google when the phone
 is online, and otherwise leaves it out and says how to add it later.
 
+For optional applications from the same offline repository, use APT directly;
+Termux's `pkg` wrapper can check online mirrors even with a local APT configuration:
+
+```sh
+APT_CONFIG="$HOME/.local/state/livecd-native/apt-offline/apt.conf" apt-get install mixtapes serein
+```
+
+The offline tarball must include this project's `xdg-utils` build and
+`libfile-mimeinfo-perl`. These package the MIME helpers and their Perl dependencies
+in advance. Older tarballs carry Termux's `xdg-utils`, whose setup downloads from CPAN.
+
 Then start the desktop. It opens the Termux:X11 app:
 
 ```sh

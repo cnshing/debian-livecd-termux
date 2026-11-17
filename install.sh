@@ -113,6 +113,12 @@ fi
 # replace a newer Termux build of one of our packages.
 apt=(apt-get -y --allow-downgrades -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold)
 apt-get update
+# Older offline tarballs include an xdg-utils postinst that downloads from CPAN.
+# Reject them before full-upgrade can configure that package.
+if test -n "$offline" && ! apt-cache --no-all-versions show xdg-utils | grep -q '^Depends: .*libfile-mimeinfo-perl'; then
+    echo 'This offline repository has the CPAN-dependent xdg-utils. Use a newer offline tarball with packaged MIME helpers.' >&2
+    exit 2
+fi
 # Termux's mirror picker can choose a mirror that stopped syncing; one served a ten-month-old index
 # without packages this desktop needs. Use Termux's own server then, as termux-change-repo can.
 index=$(ls "$PREFIX"/var/lib/apt/lists/*termux-main_dists_stable_*Release 2>/dev/null | head -n 1 || true)
@@ -218,7 +224,7 @@ printf '\nNative GNOME installed. Start: livecd start\n'
 printf 'Validate: livecd validate; stop: livecd stop\n'
 printf "Optional applications: apt list '?archive(^livecd\$)', then pkg install NAME\n"
 if test -n "$offline"; then
-    printf 'Without a network, install them from the offline repository: APT_CONFIG=%s pkg install NAME\n' "$offline/apt.conf"
+    printf 'Without a network, install them from the offline repository: APT_CONFIG=%s apt-get install NAME\n' "$offline/apt.conf"
 fi
 # Repeat what the preflight found, which the package output has scrolled away.
 if grep -q '^  WARN' "$common/preflight.txt"; then echo; cat "$common/preflight.txt"; fi

@@ -9,6 +9,7 @@ import shutil
 import subprocess
 import tempfile
 import unittest
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[2]
 spec = importlib.util.spec_from_file_location('offline_repo', ROOT / 'tools/offline-repo.py')
@@ -44,6 +45,44 @@ class Seeds(unittest.TestCase):
 
     def test_recipes_are_pinned(self):
         self.assertIn('livecd-desktop', offline.ours())
+
+    def test_only_buildable_recipes_are_pinned(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / 'packages/removed/__pycache__').mkdir(parents=True)
+            (root / 'packages/kept').mkdir()
+            (root / 'packages/kept/build.sh').touch()
+            with mock.patch.object(offline, 'ROOT', root):
+                self.assertEqual(offline.ours(), ['kept'])
+
+    def test_xdg_utils_builds_with_packaged_mime_helpers(self):
+        spec = importlib.util.spec_from_file_location('recipes', ROOT / 'tools/recipes.py')
+        recipes = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(recipes)
+        order = recipes.build_order(['xdg-utils'])
+        self.assertLess(order.index('libfile-mimeinfo-perl'), order.index('xdg-utils'))
+        self.assertTrue({'xdg-utils', 'libfile-mimeinfo-perl'} <= set(offline.ours()))
+
+    def test_old_offline_tarball_is_rejected_before_package_configuration(self):
+        installer = (ROOT / 'install.sh').read_text()
+        guard = installer.split('# Older offline tarballs include', 1)[1].split(
+            '# Termux\'s mirror picker', 1)[0]
+        guard = '# Older offline tarballs include' + guard
+        for offline_mode, depends, expected in (
+                ('yes', 'perl, make', 2),
+                ('yes', 'libfile-mimeinfo-perl (>= 0.37), file', 0),
+                ('', 'perl, make', 0)):
+            with self.subTest(offline=offline_mode, depends=depends):
+                script = '''set -euo pipefail
+offline=$1
+candidate_depends=$2
+apt-cache() { printf 'Package: xdg-utils\\nDepends: %s\\n' "$candidate_depends"; }
+''' + guard
+                result = subprocess.run(['bash', '-c', script, 'guard', offline_mode, depends],
+                                        text=True, capture_output=True)
+                self.assertEqual(result.returncode, expected, result.stderr)
+                if expected:
+                    self.assertIn('newer offline tarball', result.stderr)
 
     def test_upstream_subpackages_are_pinned(self):
         """Termux's newer code-is-code-oss would otherwise demand its own newer code-oss."""

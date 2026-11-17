@@ -68,9 +68,9 @@ on:
   push:
     tags: ["v*"]
     branches: [main]
-    paths: ["packages/**", "src/**", "tools/recipes.py", "tools/termux-build.json", "tools/make-apt-repo.sh", "tools/offline-repo.py", "tools/termux-mirror.py", "tests/packaging/test-offline-repo.py", "tests/packaging/*nautilus*", "tests/packaging/test-webext.py", ".github/workflows/packages.yml"]
+    paths: ["packages/**", "src/**", "tools/recipes.py", "tools/termux-build.json", "tools/make-apt-repo.sh", "tools/offline-repo.py", "tools/termux-mirror.py", "tests/packaging/test-offline-repo.py", "tests/packaging/check-mimeinfo-artifacts.py", "tests/packaging/*nautilus*", "tests/packaging/test-webext.py", ".github/workflows/packages.yml"]
   pull_request:
-    paths: ["packages/**", "src/**", "tools/recipes.py", "tools/termux-build.json", "tools/make-apt-repo.sh", "tools/offline-repo.py", "tools/termux-mirror.py", "tests/packaging/test-offline-repo.py", "tests/packaging/*nautilus*", "tests/packaging/test-webext.py", ".github/workflows/packages.yml"]
+    paths: ["packages/**", "src/**", "tools/recipes.py", "tools/termux-build.json", "tools/make-apt-repo.sh", "tools/offline-repo.py", "tools/termux-mirror.py", "tests/packaging/test-offline-repo.py", "tests/packaging/check-mimeinfo-artifacts.py", "tests/packaging/*nautilus*", "tests/packaging/test-webext.py", ".github/workflows/packages.yml"]
 
 permissions:
   contents: read
@@ -523,6 +523,11 @@ jobs:
       run: |
         if test -n "$(find debs -name 'android-firefox-video_*.deb' -print -quit)"; then
           python3 tests/packaging/check-browser-video-artifacts.py debs
+        fi
+    - name: Check packaged offline MIME helpers
+      run: |
+        if test -n "$(find debs -name 'xdg-utils_*.deb' -print -quit)"; then
+          python3 tests/packaging/check-mimeinfo-artifacts.py debs
         fi
     # What the pin list and the offline packages need from the pinned builder: the recipes' subpackage
     # files, its keyring and its bootstrap script.

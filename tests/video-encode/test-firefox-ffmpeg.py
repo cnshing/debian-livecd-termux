@@ -12,6 +12,14 @@ and the timestamps it sends. Firefox's WebRTC declares the H.264 level's limit
 stream's bitrate over its own timestamps must stay near the plain 30 fps run.
 The last case lowers bit_rate halfway, as Firefox's WebRTC does when congestion
 control moves its target; the second half must follow the new bitrate.
+
+--trace runs longer streams (15 s at 30 fps, the target changed at 5 s) and records every
+packet's PTS, size and key flag, so a late or ignored update can be told apart from
+packets still in the encoder's pipeline: each output packet is charged to the second of
+its own timestamp. Two contents are used. "noise" (fresh full-range 8x8 blocks, as in the
+rate checks) costs more than 500 kb/s even at the quantizer's ceiling, so its controls
+show the floor; "texture" (low-contrast blocks) does not. Each step is checked against a
+stream opened at the new rate. Saved streams can be decoded and looked at.
 """
 import argparse
 import ctypes as C
@@ -42,10 +50,19 @@ class Frame(C.Structure):  # The start of AVFrame, libavutil 61.
 
 class Packet(C.Structure):  # The start of AVPacket, libavcodec 63.
     _fields_ = [('buf', C.c_void_p), ('pts', C.c_int64), ('dts', C.c_int64),
-                ('data', C.c_void_p), ('size', C.c_int)]
+                ('data', C.c_void_p), ('size', C.c_int), ('stream_index', C.c_int), ('flags', C.c_int)]
 
 
-def probe(directory, name, rate=None):
+# name: (content, opening bitrate, bitrate from picture TRACE_CHANGE on, or None)
+# Each opened-at-rate control runs before the steps compared with it.
+TRACES = {'noise-500': ('noise', 500000, None), 'noise-step-down': ('noise', 2000000, 500000),
+          'texture-500': ('texture', 500000, None), 'texture-2000': ('texture', 2000000, None),
+          'texture-step-down': ('texture', 2000000, 500000), 'texture-step-up': ('texture', 500000, 2000000)}
+TRACE_PICTURES, TRACE_CHANGE, TRACE_SETTLE = 450, 150, 2.0  # pictures, picture, seconds
+LOW_CONTRAST = bytes(112 + value * 32 // 256 for value in range(256))
+
+
+def probe(directory, name, rate=None, trace=None, save=None):
     util = C.CDLL(str(directory / 'libavutil.so.61'), mode=C.RTLD_LOCAL)
     codec = C.CDLL(str(directory / 'libavcodec.so.63'), mode=C.RTLD_LOCAL)
     codec.avcodec_find_encoder_by_name.argtypes = [C.c_char_p]
@@ -67,8 +84,11 @@ def probe(directory, name, rate=None):
     if not context or not packet:
         raise MemoryError('codec context/packet')
     try:
+        if trace:
+            rate = (30, (33333,))
         options = {'video_size': f'{WIDTH}x{HEIGHT}', 'pixel_format': 'yuv420p',
-                   'time_base': '1/1000000' if rate else '1/30', 'b': str(BITRATE), 'bf': '0', 'g': '30'}
+                   'time_base': '1/1000000' if rate else '1/30',
+                   'b': str(TRACES[trace][1] if trace else BITRATE), 'bf': '0', 'g': '30'}
         if name == 'h264_vaapi':
             options['profile'] = '66'
         for key, value in options.items():
@@ -86,6 +106,11 @@ def probe(directory, name, rate=None):
         ret = codec.avcodec_open2(context, encoder, None)
         if ret < 0:
             raise RuntimeError(f'open: {ret}')
+        if trace:
+            content, _, change = TRACES[trace]
+            print(json.dumps(encode(util, codec, context, packet, rate[1], change, content=content,
+                                    pictures=TRACE_PICTURES, at=TRACE_CHANGE, save=save)))
+            return
         if rate:
             print(json.dumps(encode(util, codec, context, packet, rate[1], rate[2] if len(rate) > 2 else None)))
             return
@@ -100,8 +125,13 @@ def probe(directory, name, rate=None):
         codec.avcodec_free_context(C.byref(context))
 
 
-def encode(util, codec, context, packet, intervals, change=None):
-    """Encode PICTURES pictures of fresh 8x8 blocks, which cost bits at any quantizer."""
+def encode(util, codec, context, packet, intervals, change=None, content='noise', pictures=PICTURES,
+           at=None, save=None):
+    """Encode pictures of fresh 8x8 blocks. Full-range blocks cost bits at any quantizer;
+    low-contrast ones ("texture") let a high quantizer reach a low rate."""
+    traced = at is not None
+    at = pictures // 2 if at is None else at
+    trace, stream = [], save.open('wb') if save else None
     util.av_frame_alloc.restype = C.c_void_p
     util.av_frame_get_buffer.argtypes = [C.c_void_p, C.c_int]
     util.av_frame_unref.argtypes = [C.c_void_p]
@@ -124,22 +154,28 @@ def encode(util, codec, context, packet, intervals, change=None):
                 raise RuntimeError(f'receive: {ret}')
             size += output.size
             packets += 1
+            trace.append((output.pts, output.size, output.flags & 1))
+            if stream:
+                stream.write(C.string_at(output.data, output.size))
             codec.av_packet_unref(packet)
 
     try:
-        for index in range(PICTURES):
+        for index in range(pictures):
             util.av_frame_unref(pointer)
             frame.width, frame.height, frame.format = WIDTH, HEIGHT, 0  # AV_PIX_FMT_YUV420P
             ret = util.av_frame_get_buffer(pointer, 0)
             if ret < 0:
                 raise RuntimeError(f'frame buffer: {ret}')
             for block in range(HEIGHT // 8):
-                row = b''.join(bytes([value]) * 8 for value in os.urandom(WIDTH // 8))
+                values = os.urandom(WIDTH // 8)
+                if content == 'texture':
+                    values = values.translate(LOW_CONTRAST)
+                row = b''.join(bytes([value]) * 8 for value in values)
                 for line in range(8):
                     C.memmove(frame.data[0] + (block * 8 + line) * frame.linesize[0], row, WIDTH)
             for plane in (1, 2):
                 C.memset(frame.data[plane], 128, frame.linesize[plane] * (HEIGHT // 2))
-            if index == PICTURES // 2:
+            if index == at:
                 half = (size, pts)
                 if change:
                     ret = util.av_opt_set(context, b'b', str(change).encode(), 0)
@@ -156,6 +192,10 @@ def encode(util, codec, context, packet, intervals, change=None):
             raise RuntimeError('drain did not end')
     finally:
         util.av_frame_free(C.byref(pointer))
+        if stream:
+            stream.close()
+    if traced:
+        return {'packets': trace, 'change_pts': half[1], 'end_pts': pts}
     return {'packets': packets, 'bytes': size,
             'kbps': round(size * 8 / (pts / 1e6) / 1000, 1),
             'second_half_kbps': round((size - half[0]) * 8 / ((pts - half[1]) / 1e6) / 1000, 1)}
@@ -191,15 +231,78 @@ def rates(directory, name):
     return failed
 
 
+def windows(packets, end_pts):
+    """kb/s in each whole second of output PTS."""
+    seconds = [0] * int(end_pts // 1000000)
+    for pts, size, _ in packets:
+        if 0 <= pts // 1000000 < len(seconds):
+            seconds[int(pts // 1000000)] += size * 8 / 1000
+    return [round(value, 1) for value in seconds]
+
+
+def traces(directory, name, out, tolerance=0.25):
+    """Run each trace case in a child; check every step against the target from TRACE_SETTLE
+    seconds after it, and against a stream opened at that rate."""
+    out.mkdir(parents=True, exist_ok=True)
+    measured, failed = {}, 0
+    for case in TRACES:
+        result = subprocess.run([sys.executable, __file__, '--library-dir', str(directory), '--codec', name,
+                                 '--trace-case', case, '--save', str(out / f'{name}-{case}.bin')],
+                                capture_output=True, text=True, timeout=300)
+        try:
+            data = json.loads(result.stdout.strip().splitlines()[-1])
+        except (IndexError, ValueError):
+            print(f'FAIL {name}: trace {case}: exit {result.returncode}\n{result.stderr[-2000:]}', flush=True)
+            failed += 1
+            continue
+        (out / f'{name}-{case}.json').write_text(json.dumps(data) + '\n')
+        content, start, change = TRACES[case]
+        per_second = windows(data['packets'], data['end_pts'])
+        first = int(data['change_pts'] // 1000000)
+        settled = first + int(TRACE_SETTLE)
+        target = (change or start) / 1000
+        after = per_second[settled:] if change else per_second[1:]
+        mean = round(sum(after) / len(after), 1)
+        # Seconds after the change until every later second is within the tolerance.
+        reach = next((index - first for index in range(first, len(per_second))
+                      if all(abs(v - target) <= tolerance * target for v in per_second[index:])), None)
+        measured[case] = mean
+        keys = sum(key for _, _, key in data['packets'])
+        line = (f'{name}: trace {case}: {len(data["packets"])} packets, {keys} key, per second {per_second}, '
+                f'mean {mean} kb/s ' + (f'from {settled} s, target {target:g}, within {tolerance:.0%} after '
+                                        f'{reach} s' if change else f'for {target:g} kb/s opened'))
+        ok = len(data['packets']) == TRACE_PICTURES
+        if change:
+            control = measured.get(f'{content}-{change // 1000}')
+            # A step must reach what a stream opened at that rate reaches.
+            if control is not None:
+                line += f', opened-at-rate control {control} kb/s'
+                ok = ok and abs(mean - control) <= tolerance * control
+            if content == 'texture':
+                ok = ok and reach is not None and reach <= TRACE_SETTLE
+        elif content == 'texture':
+            ok = ok and abs(mean - target) <= tolerance * target
+        failed += not ok
+        print(('PASS ' if ok else 'FAIL ') + line, flush=True)
+    return failed
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--library-dir', required=True, type=Path)
     parser.add_argument('--codec', choices=['h264_vaapi', 'hevc_vaapi', 'vp9_vaapi'])
     parser.add_argument('--rate', type=int, help=argparse.SUPPRESS)
+    parser.add_argument('--trace-case', choices=list(TRACES), help=argparse.SUPPRESS)
+    parser.add_argument('--save', type=Path, help=argparse.SUPPRESS)
+    parser.add_argument('--trace', type=Path, metavar='NEW_DIR',
+                        help='only run the long per-packet bitrate traces for H.264, saving them here')
     args = parser.parse_args()
     if args.codec:
-        probe(args.library_dir, args.codec, None if args.rate is None else RATES[args.rate][1:])
+        probe(args.library_dir, args.codec, None if args.rate is None else RATES[args.rate][1:],
+              trace=args.trace_case, save=args.save)
         return 0
+    if args.trace:
+        return bool(traces(args.library_dir, 'h264_vaapi', args.trace))
     failed = 0
     for name in ['h264_vaapi', 'hevc_vaapi', 'vp9_vaapi']:
         result = subprocess.run([sys.executable, __file__, '--library-dir',

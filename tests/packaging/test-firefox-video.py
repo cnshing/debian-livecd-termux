@@ -185,28 +185,51 @@ class FirefoxVideo(unittest.TestCase):
                 self.assertEqual(env.get('TERMUX_VA_SYNC_END_PICTURE'), expected)
 
 
-    def test_encode_preference_is_opt_in_on_mali_with_an_encoding_runtime(self):
+    def test_encode_preference_follows_the_launcher_decision(self):
+        for expected in (False, True):
+            with self.subTest(expected=expected), \
+                    mock.patch.object(Path, 'home', return_value=Path(self.temporary.name)):
+                acceleration.command_line('firefox', [str(self.prefix / 'bin/firefox')], 'bionic', True, True,
+                                          firefox_encode=expected)
+                text = (Path(self.temporary.name) / '.config/livecd-native/firefox/user.js').read_text()
+                self.assertEqual('user_pref("media.use-remote-encoder.video.platform", true);' in text, expected)
+
+    def test_encoding_default_on_adreno_opt_in_on_mali(self):
         manifest = self.runtime / 'manifest.json'
         data = json.loads(manifest.read_text())
-        cases = (({}, True, True, False),                        # default: off
-                 ({'firefox_encode': True}, False, True, False),  # runtime without encoders
-                 ({'firefox_encode': True}, True, False, False),  # Adreno: not qualified
-                 ({'firefox_encode': True}, True, True, True))
-        for config, encoders, mali, expected in cases:
-            with self.subTest(config=config, encoders=encoders, mali=mali):
+        socket = Path(self.temporary.name) / 'va.sock'
+        status = Path(self.temporary.name) / 'status'
+        listed = 'video/avc OMX.qcom.video.encoder.avc\nvideo/hevc OMX.qcom.video.encoder.hevc\n'
+        # (settings, mali, runtime revision, daemon encoder list, runtime has encoders, expected)
+        cases = (({}, False, 7, listed, True, True),                       # Adreno default
+                 ({'firefox_encode': False}, False, 7, listed, True, False),  # user turned it off
+                 ({}, False, 6, listed, True, False),                      # runtime before the WebRTC fix
+                 ({'firefox_encode': True}, False, 6, listed, True, True),  # explicit opt-in still works
+                 ({}, False, 7, 'video/hevc OMX.qcom.video.encoder.hevc\n', True, False),  # no H.264 encoder
+                 ({}, False, 7, None, True, False),                        # no daemon list
+                 ({}, False, 7, listed, False, False),                     # runtime without encoders
+                 ({}, True, 7, listed, True, False),                       # Mali: still opt-in
+                 ({'firefox_encode': True}, True, 7, listed, True, True))
+        for config, mali, revision, encoders, runtime_encodes, expected in cases:
+            with self.subTest(config=config, mali=mali, revision=revision, encoders=encoders,
+                              runtime_encodes=runtime_encodes):
                 data.pop('encoding', None)
-                if encoders:
+                if runtime_encodes:
                     data['encoding'] = {'input': 'i420', 'codecs': ['h264', 'hevc', 'vp9']}
                 manifest.write_text(json.dumps(data))
+                listing = Path(str(socket) + '.encoders')
+                listing.unlink(missing_ok=True)
+                if encoders is not None:
+                    listing.write_text(encoders)
+                status.write_text('Package: android-firefox-video\nStatus: install ok installed\n'
+                                  f'Version: 9.0.2-{revision}\n')
                 with mock.patch.object(acceleration, 'settings', return_value=config), \
                         mock.patch.object(acceleration, 'mali_usable', return_value=mali), \
-                        mock.patch.object(Path, 'home', return_value=Path(self.temporary.name)):
-                    acceleration.command_line('firefox', [str(self.prefix / 'bin/firefox')], 'bionic', True, True)
-                text = (Path(self.temporary.name) / '.config/livecd-native/firefox/user.js').read_text()
-                self.assertEqual('media.use-remote-encoder.video.platform' in text, expected)
-                # Turning it off again removes it from the managed block.
-                if expected:
-                    self.assertIn('user_pref("media.use-remote-encoder.video.platform", true);', text)
+                        mock.patch.object(acceleration, 'DPKG_STATUS', status), \
+                        mock.patch.object(acceleration.os.path, 'exists',
+                                          side_effect=lambda path: str(path) == '/dev/kgsl-3d0' or
+                                          os.path.lexists(path)):
+                    self.assertEqual(acceleration.firefox_encode_ready(socket), expected)
 
 if __name__ == '__main__':
     unittest.main()

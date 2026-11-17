@@ -111,10 +111,31 @@ IO-coherent, so PanVK asks for `/dev/dma_heap/system-uncached` for HOST_COHERENT
 - Test CPU-write/GPU-read and the reverse, and rerun the desktop and Ghostty checks, before
   enabling it.
 
+## The desktop session: bridge-scoped ION (2026-11-17, Note10+)
+
+The session deliberately does not preload the library (see above), so on ION-only phones every
+VA client in the session (FFmpeg, GStreamer, the browser harness's own probes) printed
+`tva: contiguous video buffer failed` per surface and fell back to one dma-buf per plane.
+
+Now, when `open("/dev/dma_heap/system")` fails, the bridge `dlopen`s the same
+`libandroid-dma-heap.so` (beside libgallium; `lib/` in the glibc stack) and calls its exported
+`livecd_dma_heap_alloc()`. A library loaded with `dlopen` and `RTLD_LOCAL` interposes nothing, so
+only the bridge's own contiguous NV12 surfaces come from ION; Turnip, PanVK and everything else
+in the process still see no `/dev/dma_heap`. The library declines with `ENOENT` where real heaps
+exist, without `/dev/ion`, or with `LIVECD_DMA_HEAP_ION=0`. Mali's softpipe winsys keeps its
+heap-only allocator, so the S20 session is unchanged. With the launcher's preload the first
+`open` already succeeds and nothing changes for browsers.
+
+- Host test: `tests/dma-heap/test-dma-heap.sh` loads the library with `dlopen` against the fake
+  ION device, checks the allocation, and checks that the process's own `open` of the heap node
+  still fails (no interposition).
+- Note10+, FFmpeg VA-API VP9 through a session-like environment (render-node preload only,
+  `DMD_VA_LOG=1`): 12 of 12 surfaces `contiguous NV12 ... uv_offset=237568` from ION
+  (bridge-scoped), 48/48 frames bit-exact against software. Control `LIVECD_DMA_HEAP_ION=0`:
+  every surface falls back to separate planes, also bit-exact.
+
 ## Left
 
-- **Note10+ regression run.** It is also ION-only, so its bridge now depends on the preload.
-  It has not been run.
 - **The desktop session through the preload**, which changes PanVK's HOST_COHERENT memory to
   uncached ION. It needs the desktop and Ghostty checks before `graphics.py` loads it.
 - `opendir("/dev/dma_heap")` listing is not emulated yet.

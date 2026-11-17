@@ -40,6 +40,8 @@ try:
     owner = status['pid']
     wid = wait(window)[-1]
     subprocess.run(['xdotool', 'windowfocus', '--sync', wid], env=env, check=True)
+    # As in test-terminal.py, mapping can precede Ghostty's PTY/input setup.
+    time.sleep(2)
     marker = STATE / 'standalone-identity.json'
     marker.unlink(missing_ok=True)
     code = 'import json,os,pathlib;pathlib.Path(' + repr(str(marker)) + ').write_text(json.dumps({"uid":os.getuid(),"cwd":os.getcwd()}))'

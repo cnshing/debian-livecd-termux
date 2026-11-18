@@ -94,13 +94,11 @@ the session's VA environment):
 
 ## Encoding quality and application boundaries
 
-- Firefox's experimental WebRTC and WebCodecs H.264 picture checks pass on
-  the installed patched pair. Five frame-rate/bitrate cases pass, but a 2 Mb/s
-  to 500 kb/s change produces 1.151 Mb/s over the next 60 pictures. The daemon
-  log proves the correct new target reached `AMediaCodec_setParameters`.
-  Record per-packet size/PTS over a longer run to distinguish firmware
-  convergence from ignored updates, then qualify real congestion control.
-  Keep the default off meanwhile ([details](encode-firefox.md)).
+- Firefox encoding is on by default on Adreno (2026-11-18, firefox 159.0-103): WebRTC,
+  WebCodecs, a sender cap step and a throttled-link loopback pass through the installed
+  launcher. The earlier 1.151 Mb/s was the test content's floor; the defect was Firefox's
+  WebRTC `SetBitrate` (patch 1103). Remaining, shared with Chromium: at low rates Qualcomm's
+  CBR leaves flat areas stale; try VBR or intra refresh in termux-va ([details](encode-firefox.md)).
 - Chromium MediaRecorder's hardware H.264 output has wrong colour signalling.
   Inspect frame colour space and range through `VideoTrackRecorder`,
   `H264VaapiVideoEncoderDelegate::UpdateSPS`, packed SPS handling and the

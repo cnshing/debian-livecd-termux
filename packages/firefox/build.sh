@@ -1,5 +1,5 @@
 # Termux's firefox recipe at 538685c906074926fd19650e38c6dad91379eb0f, kept whole by
-# upstream.json, plus three WebCodecs/WebRTC encoder fixes (1101-1104) that Firefox 159
+# upstream.json, plus four WebCodecs/WebRTC encoder patches (1101-1104) that Firefox 159
 # lacks. They only matter with media.use-remote-encoder.video.platform on, which the
 # launcher sets by default on Adreno and on opt-in on Mali (docs/native/handoff/encode-firefox.md).
 TERMUX_PKG_HOMEPAGE=https://www.mozilla.org/firefox

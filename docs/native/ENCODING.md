@@ -44,7 +44,7 @@ program (GStreamer va, FFmpeg VA-API, ...)
 
 On Mali (`/dev/mali0`) the launcher turns on `AcceleratedVideoEncoder` for
 Chromium and Chrome (`command_line()` in
-[`acceleration.py`](../../src/native/acceleration.py)). Firefox needs an opt-in.
+[`acceleration.py`](../../src/native/acceleration.py)). Firefox needs an opt-in on Mali; on Adreno it is on by default (2026-11-18).
 On Adreno (Note10+, 2026-11-16) it is on for Chromium and Chrome: WebCodecs H.264 passed 60 of 60
 frames on `OMX.qcom.video.encoder.avc` (maximum colour error 10) and WebRTC H.264 287 frames,
 received picture viewed. Chrome uses this project's source-built glibc VA driver,
@@ -59,7 +59,7 @@ VA-API HEVC encoding.
 | --- | --- | --- | --- |
 | Chromium (this project's build) | **On** from `156.0.8078.79-3`; older revisions stay off | Passes: 286 and 284 frames, received 640x360 pictures viewed | Passes: H.264 and VP9, 60 of 60 frames on the Exynos encoders, maximum colour error 12 |
 | Google Chrome (prebuilt, Bionilux) | **On**, by the user's decision, for WebRTC | Passes with Bionilux `0.5.0-2`: 278 and 280 frames, received frames viewed | **Crashes the GPU process**; the page gets `OperationError: Encoding error.` This cannot be fixed outside Chrome |
-| Firefox | Off; opt in with `"firefox_encode": true` | Passed at 640x360 with an earlier private runtime | 60 of 60 frames, but wrong colours from Firefox's own BT.709 label; the patched build below relabels it, untested on the phone |
+| Firefox | Off; opt in with `"firefox_encode": true` (on by default on Adreno) | Passed at 640x360 with an earlier private runtime | 60 of 60 frames, but wrong colours from Firefox's own BT.709 label; the patched build below relabels it, untested on the phone |
 
 **Chromium.** Revision 1 crashed: WebCodecs on Linux asks for GPU-memory-buffer
 input, which is shared memory here, and a `gfx::NATIVE_PIXMAP` check in the GPU
@@ -83,15 +83,14 @@ always requests GPU-memory-buffer input, and Chrome is prebuilt, so it cannot be
 patched. With the encoder on, a page that asks WebCodecs for hardware encoding
 crashes Chrome's GPU process. [Handoff](handoff/encode-chrome.md).
 
-**Firefox.** On Adreno, Firefox `159.0-101` and android-firefox-video `9.0.2-6`
-passed private WebRTC H.264 and all 60 WebCodecs H.264 pictures, with maximum
-colour error 4. Encoding stays off: a later rate-control test requested a
-midstream decrease to 500 kb/s but measured 1.151 Mb/s for the second half.
-Mali remains opt-in.
-[`packages/firefox`](../../packages/firefox) builds Firefox with
-two patches. One labels WebCodecs output BT.601, the matrix Firefox actually
-converts with. The other lets WebRTC change a VA-API encoder's bitrate
-mid-call. The installed `android-firefox-video` manifest must list its encoders.
+**Firefox.** On Adreno, hardware encoding (WebRTC and WebCodecs H.264) is on by default
+when the session daemon lists a hardware H.264 encoder and android-firefox-video is revision 8
+or later. Installed firefox `159.0-103` passed WebRTC, WebCodecs (60/60, error 4), a sender cap
+step and a throttled-link loopback (adapted within 1 s, no stalls, recovered). The earlier
+bitrate failure was the test content's floor; the real bug was Firefox's WebRTC
+`SetBitrate`, which [`packages/firefox`](../../packages/firefox) now patches (1103) along with
+the WebCodecs BT.601 label (1101) and `Reconfigure` (1102). VP9 falls back to software (no
+hardware VP9 encoder). Mali remains opt-in, not re-qualified.
 [Handoff](handoff/encode-firefox.md).
 
 In every browser the Exynos encoders refuse MediaCodec's `low-latency` key, so
@@ -197,7 +196,7 @@ All changes are generic: none is specific to a program.
 | Chromium (Termux) | Our VA-API build, revision 3 or later, encodes WebRTC and WebCodecs H.264/VP9 on Mali and H.264 on Adreno, on by default on both |
 | Google Chrome | Glibc stack under Bionilux `0.5.0-2`. WebRTC encodes on Mali, on by default there; WebCodecs hardware encoding crashes its GPU process |
 | ungoogled-chromium | Glibc stack; encoding untested and not enabled |
-| Firefox | Opt-in only (`firefox_encode`), with the patched [`packages/firefox`](../../packages/firefox) build; not yet phone-tested. See the [handoff](handoff/encode-firefox.md) |
+| Firefox | On by default on Adreno, opt-in (`firefox_encode`) on Mali, with the patched [`packages/firefox`](../../packages/firefox) build. See the [handoff](handoff/encode-firefox.md) |
 
 ## Limits
 

@@ -175,24 +175,19 @@ Known, not 10-bit specific: GStreamer's `vah265enc`/`vah264enc` output is not cr
 
 | Feature | FFmpeg VA / GStreamer VA | Chromium | Chrome | Firefox |
 | --- | --- | --- | --- | --- |
-| AVC hardware encode | Existing default | Existing WebRTC/WebCodecs default | **New WebRTC default** with the validated source-built driver | Experimental call/pixel tests pass; default remains off |
+| AVC hardware encode | Existing default | Existing WebRTC/WebCodecs default | **New WebRTC default** with the validated source-built driver | **Default on** (2026-11-18): call, pixel, cap-step and throttled-link tests pass on installed 159.0-103 |
 | HEVC Main encode | Existing default | Not offered by tested VA WebCodecs path | Not qualified | Not qualified |
 | VP8 hardware encode | **On** (`CODEC_VP8_ENC` 14, `OMX.qcom.video.encoder.vp8`); FFmpeg `vp8_vaapi` 90/90 frames decode in libvpx, SSIM 0.998; GStreamer `vavp8enc` 90/90 | Chromium: WebRTC hardware 3/3 runs (280 frames), WebCodecs 60/60 (max colour error 6). Chrome: WebRTC hardware sessions every run, picture check 2/3 (starts at 236 kb/s and lags behind the changing test canvas); WebCodecs fails with Chrome's known GPU-memory-buffer encoding error | Software | Software |
 | VP9 / AV1 hardware encode | Not offered by daemon | Software | Software | Software |
 | Main10 / HDR10 HEVC encode | Bridge takes NV12 only | Not qualified | Not qualified | Not qualified |
 
-Firefox `159.0-101` / android-firefox-video `9.0.2-6` passed H.264 WebRTC
-(244 encoded / 243 decoded, 640x360) and WebCodecs (60/60, maximum channel
-error 4, correct BT.601 metadata). Its five fixed/frame-rate cases passed
-at 1.974–2.035 Mb/s for 2 Mb/s. **It failed the midstream bitrate decrease:**
-the remaining 60 pictures averaged 1.151 Mb/s for a 500 kb/s request. The
-daemon received 499995 b/s and reported no MediaCodec rejection. Therefore
-the proposed default was not shipped; Mali's existing opt-in remains intact.
-The earlier x1s reconfiguration fixes (`675ee1c`) were already included.
-This test measures immediately after submission without aligning output
-packet timestamps or allowing convergence, whereas the older daemon test
-skips 15 pictures after a target change. The result does not establish an
-ignored bitrate update; a longer timestamp-aligned trace is still needed.
+Firefox (2026-11-18): installed firefox `159.0-103` / android-firefox-video `9.0.2-8` /
+livecd-desktop `0.2.0-43`, encoding on by default. WebRTC H.264 640x360 and WebCodecs 60/60
+(error 4) pass; a 200 kb/s sender cap is followed from the first second; through a 250 kb/s
+shaped link the call adapts within 1 s with 0% loss and no stall, and returns to 510 kb/s.
+The 2026-11-16 "1.151 Mb/s" failure was the test content's floor (noise opened at 500 kb/s also
+gives 1118 kb/s); the real defect was Firefox's unimplemented WebRTC `SetBitrate` (patch 1103).
+Shared with Chromium: at 200-500 kb/s on busy content Qualcomm's CBR leaves flat areas stale.
 See [Firefox handoff](handoff/encode-firefox.md).
 
 Chromium's MediaRecorder did invoke Qualcomm's AVC encoder at 1280x720, but
@@ -245,8 +240,8 @@ by that route; copying a library alone does not qualify OpenCL.
 
 Preserved 10-bit/HDR remains.
 The [implementation handoff](handoff/note10-codec-parity.md) identifies the
-frontend, protocol and buffer changes. Firefox rate control needs further
-qualification; Chromium MediaRecorder colour metadata needs fixing and rerunning. High-resolution
+frontend, protocol and buffer changes. Firefox rate control is qualified (default on); Qualcomm's low-rate stale flat areas
+(Chromium and Firefox) remain. Chromium MediaRecorder colour metadata needs fixing and rerunning. High-resolution
 throughput, OpenCL, WebGPU and stock-only graphics extensions remain gaps or
 unqualified paths; no defaults were changed for those rows.
 
@@ -273,8 +268,8 @@ python tests/video-encode/test-browser-encode.py chrome --out ~/p/chrome-encode
 ```
 
 Use a new short output path for every run. The test fails on wrong size,
-colour, missing hardware sessions or GPU crash. Firefox experiments require
-`--firefox-encode`; that switch does not change the installed default. Do not
+colour, missing hardware sessions or GPU crash. `--mode step` and `--mode adapt` test
+congestion control; `--firefox-encode` forces Firefox encoding where the launcher would not. Do not
 run the hardware Chrome WebCodecs path repeatedly: its prebuilt binary's native
 pixmap assertion remains unresolved ([details](handoff/encode-chrome.md)).
 

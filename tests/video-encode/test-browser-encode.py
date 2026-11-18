@@ -17,15 +17,16 @@ termux-va daemon. Nothing touches the live desktop, its browser profiles or the 
                  the bars' RGB back. Control: the same streams with the signalling removed
                  must decode wrong for the full range sources.
 
-  step           a WebRTC call whose sender is capped at 500 kb/s (RTCRtpSender maxBitrate)
+  step           a WebRTC call whose sender is capped at 200 kb/s (RTCRtpSender maxBitrate)
                  for 15 s, then uncapped: the sent rate must stay within 25% of the cap from
-                 3 s after the change, with no stall.
-  adapt          the same call with its media through a shaping UDP relay limited to 400 kb/s
+                 3 s after the change, with no stall, and return to 90% of its earlier rate.
+                 In both modes the call must first send at least 1.5 times the constraint.
+  adapt          the same call with its media through a shaping UDP relay limited to 250 kb/s
                  for 20 s (packets over 150 ms of queue are dropped), then unlimited: congestion
                  control must bring the sent rate under 125% of the limit within 8 s, keep the
                  pictures moving (no second without a picture, at least 10 a second once
                  adapted), keep at least 320x180 with correct colours, keep loss under 5% once
-                 adapted, and climb back above 1.5 times the limit afterwards.
+                 adapted, and return to at least 90% of its earlier rate afterwards.
                  The canvas carries two bands of low-contrast noise in these modes, so the
                  encoder cannot meet a lower target by its content alone.
 
@@ -438,9 +439,9 @@ class Relay:
                 self.near.sendto(data, self.sender)
 
 
-PLANS = {'step': [{'seconds': 12, 'maxBitrate': 0}, {'seconds': 15, 'maxBitrate': 500000},
+PLANS = {'step': [{'seconds': 12, 'maxBitrate': 0}, {'seconds': 15, 'maxBitrate': 200000},
                   {'seconds': 12, 'maxBitrate': 0}],
-         'adapt': [{'seconds': 12, 'limit': 0}, {'seconds': 20, 'limit': 400000}, {'seconds': 20, 'limit': 0}]}
+         'adapt': [{'seconds': 12, 'limit': 0}, {'seconds': 20, 'limit': 250000}, {'seconds': 20, 'limit': 0}]}
 
 
 def judge_adaptation(case, mode):
@@ -462,6 +463,12 @@ def judge_adaptation(case, mode):
         start += phase['seconds']
         target = (phase.get('limit') or phase.get('maxBitrate') or 0) / 1000
         if index == constrained:
+            constrained_start = span[0]
+            # A sender already under the constraint proves nothing about adapting to it.
+            before = sent[span[0] - 5:span[0]]
+            if sum(before) / len(before) < 1.5 * target:
+                failures.append(f'sent only {sum(before) / len(before):.0f} kb/s before a {target:g} kb/s '
+                                'constraint; the test needs at least 1.5 times it')
             allowed = 8 if mode == 'adapt' else 3
             reach = next((i - span[0] for i in span if all(sent[j] <= 1.25 * target for j in range(i, span[-1] + 1))), None)
             report['reach_seconds'] = reach
@@ -485,11 +492,15 @@ def judge_adaptation(case, mode):
                 if min(p or 0 for p in slow) < 10:
                     failures.append(f'only {min(p or 0 for p in slow)} pictures in a second once adapted')
         if index == constrained + 1:
+            # Back to the rate before the constraint. Not higher: libwebrtc caps a stream by its
+            # resolution (500 kb/s at 320x180), and its H.264 quality scaler keeps a busy picture
+            # small (QP above 24), so a call may legitimately stay at its starting size.
             late = sent[span[-1] - 4:span[-1] + 1]
-            previous = (plan[constrained].get('limit') or plan[constrained].get('maxBitrate')) / 1000
-            report['recovered_kbps'] = max(late)
-            if max(late) < 1.5 * previous:
-                failures.append(f'sent rate did not climb back above {1.5 * previous:g} kb/s ({max(late)})')
+            before = sent[constrained_start - 5:constrained_start]
+            report['recovered_kbps'] = round(sum(late) / len(late), 1)
+            report['before_kbps'] = round(sum(before) / len(before), 1)
+            if report['recovered_kbps'] < 0.9 * report['before_kbps']:
+                failures.append(f'sent rate did not return to {report["before_kbps"]} kb/s ({report["recovered_kbps"]})')
     stalls = [i for i in range(3, len(rows)) if not pictures[i]]
     if stalls:
         failures.append(f'no picture in seconds {stalls}')

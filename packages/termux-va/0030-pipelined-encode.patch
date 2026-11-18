@@ -1,0 +1,149 @@
+diff --git a/daemon/termux-va.c b/daemon/termux-va.c
+index d2ce8a9..df5dcf4 100644
+--- a/daemon/termux-va.c
++++ b/daemon/termux-va.c
+@@ -2019,12 +2019,16 @@ static int encoder_drain_output(Session *s, uint8_t **csd, size_t *csd_len,
+             oi == AMEDIACODEC_INFO_OUTPUT_BUFFERS_CHANGED)
+             continue;
+         if (oi == AMEDIACODEC_INFO_TRY_AGAIN_LATER)
+-            return *packet_sent ? 0 : -1;
++            return *packet_sent ? 0 : 1;
+         if (oi < 0)
+             return -1;
+ 
+         size_t osz = 0;
+         uint8_t *ob = AMediaCodec_getOutputBuffer(s->codec, oi, &osz);
++        if ((info.flags & FLAG_END_OF_STREAM) && info.size <= 0) {
++            AMediaCodec_releaseOutputBuffer(s->codec, oi, 0);
++            return 2;
++        }
+         /* AMediaCodec_getOutputBuffer returns ABuffer::data(), which already
+          * starts at the range offset; adding info.offset again skips bytes.
+          * OMX.qcom.video.encoder.vp8 reports offset 12, which cut every VP8
+@@ -2156,18 +2160,21 @@ static int encoder_copy_input(Session *s, uint8_t *dst, size_t capacity,
+         *queued_size = length;
+         return 0;
+     }
+-    /* Initialize padding so stale buffer contents cannot affect the edges. */
+-    if (ten_bit) {
+-        memset(dst, 0, y_size + uv_size);
+-    } else {
+-        memset(dst, 16, y_size);
+-        memset(dst + y_size, 128, uv_size);
+-    }
+-    for (size_t y = 0; y < height; y++)
++    /* Initialize only the padding, so stale buffer contents cannot affect
++     * the edges; clearing whole 4K planes first cost several ms a picture. */
++    const int black = ten_bit ? 0 : 16, grey = ten_bit ? 0 : 128;
++    for (size_t y = 0; y < height; y++) {
+         memcpy(dst + y * stride, src + y * row, row);
++        memset(dst + y * stride + row, black, stride - row);
++    }
++    memset(dst + height * stride, black, (slice - height) * stride);
+     src += row * height;
+-    for (size_t y = 0; y < height / 2; y++)
+-        memcpy(dst + y_size + y * stride, src + y * row, row);
++    for (size_t y = 0; y < height / 2; y++) {
++        uint8_t *line = dst + y_size + y * stride;
++        memcpy(line, src + y * row, row);
++        if (y + 1 < height / 2)
++            memset(line + row, grey, stride - row);
++    }
+     *queued_size = y_size + uv_size;
+     return 0;
+ }
+@@ -2464,16 +2471,54 @@ static void write_decoder_list(const char *sock_path)
+         dlog(0, "cannot publish %s: %s", path, strerror(errno));
+ }
+ 
+-static int encoder_run(Session *s)
++/* Encoder output runs on its own thread, so the client can submit the next
++ * picture while MediaCodec is still encoding earlier ones.  Packets go out
++ * in MediaCodec's order, which is submission order (no B frames). */
++typedef struct {
++    Session *s;
++    volatile int input_done;
++    volatile int failed;
++} EncoderOutput;
++
++static void *encoder_output_thread(void *arg)
+ {
+-    uint8_t *input = malloc(MAX_ENCODE_FRAME);
++    EncoderOutput *o = arg;
++    Session *s = o->s;
+     uint8_t *csd = NULL;
+     size_t csd_len = 0, csd_cap = 0;
++    while (running && !s->stop) {
++        bool packet_sent = false;
++        int r = encoder_drain_output(s, &csd, &csd_len, &csd_cap, &packet_sent,
++                                     (uint32_t)s->frames_out + 1);
++        if (r < 0) {
++            o->failed = 1;
++            /* Wake the input side: it may be blocked reading the client. */
++            shutdown(s->fd, SHUT_RDWR);
++            break;
++        }
++        if (r == 2 || (r == 1 && o->input_done))
++            break;
++    }
++    free(csd);
++    return NULL;
++}
++
++static int encoder_run(Session *s)
++{
++    uint8_t *input = malloc(MAX_ENCODE_FRAME);
+     if (!input)
+         return -1;
+ 
+     uint32_t frame_no = 0;
++    EncoderOutput out = { .s = s };
++    pthread_t output_thread;
++    if (pthread_create(&output_thread, NULL, encoder_output_thread, &out) != 0) {
++        free(input);
++        return -1;
++    }
+     for (;;) {
++        if (out.failed)
++            break;
+         uint32_t sz_be;
+         if (recv_all(s->fd, &sz_be, sizeof(sz_be)) < 0)
+             break;
+@@ -2533,33 +2578,17 @@ static int encoder_run(Session *s)
+         if (AMediaCodec_queueInputBuffer(s->codec, bi, 0, queued_size,
+                                          pts_us, 0) != AMEDIA_OK)
+             break;
+-
+-        bool packet_sent = false;
+-        if (encoder_drain_output(s, &csd, &csd_len, &csd_cap,
+-                                 &packet_sent, pts) < 0)
+-            break;
+     }
+ 
+-    /* Flush any delayed packet before closing the codec. */
+-    if (s->codec && !s->stop) {
++    /* Send every delayed packet, then end the output thread. */
++    if (s->codec && !s->stop && !out.failed) {
+         ssize_t bi = AMediaCodec_dequeueInputBuffer(s->codec, INPUT_TIMEOUT_US);
+         if (bi >= 0)
+             AMediaCodec_queueInputBuffer(s->codec, bi, 0, 0, 0,
+                                          FLAG_END_OF_STREAM);
+-        for (int i = 0; i < 64 && !s->stop; i++) {
+-            AMediaCodecBufferInfo info;
+-            ssize_t oi = AMediaCodec_dequeueOutputBuffer(s->codec, &info,
+-                                                         OUTPUT_TIMEOUT_US);
+-            if (oi == AMEDIACODEC_INFO_TRY_AGAIN_LATER)
+-                continue;
+-            if (oi < 0)
+-                continue;
+-            AMediaCodec_releaseOutputBuffer(s->codec, oi, 0);
+-            if (info.flags & FLAG_END_OF_STREAM)
+-                break;
+-        }
+     }
+-    free(csd);
++    out.input_done = 1;
++    pthread_join(output_thread, NULL);
+     free(input);
+     return 0;
+ }

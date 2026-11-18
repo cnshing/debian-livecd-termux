@@ -1,0 +1,298 @@
+diff --git a/src/gallium/frontends/va/tva_bridge.c b/src/gallium/frontends/va/tva_bridge.c
+index 58cd9ef..229734f 100644
+--- a/src/gallium/frontends/va/tva_bridge.c
++++ b/src/gallium/frontends/va/tva_bridge.c
+@@ -569,6 +569,8 @@ struct tva_av1_frame {
+     bool hidden_since_show_frame;
+ };
+ 
++#define TVA_ENC_DEPTH 8
++
+ struct tva_codec {
+     struct pipe_video_codec base;
+ 
+@@ -580,6 +582,19 @@ struct tva_codec {
+     uint32_t encode_height;
+     uint8_t *encode_packet;
+     size_t encode_packet_cap;
++    /* Pipelined encoding: encode_bitstream sends a picture and returns; the
++     * reader thread files each returned packet against the oldest picture
++     * still waiting (MediaCodec returns them in order, there are no B
++     * frames), and get_feedback writes it into the coded buffer on the
++     * application thread.  Sequence numbers start at 1; feedback carries one. */
++    struct tva_enc_job {
++        struct pipe_resource *dest;
++        uint8_t *data;
++        size_t len;
++        bool ready, key_wanted;
++    } enc_jobs[TVA_ENC_DEPTH];
++    uint64_t enc_sent, enc_received, enc_done;
++    bool enc_failed;
+     /* The client asked for this picture to be a sync frame. */
+     bool encode_key;
+     /* Top-left of the visible picture inside the coded surface. */
+@@ -2960,6 +2975,60 @@ tva_codec_fence_wait(struct pipe_video_codec *codec,
+                      struct pipe_fence_handle *fence_handle,
+                      uint64_t timeout);
+ 
++#if defined(__linux__)
++/* Reads rows of a linear, CPU-written surface through its dma-buf.  A Gallium
++ * map of a KGSL buffer is uncached, and reading a 4K picture through it takes
++ * tens of milliseconds; the dma-buf mapping of the same ION/heap memory is
++ * cached, with DMA_BUF_IOCTL_SYNC keeping the CPU view coherent. */
++static bool
++tva_direct_read_plane(struct pipe_screen *screen, struct pipe_resource *res,
++                      unsigned x, unsigned y0, unsigned row_bytes,
++                      unsigned rows, uint8_t *dst)
++{
++    if (!screen || !screen->resource_get_handle || !res || !row_bytes || !rows)
++        return false;
++    struct winsys_handle whandle;
++    memset(&whandle, 0, sizeof(whandle));
++    whandle.type = WINSYS_HANDLE_TYPE_FD;
++    if (!screen->resource_get_handle(screen, NULL, res, &whandle, 0))
++        return false;
++    const int fd = whandle.handle;
++    const uint64_t stride = whandle.stride, size = whandle.size;
++    const uint64_t first = whandle.offset + (uint64_t)y0 * stride + x;
++    const uint64_t need = (uint64_t)(rows - 1) * stride + row_bytes;
++    /* Only a linear layout can be read as rows. */
++    if (fd < 0 || whandle.modifier != DRM_FORMAT_MOD_LINEAR ||
++        !stride || stride < (uint64_t)x + row_bytes || !size ||
++        first > size || need > size - first) {
++        if (fd >= 0)
++            close(fd);
++        return false;
++    }
++    const uint64_t map_offset = first & ~(uint64_t)4095;
++    const size_t map_len = (size_t)(first - map_offset + need);
++    uint8_t *map = mmap(NULL, map_len, PROT_READ, MAP_SHARED, fd, (off_t)map_offset);
++    if (map == MAP_FAILED) {
++        close(fd);
++        return false;
++    }
++    struct dma_buf_sync sync = { .flags = DMA_BUF_SYNC_START | DMA_BUF_SYNC_READ };
++    const bool synced = ioctl(fd, DMA_BUF_IOCTL_SYNC, &sync) == 0;
++    const uint8_t *src = map + (first - map_offset);
++    if (stride == row_bytes)
++        memcpy(dst, src, (size_t)row_bytes * rows);
++    else
++        for (unsigned y = 0; y < rows; y++)
++            memcpy(dst + (size_t)y * row_bytes, src + (size_t)y * stride, row_bytes);
++    if (synced) {
++        sync.flags = DMA_BUF_SYNC_END | DMA_BUF_SYNC_READ;
++        ioctl(fd, DMA_BUF_IOCTL_SYNC, &sync);
++    }
++    munmap(map, map_len);
++    close(fd);
++    return true;
++}
++#endif
++
+ static int
+ tva_encode_copy_source(struct tva_codec *c, struct pipe_video_buffer *source,
+                        uint8_t **out, size_t *out_len)
+@@ -2993,6 +3062,15 @@ tva_encode_copy_source(struct tva_codec *c, struct pipe_video_buffer *source,
+         free(packed);
+         return -1;
+     }
++#if defined(__linux__)
++    if (tva_direct_read_plane(c->pipe->screen, res[0], x, y0, width, height, packed) &&
++        tva_direct_read_plane(c->pipe->screen, res[1], x, y0 / 2, width, uv_height,
++                              packed + y_size)) {
++        *out = packed;
++        *out_len = total;
++        return 0;
++    }
++#endif
+ 
+     struct pipe_box box;
+     struct pipe_transfer *transfer = NULL;
+@@ -3190,17 +3268,114 @@ tva_encode_write_destination(struct tva_codec *c, struct pipe_resource *dest,
+     return 0;
+ }
+ 
++static size_t tva_encode_complete(struct tva_codec *c, uint64_t seq);
++
+ static void
+ tva_codec_get_feedback(struct pipe_video_codec *codec, void *feedback,
+                        unsigned *size,
+                        struct pipe_enc_feedback_metadata *metadata)
+ {
++    const uintptr_t sync_bit = (uintptr_t)1 << (sizeof(uintptr_t) * 8 - 1);
++    uintptr_t v = (uintptr_t)feedback;
++    size_t len = (v & sync_bit) ? (v & ~sync_bit)
++                 : v ? tva_encode_complete(tva_codec(codec), v) : 0;
+     if (size)
+-        *size = (unsigned)(uintptr_t)feedback;
++        *size = (unsigned)len;
+     if (metadata)
+         memset(metadata, 0, sizeof(*metadata));
+ }
+ 
++static bool tva_encode_pipelined(void)
++{
++    const char *e = getenv("TVA_ENCODE_PIPELINE");
++    return !(e && (!strcmp(e, "0") || !strcmp(e, "off")));
++}
++
++/* Reader thread of an encoder: receives packets in submission order. */
++static int
++tva_encode_reader_thread(void *param)
++{
++    struct tva_codec *c = param;
++    size_t cap = TVA_MAX_UNIT_BYTES;
++    uint8_t *buf = malloc(cap);
++    for (;;) {
++        size_t len = 0;
++        uint32_t flags = 0, pts = 0;
++        if (!buf || tva_session_receive_packet(c->sess, buf, cap, &len,
++                                               &flags, &pts) != TVA_OK) {
++            mtx_lock(&c->pend_mutex);
++            c->enc_failed = true;
++            u_cnd_monotonic_broadcast(&c->pend_cond);
++            mtx_unlock(&c->pend_mutex);
++            break;
++        }
++        uint8_t *copy = malloc(len ? len : 1);
++        if (copy)
++            memcpy(copy, buf, len);
++        mtx_lock(&c->pend_mutex);
++        if (!copy || c->enc_received >= c->enc_sent) {
++            /* An unrequested packet: the stream is out of step. */
++            free(copy);
++            c->enc_failed = true;
++            u_cnd_monotonic_broadcast(&c->pend_cond);
++            mtx_unlock(&c->pend_mutex);
++            break;
++        }
++        struct tva_enc_job *job = &c->enc_jobs[c->enc_received % TVA_ENC_DEPTH];
++        c->enc_received++;
++        if (job->key_wanted && !(flags & 1))
++            TVA_TRACE("encoder returned a non-key frame for a requested key frame");
++        job->data = copy;
++        job->len = len;
++        job->ready = true;
++        u_cnd_monotonic_broadcast(&c->pend_cond);
++        mtx_unlock(&c->pend_mutex);
++    }
++    free(buf);
++    return 0;
++}
++
++/* Waits for pictures up to sequence number seq and writes their packets
++ * into their coded buffers, oldest first.  Application thread only.
++ * Returns the packet length of seq, 0 on failure. */
++static size_t
++tva_encode_complete(struct tva_codec *c, uint64_t seq)
++{
++    size_t result = 0;
++    mtx_lock(&c->pend_mutex);
++    while (c->enc_done < seq && c->enc_done < c->enc_sent) {
++        struct tva_enc_job *job = &c->enc_jobs[c->enc_done % TVA_ENC_DEPTH];
++        while (!job->ready && !c->enc_failed && !c->quitting)
++            u_cnd_monotonic_wait(&c->pend_cond, &c->pend_mutex);
++        if (!job->ready) {
++            mtx_unlock(&c->pend_mutex);
++            tva_mark_broken(c);
++            return 0;
++        }
++        uint8_t *data = job->data;
++        size_t len = job->len;
++        struct pipe_resource *dest = job->dest;
++        job->data = NULL;
++        job->dest = NULL;
++        job->ready = false;
++        c->enc_done++;
++        bool target = c->enc_done == seq;
++        mtx_unlock(&c->pend_mutex);
++        bool ok = tva_encode_write_destination(c, dest, data, len) == 0;
++        free(data);
++        pipe_resource_reference(&dest, NULL);
++        if (!ok) {
++            tva_mark_broken(c);
++            return 0;
++        }
++        if (target)
++            result = len;
++        mtx_lock(&c->pend_mutex);
++    }
++    mtx_unlock(&c->pend_mutex);
++    return result;
++}
++
+ static void
+ tva_codec_encode_bitstream(struct pipe_video_codec *codec,
+                            struct pipe_video_buffer *source,
+@@ -3212,6 +3387,8 @@ tva_codec_encode_bitstream(struct pipe_video_codec *codec,
+     size_t raw_len = 0, encoded_len = 0;
+     uint32_t flags = 0, pts = 0;
+ 
++    if (feedback)
++        *feedback = NULL;
+     if (tva_encoder_ensure_session(c, source) < 0 ||
+         tva_encode_copy_source(c, source, &raw, &raw_len) < 0)
+         goto fail;
+@@ -3221,6 +3398,32 @@ tva_codec_encode_bitstream(struct pipe_video_codec *codec,
+             goto fail;
+         c->encode_sent_bitrate = c->encode_bitrate;
+     }
++    if (tva_encode_pipelined() && !c->reader_started) {
++        c->reader_started = thrd_create(&c->reader, tva_encode_reader_thread,
++                                        c) == thrd_success;
++        if (!c->reader_started)
++            goto fail;
++    }
++    if (c->reader_started) {
++        /* Keep at most TVA_ENC_DEPTH pictures in flight. */
++        if (c->enc_sent - c->enc_done >= TVA_ENC_DEPTH &&
++            !tva_encode_complete(c, c->enc_done + 1))
++            goto fail;
++        mtx_lock(&c->pend_mutex);
++        struct tva_enc_job *job = &c->enc_jobs[c->enc_sent % TVA_ENC_DEPTH];
++        pipe_resource_reference(&job->dest, destination);
++        job->key_wanted = c->encode_key;
++        job->ready = false;
++        uint64_t seq = ++c->enc_sent;
++        mtx_unlock(&c->pend_mutex);
++        if (tva_session_send_raw_frame(c->sess, raw, raw_len,
++                                       c->encode_key ? ENC_UNIT_FORCE_KEY : 0) != TVA_OK)
++            goto fail;
++        free(raw);
++        if (feedback)
++            *feedback = (void *)(uintptr_t)seq;
++        return;
++    }
+     if (tva_session_send_raw_frame(c->sess, raw, raw_len,
+                                    c->encode_key ? ENC_UNIT_FORCE_KEY : 0) != TVA_OK)
+         goto fail;
+@@ -3238,15 +3441,15 @@ tva_codec_encode_bitstream(struct pipe_video_codec *codec,
+     if (tva_encode_write_destination(c, destination, c->encode_packet,
+                                      encoded_len) < 0)
+         goto fail;
++    /* Synchronous mode: feedback is the length with the top bit set. */
+     if (feedback)
+-        *feedback = (void *)(uintptr_t)encoded_len;
++        *feedback = (void *)(((uintptr_t)1 << (sizeof(uintptr_t) * 8 - 1)) |
++                             (uintptr_t)encoded_len);
+     free(raw);
+     return;
+ 
+ fail:
+     free(raw);
+-    if (feedback)
+-        *feedback = (void *)(uintptr_t)0;
+     tva_mark_broken(c);
+ }
+ 
+@@ -5120,6 +5323,10 @@ tva_codec_destroy(struct pipe_video_codec *codec)
+     tva_session_cancel(c->sess);
+     if (c->reader_started)
+         thrd_join(c->reader, NULL);
++    for (unsigned i = 0; i < TVA_ENC_DEPTH; i++) {
++        free(c->enc_jobs[i].data);
++        pipe_resource_reference(&c->enc_jobs[i].dest, NULL);
++    }
+     mtx_lock(&c->pend_mutex);
+     while (c->pend_count)
+         tva_pend_pop_locked(c);

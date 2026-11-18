@@ -118,8 +118,7 @@ route by default. No new decode default was enabled during this continuation.
 | --- | --- | --- | --- | --- |
 | AVC 8-bit, HEVC Main, VP9 profile 0 | On | On; Chrome now uses the source-built VA driver | On | Baseline; private Chrome playback rechecked with the new driver |
 | VP8 decode | Not advertised | Software | Hardware; 48/48 ordered pictures passed with `OMX.qcom.video.decoder.vp8` | VA needs a Gallium VP8 frontend, not a launcher flag |
-| HEVC Main10 / VP9 profile 2 input | Not advertised | Software | Hardware decode passed 48/48 per codec, **output is 8-bit NV12** | These RGB checks do not qualify preserved 10-bit precision |
-| Actual P010 output | Missing transport/surfaces | Missing through VA | NDK format probe succeeds; FFmpeg's tested route still outputs NV12 | [10-bit handoff](handoff/note10-codec-parity.md) |
+| HEVC Main10 / VP9 profile 2 | **On by default where the daemon's start-up probe proves P010** (2026-11-18): FFmpeg VA-API bit-exact P010, 48/48 frames for 640x360, 854x480 and 1080p of both codecs; GStreamer `vah265dec`/`vavp9dec` bit-exact | **Firefox: hardware**, pixel checks pass, frames viewed. **Chromium, Chrome: software** (their ANGLE import shows P010 black, so the launcher sets `TERMUX_VA_DISABLE_10BIT`); Chrome has no software HEVC, so HEVC Main10 does not play there, as before | Hardware decode, output 8-bit NV12 (FFmpeg's MediaCodec route) | See "10-bit decoding" below |
 | MPEG-4 Part 2 | Not advertised | Software | Qualcomm software decoder returned 48/48; hardware check correctly fails | Outside the hardware target |
 | AV1 | Disabled for hardware; software available | Software | Software | No hardware on this phone |
 | 4K/8K limits, sustained rate, HDR output | Not qualified | Not qualified | Not qualified here | Declared capabilities are not acceptance results |
@@ -133,6 +132,20 @@ stride 96, 13824 bytes and exits 1. Explicitly requesting P010 on the older
 probe had silently produced NV12; always inspect the negotiated format.
 This small grey-frame probe proves a ByteBuffer route exists, not full pixel
 precision, crop, HDR metadata, browser presentation or throughput.
+
+## 10-bit decoding (2026-11-18)
+
+termux-va revision 2 decodes a tiny embedded Main10 and a profile-2 key frame on each Qualcomm decoder at
+start-up (about 0.5 s) and writes those that return real P010 (`0x7fa30c0a`, Venus linear) to
+`<socket>.tenbit`. New session ids 11 and 12 request YUV420Flexible output, refuse anything but P010 and
+use double-size SHM slots; id 13 is reserved for 10-bit encoding. The bridge (android-vaapi 15, -glibc 7)
+offers `VAProfileHEVCMain10` and `VAProfileVP9Profile2` with P010 surfaces only for listed decoders and
+counts crop offsets in samples. An older daemon lists nothing, and Mali is never probed, so neither
+changes. `TERMUX_VA_DISABLE_10BIT=1` turns it off. livecd-desktop 37 keeps Chromium and Chrome on
+software 10-bit. Verified installed (CI 44106137931, 44260406980) through the session environment and the
+installed browser launchers; the negative controls (`TERMUX_VA_DISABLE_10BIT=1`, the previous driver) fail.
+Not done: HDR metadata (the fixtures carry none; colour tags are not yet carried over the wire), Chromium's
+P010 presentation, 4K, 10-bit encode.
 
 ## Encode routes
 

@@ -6,6 +6,11 @@ The local evidence directory is `temp/parity-note10-20261116/`.
 
 ## Preserved 10-bit decode and HDR
 
+**Steps 1-6 are done (2026-11-18, termux-va 2, android-vaapi 15, -glibc 7, livecd-desktop 37):** see
+"10-bit decoding" in [ADRENO-640-PARITY.md](../ADRENO-640-PARITY.md). Still open: step 7 (colour and HDR
+metadata over the wire), Chromium/Chrome P010 presentation (their ANGLE/Vulkan import shows black, so
+the launcher keeps them on software 10-bit), 4K and HEVC Main10 encode. The history below is kept.
+
 **A real ByteBuffer P010 route exists.** The committed
 [`probe-bytebuffer.c`](../../../tests/native/codec-info/probe-bytebuffer.c)
 feeds tiny synthetic Main10/profile-2 keyframes to the named Qualcomm decoders.

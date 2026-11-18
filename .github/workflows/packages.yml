@@ -350,8 +350,11 @@ jobs:
         # commit fixes. Fall back to the newest set for that commit; the builder rebuilds any
         # package whose version no longer matches, so a stale set only costs time.
         if test -z "$artifact"; then
-          artifact=$(gh api -X GET "repos/$GITHUB_REPOSITORY/actions/artifacts" -f per_page=100 \
-            | jq -r --arg prefix "chromium-dependencies-$TERMUX_PACKAGES_COMMIT-" '.artifacts | map(select(.expired == false and (.name | startswith($prefix)))) | sort_by(.created_at) | last | .id // empty')
+          # Every page: with several branches building, the set falls past the newest 100
+          # artifacts within days, and missing it adds about 3.5 hours of dependency builds.
+          artifact=$(gh api --paginate -X GET "repos/$GITHUB_REPOSITORY/actions/artifacts" -f per_page=100 \
+            --jq '.artifacts[] | select(.expired == false and (.name | startswith("chromium-dependencies-'"$TERMUX_PACKAGES_COMMIT"'-"))) | "\(.created_at) \(.id)"' \
+            | sort | tail -n 1 | cut -d' ' -f2)
         fi
         if test -n "$artifact"; then
           gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$artifact/zip" > "$RUNNER_TEMP/chromium-dependencies.zip"

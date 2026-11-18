@@ -1,0 +1,57 @@
+diff --git a/src/freedreno/fdl/fd6_format_table.c b/src/freedreno/fdl/fd6_format_table.c
+index 009206d..b2b5fc9 100644
+--- a/src/freedreno/fdl/fd6_format_table.c
++++ b/src/freedreno/fdl/fd6_format_table.c
+@@ -378,6 +378,11 @@ static const struct fd6_format formats[PIPE_FORMAT_COUNT] = {
+ 
+    _T_(R8_G8B8_420_UNORM, R8_G8B8_2PLANE_420_UNORM, WZYX), /* Gallium NV12 */
+    _T_(G8_B8R8_420_UNORM, R8_G8B8_2PLANE_420_UNORM, WZYX), /* Vulkan NV12 */
++   /* P010: Vulkan's 10-bit two-plane 4:2:0, and its planes, whose samples sit in the high 10 bits
++    * of each 16-bit word (sampled as 16-bit UNORM). Texture and linear only. */
++   _T_(X6G10_X6B10X6R10_420_UNORM, P010, WZYX),
++   _T_(X6R10_UNORM, 16_UNORM, WZYX),
++   _T_(X6R10X6G10_UNORM, 16_16_UNORM, WZYX),
+    _T_(G8_B8_R8_420_UNORM, R8_G8_B8_3PLANE_420_UNORM, WZYX),
+ };
+ /* clang-format on */
+diff --git a/src/freedreno/fdl/fd6_view.cc b/src/freedreno/fdl/fd6_view.cc
+index 3ddcf0b..5437b5a 100644
+--- a/src/freedreno/fdl/fd6_view.cc
++++ b/src/freedreno/fdl/fd6_view.cc
+@@ -283,7 +283,8 @@ fdl6_view_init(struct fdl6_view *view, const struct fdl_layout **layouts,
+ 
+       if (args->format == PIPE_FORMAT_R8_G8B8_420_UNORM ||
+           args->format == PIPE_FORMAT_G8_B8R8_420_UNORM ||
+-          args->format == PIPE_FORMAT_G8_B8_R8_420_UNORM) {
++          args->format == PIPE_FORMAT_G8_B8_R8_420_UNORM ||
++          args->format == PIPE_FORMAT_X6G10_X6B10X6R10_420_UNORM) {
+          /* chroma offset re-uses MIPLVLS bits */
+          assert(args->level_count == 1);
+          if (args->chroma_offsets[0] == FDL_CHROMA_LOCATION_MIDPOINT)
+@@ -371,7 +372,8 @@ fdl6_view_init(struct fdl6_view *view, const struct fdl_layout **layouts,
+ 
+       if (args->format == PIPE_FORMAT_R8_G8B8_420_UNORM ||
+           args->format == PIPE_FORMAT_G8_B8R8_420_UNORM ||
+-          args->format == PIPE_FORMAT_G8_B8_R8_420_UNORM) {
++          args->format == PIPE_FORMAT_G8_B8_R8_420_UNORM ||
++          args->format == PIPE_FORMAT_X6G10_X6B10X6R10_420_UNORM) {
+          uint64_t base_addr[3];
+ 
+          if (ubwc_enabled) {
+diff --git a/src/freedreno/vulkan/tu_image.cc b/src/freedreno/vulkan/tu_image.cc
+index c43e211..bb205e4 100644
+--- a/src/freedreno/vulkan/tu_image.cc
++++ b/src/freedreno/vulkan/tu_image.cc
+@@ -310,6 +310,12 @@ tiling_possible(VkFormat format)
+        format == VK_FORMAT_B8G8R8G8_422_UNORM)
+       return false;
+ 
++   /* P010 and its plane formats are linear only: they serve imported video frames. */
++   if (format == VK_FORMAT_G10X6_B10X6R10X6_2PLANE_420_UNORM_3PACK16 ||
++       format == VK_FORMAT_R10X6_UNORM_PACK16 ||
++       format == VK_FORMAT_R10X6G10X6_UNORM_2PACK16)
++      return false;
++
+    return true;
+ }
+ 

@@ -158,6 +158,16 @@ installed through the session: FFmpeg `hevc_vaapi -profile:v main10` 640x360 53.
 GStreamer `vah265enc` Main10 with 52.8 dB over the visible rows; 8-bit HEVC/H.264 encode, 10-bit decode
 and VP8 decode unchanged; a daemon without the probe refuses Main10. Limit: a packed P010 frame must fit
 the 16 MiB raw-frame cap, so 10-bit encode stops below 4K (4096x2304 needs 28 MiB).
+**Colour and HDR metadata (2026-11-18).** Decoding needs no colour on the wire: VA-API clients read
+colour and HDR metadata from the bitstream, and the bridge returns the decoder's P010 samples exactly
+(bit-exact above). For encoding, the colour the client signals (`ENC_XFER_COLOR`, ccdf3aa) reaches
+MediaCodec: a Main10 encode tagged BT.2020 comes out with BT.2020 primaries and matrix. The transfer does
+not: PQ and HLG both come out `smpte170m`, and FFmpeg's `-sei hdr` mastering-display and light-level SEI
+are not in the stream. That is the encoder, not the bridge. Called directly through MediaCodec
+(byte-buffer input, Venus P010, Main10 HDR10 profile), it writes `smpte170m` for every `color-transfer`
+value tried (6, 7, 16, 18), with or without `hdr-static-info`, and adds no HDR SEI. Android apps that use
+MediaCodec this way get the same streams, so this is parity. Signalling PQ/HLG anyway would need the
+daemon to rewrite the SPS VUI and insert the SEI itself (not done).
 Known, not 10-bit specific: GStreamer's `vah265enc`/`vah264enc` output is not cropped (640x360 comes out
 640x368 and 640x352), which FFmpeg's encoders do not show.
 

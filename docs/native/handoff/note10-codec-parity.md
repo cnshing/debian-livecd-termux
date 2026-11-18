@@ -81,7 +81,16 @@ points at the buffer's range offset, and the daemon (like FFmpeg's
 offset 12, so the first 12 bytes of every frame were lost. A Java `MediaCodec`
 encode of the same frames (dex via `app_process`) showed offset 12 and valid
 VP8. FFmpeg's `vp8_mediacodec` still has this bug; the stack-protector abort
-seen before did not recur. ENCODE_RESULT
+seen before did not recur.
+
+Installed check (2026-11-18: android-vaapi 16, termux-va 3, ffmpeg 102, through
+the session's VA environment):
+- FFmpeg VA decode is bit-exact 48/48 for `chart-vp8` and `chart-vp8-altref`, and
+  H.264/HEVC/VP9 are unchanged at 48/48. GStreamer `vavp8dec` is bit-exact.
+- `vp8_vaapi` and `vavp8enc` produce 90/90 frames that libvpx decodes (SSIM
+  0.998), and `vp8_mediacodec` is fixed (SSIM 0.998).
+- `test-daemon.py` passes 49/49; its 12-byte-cut control fails as it should.
+- Browsers: see ADRENO-640-PARITY.md. Mali keeps VP8 off (livecd-desktop 39).
 
 ## Encoding quality and application boundaries
 

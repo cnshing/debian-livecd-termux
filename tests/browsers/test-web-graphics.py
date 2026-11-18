@@ -93,6 +93,7 @@ def main():
     p.add_argument('--pref', action='append', default=[], help='extra Firefox preference NAME=JSON (experiments)')
     p.add_argument('--url', help='open this page instead of the probe, screenshot it after --dwell seconds')
     p.add_argument('--dwell', type=float, default=20)
+    p.add_argument('--text', help='with --url: also record the value of this JavaScript expression')
     p.add_argument('--modules', default=str(Path.home() / '.local/lib/livecd-native'),
                    help='directory of the launcher modules (acceleration.py) to test')
     args = p.parse_args()
@@ -199,6 +200,8 @@ def main():
             time.sleep(args.dwell)
             browser.screenshot(out / 'page.png')
             result['title'] = browser.evaluate('document.title')
+            if args.text:
+                (out / 'page.txt').write_text(str(browser.evaluate(args.text)))
             if args.browser != 'firefox':
                 result['console_errors'] = browser.evaluate(
                     "[...document.querySelectorAll('pre, .error, #error')].map(e => e.textContent.slice(0, 400))")
@@ -254,6 +257,9 @@ def main():
         if name == 'webgpu':
             adapter = json.dumps(case.get('adapter', {})).lower()
             named = any(n in adapter for n in GPU_NAMES)
+            if args.browser == 'firefox' and not case.get('adapter', {}).get('description'):
+                # Firefox withholds adapter names; rely on its GPU process using the driver instead.
+                named = bool(result.get('gpu_processes'))
             software = case.get('adapter', {}).get('fallback') or any(n in adapter for n in SOFTWARE_NAMES)
         else:
             renderer = (str(case.get('renderer')) + ' ' + str(case.get('vendor'))).lower()

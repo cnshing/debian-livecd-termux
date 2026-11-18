@@ -189,7 +189,7 @@ async function webgpu(left) {
   for (const k of ['maxTextureDimension2D', 'maxBufferSize', 'maxStorageBufferBindingSize',
                    'maxComputeWorkgroupSizeX', 'maxComputeInvocationsPerWorkgroup', 'maxComputeWorkgroupStorageSize'])
     out.limits[k] = adapter.limits[k];
-  step('device');
+  step('device for ' + JSON.stringify(out.adapter));
   const device = await adapter.requestDevice();
   const errors = []; device.addEventListener('uncapturederror', e => errors.push(String(e.error.message)));
   let lost = null; device.lost.then(i => { lost = i.message || i.reason; });

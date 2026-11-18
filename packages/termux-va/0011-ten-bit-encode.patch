@@ -1,0 +1,204 @@
+diff --git a/daemon/termux-va.c b/daemon/termux-va.c
+index fa32f77..f22b868 100644
+--- a/daemon/termux-va.c
++++ b/daemon/termux-va.c
+@@ -759,7 +759,7 @@ static int do_handshake(Session *s)
+         dlog(1, "[%d] unsupported handshake version: %u (supported %d..%d)",
+              s->id, ver, TVA_VERSION_MIN, HELLO_VERSION);
+         status = 1;
+-    } else if (!mime || cid == CODEC_HEVC_MAIN10_ENC) {
++    } else if (!mime) {
+         dlog(1, "[%d] unknown codec id: %u", s->id, cid);
+         status = 2;
+     } else if (w < 96 || h < 96 || w > 8192 || h > 4320) {
+@@ -2101,6 +2101,7 @@ static int encoder_copy_input(Session *s, uint8_t *dst, size_t capacity,
+                               const uint8_t *src, size_t length,
+                               size_t *queued_size)
+ {
++    bool ten_bit = codec_is_ten_bit(s->codec_id);
+     if (!s->encoder_stride) {
+         int32_t stride = 0, slice = 0, color = 0;
+         AMediaFormat *format = AMediaCodec_getInputFormat(s->codec);
+@@ -2110,44 +2111,58 @@ static int encoder_copy_input(Session *s, uint8_t *dst, size_t capacity,
+             AMediaFormat_getInt32(format, "color-format", &color);
+             AMediaFormat_delete(format);
+         }
+-        if (color && color != COLOR_FORMAT_YUV420_SEMIPLANAR) {
++        if (color && color != (ten_bit ? COLOR_QCOM_YUV420_P010_VENUS
++                                       : COLOR_FORMAT_YUV420_SEMIPLANAR)) {
+             dlog(0, "[%d] unsupported encoder input color format: 0x%x", s->id, color);
+             return -1;
+         }
+         s->encoder_stride = stride > 0 ? stride : (int)s->w;
+         s->encoder_slice_height = slice > 0 ? slice : (int)s->h;
+-        dlog(1, "[%d] encoder input NV12 %ux%u stride=%d slice-height=%d",
+-             s->id, s->w, s->h, s->encoder_stride, s->encoder_slice_height);
++        if (ten_bit) {
++            /* Venus linear P010: the reported stride counts samples, rows are padded to
++             * 256 bytes, and chroma starts after the luma rows rounded up to 32. The
++             * reported slice height is not the real one (tested on the Snapdragon 855). */
++            s->encoder_stride = (s->encoder_stride * 2 + 255) & ~255;
++            s->encoder_slice_height = ((s->encoder_slice_height > (int)s->h
++                                        ? s->encoder_slice_height : (int)s->h) + 31) & ~31;
++        }
++        dlog(1, "[%d] encoder input %s %ux%u stride=%d slice-height=%d", s->id,
++             ten_bit ? "P010" : "NV12", s->w, s->h, s->encoder_stride, s->encoder_slice_height);
+     }
+ 
+-    size_t width = s->w, height = s->h;
++    size_t bytes = ten_bit ? 2 : 1;
++    size_t width = s->w, height = s->h, row = width * bytes;
+     size_t stride = s->encoder_stride, slice = s->encoder_slice_height;
+-    if ((width | height | stride | slice) & 1 || stride < width || slice < height ||
++    if ((width | height | slice) & 1 || stride < row || slice < height ||
+         slice > SIZE_MAX / stride)
+         return -1;
+     size_t y_size = stride * slice;
+     /* CCodec's byte buffer includes padded luma rows, but its chroma plane
+      * ends at the last visible byte, without trailing row padding. */
+-    size_t uv_size = stride * (height / 2 - 1) + width;
++    size_t uv_size = stride * (height / 2 - 1) + row;
+     if (y_size > capacity || uv_size > capacity - y_size ||
+-        length != width * height + width * (height / 2)) {
++        length != row * height + row * (height / 2)) {
+         dlog(0, "[%d] encoder input layout does not fit: frame=%zu buffer=%zu",
+              s->id, length, capacity);
+         return -1;
+     }
+-    if (stride == width && slice == height) {
++    if (stride == row && slice == height) {
+         memcpy(dst, src, length);
+         *queued_size = length;
+         return 0;
+     }
+     /* Initialize padding so stale buffer contents cannot affect the edges. */
+-    memset(dst, 16, y_size);
+-    memset(dst + y_size, 128, uv_size);
++    if (ten_bit) {
++        memset(dst, 0, y_size + uv_size);
++    } else {
++        memset(dst, 16, y_size);
++        memset(dst + y_size, 128, uv_size);
++    }
+     for (size_t y = 0; y < height; y++)
+-        memcpy(dst + y * stride, src + y * width, width);
+-    src += width * height;
++        memcpy(dst + y * stride, src + y * row, row);
++    src += row * height;
+     for (size_t y = 0; y < height / 2; y++)
+-        memcpy(dst + y_size + y * stride, src + y * width, width);
++        memcpy(dst + y_size + y * stride, src + y * row, row);
+     *queued_size = y_size + uv_size;
+     return 0;
+ }
+@@ -2307,8 +2322,83 @@ out:
+     return ok;
+ }
+ 
++/* Whether Qualcomm's HEVC encoder turns one Venus P010 picture into a Main10 stream
++ * (SPS general_profile_idc 2). */
++static bool probe_ten_bit_encoder(char *component, size_t component_size)
++{
++    bool ok = false;
++    AMediaFormat *fmt = NULL;
++    AMediaCodec *codec = AMediaCodec_createEncoderByType("video/hevc");
++    if (!codec)
++        return false;
++    char *name = NULL;
++    if (AMediaCodec_getName(codec, &name) != AMEDIA_OK || !name)
++        goto out;
++    snprintf(component, component_size, "%s", name);
++    bool qualcomm = !strncmp(name, "OMX.qcom.", 9) || !strncmp(name, "c2.qti.", 7);
++    AMediaCodec_releaseName(codec, name);
++    if (!qualcomm)
++        goto out;
++    fmt = AMediaFormat_new();
++    AMediaFormat_setString(fmt, TVA_MF_KEY_MIME, "video/hevc");
++    AMediaFormat_setInt32(fmt, TVA_MF_KEY_WIDTH, 256);
++    AMediaFormat_setInt32(fmt, TVA_MF_KEY_HEIGHT, 144);
++    AMediaFormat_setInt32(fmt, TVA_MF_KEY_BIT_RATE, 1000000);
++    AMediaFormat_setInt32(fmt, TVA_MF_KEY_FRAME_RATE, 30);
++    AMediaFormat_setInt32(fmt, TVA_MF_KEY_I_FRAME_INTERVAL, 1);
++    AMediaFormat_setInt32(fmt, "color-format", COLOR_QCOM_YUV420_P010_VENUS);
++    AMediaFormat_setInt32(fmt, "profile", 4096);
++    if (AMediaCodec_configure(codec, fmt, NULL, NULL, 1) != AMEDIA_OK ||
++        AMediaCodec_start(codec) != AMEDIA_OK)
++        goto out;
++    int sent = 0;
++    for (int i = 0; i < 300 && !ok; i++) {
++        if (sent < 2) {
++            ssize_t in = AMediaCodec_dequeueInputBuffer(codec, 10000);
++            if (in >= 0) {
++                size_t cap = 0;
++                uint8_t *buffer = AMediaCodec_getInputBuffer(codec, (size_t)in, &cap);
++                if (!buffer)
++                    break;
++                for (size_t k = 0; k + 1 < cap; k += 2) {   /* mid grey, high 10 bits */
++                    buffer[k] = 0x00;
++                    buffer[k + 1] = 0x80;
++                }
++                AMediaCodec_queueInputBuffer(codec, (size_t)in, 0, sent ? 0 : cap, 0,
++                                             sent ? AMEDIACODEC_BUFFER_FLAG_END_OF_STREAM : 0);
++                sent++;
++            }
++        }
++        AMediaCodecBufferInfo info;
++        ssize_t out = AMediaCodec_dequeueOutputBuffer(codec, &info, 10000);
++        if (out >= 0) {
++            size_t size = 0;
++            uint8_t *data = AMediaCodec_getOutputBuffer(codec, (size_t)out, &size);
++            for (int32_t k = 0; data && k + 6 < info.size; k++) {
++                const uint8_t *b = data + info.offset + k;
++                if (!b[0] && !b[1] && b[2] == 1 && ((b[3] >> 1) & 63) == 33) {
++                    ok = (b[6] & 31) == 2;   /* general_profile_idc */
++                    break;
++                }
++            }
++            bool end = info.flags & AMEDIACODEC_BUFFER_FLAG_END_OF_STREAM;
++            AMediaCodec_releaseOutputBuffer(codec, (size_t)out, false);
++            if (end)
++                break;
++        }
++    }
++    dlog(1, "video/hevc 10-bit encode probe: %s -> %s", component, ok ? "Main10" : "not offered");
++out:
++    AMediaCodec_stop(codec);
++    AMediaCodec_delete(codec);
++    if (fmt)
++        AMediaFormat_delete(fmt);
++    return ok;
++}
++
+ /* Write "<mime> <component>" for each decoder proved to return P010 to
+- * <socket>.tenbit.  Replaced atomically; empty when none passed. */
++ * <socket>.tenbit, and "video/hevc-enc <component>" if the HEVC encoder makes
++ * Main10 from P010.  Replaced atomically; empty when none passed. */
+ static void write_ten_bit_list(const char *sock_path)
+ {
+     static const struct { const char *mime; const uint8_t *unit; size_t len; } probes[] = {
+@@ -2330,6 +2420,9 @@ static void write_ten_bit_list(const char *sock_path)
+                                   component, sizeof(component)))
+             fprintf(f, "%s %s\n", probes[i].mime, component);
+     }
++    char encoder[128] = "";
++    if (!(off && !strcmp(off, "0")) && probe_ten_bit_encoder(encoder, sizeof(encoder)))
++        fprintf(f, "video/hevc-enc %s\n", encoder);
+     if (fclose(f) != 0 || rename(next, path) != 0)
+         dlog(0, "cannot publish %s: %s", path, strerror(errno));
+ }
+@@ -2492,8 +2585,13 @@ static void *session_thread(void *arg)
+          * as VA-API drivers do.  Keep the encoder's own period long. */
+         AMediaFormat_setInt32(enc_fmt, TVA_MF_KEY_I_FRAME_INTERVAL, 3600);
+         AMediaFormat_setInt32(enc_fmt, TVA_MF_KEY_MAX_INPUT_SIZE, MAX_ENCODE_FRAME);
+-        /* Qualcomm's byte-buffer encoders accept semi-planar NV12. */
+-        AMediaFormat_setInt32(enc_fmt, "color-format", COLOR_FORMAT_YUV420_SEMIPLANAR);
++        /* Qualcomm's byte-buffer encoders accept semi-planar NV12, and for HEVC Main10
++         * only Venus linear P010 together with the Main10 HDR10 profile constant (4096):
++         * profile 2 and Android's P010 are refused. The stream is Main10 (profile_idc 2). */
++        AMediaFormat_setInt32(enc_fmt, "color-format", codec_is_ten_bit(s->codec_id)
++                              ? COLOR_QCOM_YUV420_P010_VENUS : COLOR_FORMAT_YUV420_SEMIPLANAR);
++        if (codec_is_ten_bit(s->codec_id))
++            AMediaFormat_setInt32(enc_fmt, "profile", 4096);
+         /* CBR makes Qualcomm's encoder honor low VA-API targets instead of
+          * falling back to its quality-based floor in VBR mode. */
+         AMediaFormat_setInt32(enc_fmt, "bitrate-mode", 2); /* CBR */

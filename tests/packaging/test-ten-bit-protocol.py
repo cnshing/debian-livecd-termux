@@ -38,6 +38,15 @@ class TenBitProtocol(unittest.TestCase):
         self.assertIn('tva_ten_bit_available("video/hevc")', bridge)
         self.assertIn('TERMUX_VA_DISABLE_10BIT', bridge)
 
+    def test_encode_gated_by_probe(self):
+        daemon = (ROOT / 'packages/termux-va/0011-ten-bit-encode.patch').read_text()
+        bridge = (ROOT / 'packages/android-vaapi/0111-ten-bit-encode.patch').read_text()
+        # The daemon lists the encoder only when one P010 picture became a Main10 stream.
+        self.assertIn('ok = (b[6] & 31) == 2;   /* general_profile_idc */', daemon)
+        self.assertIn('"video/hevc-enc %s', daemon)
+        self.assertIn('tva_ten_bit_available("video/hevc-enc")', bridge)
+        self.assertIn('return CODEC_HEVC_MAIN10_ENC;', bridge)
+
 
 if __name__ == '__main__':
     unittest.main()

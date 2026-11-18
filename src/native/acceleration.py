@@ -518,6 +518,10 @@ def prepare(profile, command, abi, video_override):
             # its own: its GL is Zink, and the driver now reads only its own variable.
             env['GALLIUM_DRIVER'] = 'softpipe'
         if profile in BROWSERS:
+            # Chromium and Chrome decode 10-bit HEVC and VP9 into P010 surfaces that their
+            # ANGLE/Vulkan import shows black (Note10+, 2026-11-18), so they keep decoding
+            # 10-bit in software. Firefox and session programs show P010 correctly.
+            env.setdefault('TERMUX_VA_DISABLE_10BIT', '1')
             # ANGLE consumes exported surfaces through implicit DRM sync. The
             # MediaCodec/CPU producer needs an explicit completion boundary.
             env['TERMUX_VA_SYNC_END_PICTURE'] = (

@@ -245,6 +245,16 @@ class PanVKBrowsers(unittest.TestCase):
                     'TERMUX_VA_HEVC_REORDER_PICS', 'TERMUX_VA_H264_REORDER_FRAMES'):
             self.assertNotIn(key, env)
 
+    def test_chromium_family_decodes_ten_bit_in_software(self):
+        # Their ANGLE import shows P010 black (Note10+, 2026-11-18); a caller's own value wins.
+        selected = (self.tmp / 'va', {'libraries': [], 'preloads': [], 'driver_directory': 'dri'})
+        with mock.patch.object(acceleration, 'stack', return_value=selected):
+            _, env = acceleration.prepare('chrome', ['/chrome'], 'glibc', 'on')
+            self.assertEqual(env['TERMUX_VA_DISABLE_10BIT'], '1')
+            with mock.patch.dict(os.environ, {'TERMUX_VA_DISABLE_10BIT': '0'}):
+                _, env = acceleration.prepare('chrome', ['/chrome'], 'glibc', 'on')
+            self.assertEqual(env['TERMUX_VA_DISABLE_10BIT'], '0')
+
     def test_completion_can_be_disabled_for_a_control_run(self):
         selected = (self.tmp / 'va', {'libraries': [], 'preloads': [], 'driver_directory': 'dri'})
         with mock.patch.object(acceleration, 'stack', return_value=selected), \

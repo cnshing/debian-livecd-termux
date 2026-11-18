@@ -145,7 +145,21 @@ changes. `TERMUX_VA_DISABLE_10BIT=1` turns it off. livecd-desktop 37 keeps Chrom
 software 10-bit. Verified installed (CI 44106137931, 44260406980) through the session environment and the
 installed browser launchers; the negative controls (`TERMUX_VA_DISABLE_10BIT=1`, the previous driver) fail.
 Not done: HDR metadata (the fixtures carry none; colour tags are not yet carried over the wire), Chromium's
-P010 presentation, 4K, 10-bit encode.
+P010 presentation ([handoff](handoff/chromium-p010.md)), 4K.
+
+**HEVC Main10 encoding (2026-11-18, termux-va 4, android-vaapi 17, -glibc 9).** Session id 13. Qualcomm's
+HEVC encoder takes 10-bit input only as Venus linear P010 together with the Main10 HDR10 profile constant
+(4096; profile 2 and Android's P010 are refused) and writes a Main10 stream. Its input layout differs from
+what it reports: the stride is in samples, rows are padded to 256 bytes, and chroma starts after the luma
+rows rounded up to 32. The daemon's start-up probe encodes one P010 picture and lists `video/hevc-enc` only
+if the SPS says Main10; the bridge then offers `VAProfileHEVCMain10` encoding with P010 surfaces. Verified
+installed through the session: FFmpeg `hevc_vaapi -profile:v main10` 640x360 53.5 dB against the source,
+854x480 and 1080p correct (pictures viewed; those clips are noise, so their PSNR is low for any encoder);
+GStreamer `vah265enc` Main10 with 52.8 dB over the visible rows; 8-bit HEVC/H.264 encode, 10-bit decode
+and VP8 decode unchanged; a daemon without the probe refuses Main10. Limit: a packed P010 frame must fit
+the 16 MiB raw-frame cap, so 10-bit encode stops below 4K (4096x2304 needs 28 MiB).
+Known, not 10-bit specific: GStreamer's `vah265enc`/`vah264enc` output is not cropped (640x360 comes out
+640x368 and 640x352), which FFmpeg's encoders do not show.
 
 ## Encode routes
 

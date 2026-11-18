@@ -9,7 +9,7 @@ The local evidence directory is `temp/parity-note10-20261116/`.
 **Steps 1-6 are done (2026-11-18, termux-va 2, android-vaapi 15, -glibc 7, livecd-desktop 37):** see
 "10-bit decoding" in [ADRENO-640-PARITY.md](../ADRENO-640-PARITY.md). Still open: step 7 (colour and HDR
 metadata over the wire), Chromium/Chrome P010 presentation (their ANGLE/Vulkan import shows black, so
-the launcher keeps them on software 10-bit), 4K and HEVC Main10 encode. The history below is kept.
+the launcher keeps them on software 10-bit) and 4K. HEVC Main10 encode is done (termux-va 4, android-vaapi 17). The history below is kept.
 
 **A real ByteBuffer P010 route exists.** The committed
 [`probe-bytebuffer.c`](../../../tests/native/codec-info/probe-bytebuffer.c)
@@ -110,7 +110,8 @@ the session's VA environment):
 - Chrome WebCodecs requests native pixmaps and crashes on shared-memory
   input. A launcher flag cannot replace Chromium's source patches. See
   [Chrome handoff](encode-chrome.md). The newly qualified default is WebRTC.
-- HEVC Main10 HDR10 encode is registered, but the bridge's encoder input is
+- HEVC Main10 encode: done 2026-11-18 (see ADRENO-640-PARITY.md). HDR10 static metadata is not passed.
+  Previously: HEVC Main10 HDR10 encode is registered, but the bridge's encoder input is
   NV12 only. It needs a separately negotiated P010/surface input path and
   colour/HDR metadata; the decode work alone does not enable it.
 

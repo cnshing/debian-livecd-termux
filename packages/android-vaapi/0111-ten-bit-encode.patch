@@ -1,0 +1,99 @@
+diff --git a/src/gallium/frontends/va/tva_bridge.c b/src/gallium/frontends/va/tva_bridge.c
+index 0af9cbb..6ecee67 100644
+--- a/src/gallium/frontends/va/tva_bridge.c
++++ b/src/gallium/frontends/va/tva_bridge.c
+@@ -243,6 +243,9 @@ tva_encode_profile_supported(enum pipe_video_profile profile)
+         return tva_encoder_available("video/avc");
+     case PIPE_VIDEO_PROFILE_HEVC_MAIN:
+         return tva_encoder_available("video/hevc");
++    case PIPE_VIDEO_PROFILE_HEVC_MAIN_10:
++        /* Only where the daemon's probe made a Main10 stream from P010. */
++        return !tva_ten_bit_disabled() && tva_ten_bit_available("video/hevc-enc");
+     case PIPE_VIDEO_PROFILE_VP9_PROFILE0:
+         return tva_encoder_available("video/x-vnd.on2.vp9");
+     default:
+@@ -282,6 +285,8 @@ tva_encode_codec_id(enum pipe_video_profile profile)
+         return CODEC_H264_MAIN_ENC;
+     case PIPE_VIDEO_PROFILE_MPEG4_AVC_HIGH:
+         return CODEC_H264_HIGH_ENC;
++    case PIPE_VIDEO_PROFILE_HEVC_MAIN_10:
++        return CODEC_HEVC_MAIN10_ENC;
+     default:
+         break;
+     }
+@@ -434,7 +439,8 @@ tva_screen_is_video_format_supported(struct pipe_screen *screen,
+ 
+     if (entrypoint == PIPE_VIDEO_ENTRYPOINT_ENCODE &&
+         tva_encode_profile_supported(profile))
+-        return format == PIPE_FORMAT_NV12;
++        return format == (profile == PIPE_VIDEO_PROFILE_HEVC_MAIN_10 ? PIPE_FORMAT_P010
++                                                                     : PIPE_FORMAT_NV12);
+ 
+     if (entrypoint != PIPE_VIDEO_ENTRYPOINT_BITSTREAM ||
+         (profile != PIPE_VIDEO_PROFILE_UNKNOWN &&
+@@ -2946,18 +2952,21 @@ tva_encode_copy_source(struct tva_codec *c, struct pipe_video_buffer *source,
+                        uint8_t **out, size_t *out_len)
+ {
+     if (!c || !c->pipe || !source || !out || !out_len ||
+-        source->buffer_format != PIPE_FORMAT_NV12)
++        (source->buffer_format != PIPE_FORMAT_NV12 &&
++         source->buffer_format != PIPE_FORMAT_P010))
+         return -1;
++    /* Packed on the wire: NV12 one byte per sample, P010 two. */
++    const size_t bytes = source->buffer_format == PIPE_FORMAT_P010 ? 2 : 1;
+ 
+     unsigned width = c->encode_width ? c->encode_width : source->width;
+     unsigned height = c->encode_height ? c->encode_height : source->height;
+     unsigned x = c->encode_x, y0 = c->encode_y;
+     unsigned uv_height = (height + 1) / 2;
+     if (!width || !height || x + width > source->width || y0 + height > source->height ||
+-        (x | y0) & 1 || height > SIZE_MAX / width)
++        (x | y0) & 1 || height > SIZE_MAX / width / bytes)
+         return -1;
+-    size_t y_size = (size_t)width * height;
+-    size_t uv_size = (size_t)width * uv_height;
++    size_t y_size = (size_t)width * height * bytes;
++    size_t uv_size = (size_t)width * uv_height * bytes;
+     if (y_size > SIZE_MAX - uv_size)
+         return -1;
+     size_t total = y_size + uv_size;
+@@ -2984,15 +2993,15 @@ tva_encode_copy_source(struct tva_codec *c, struct pipe_video_buffer *source,
+         free(packed);
+         return -1;
+     }
+-    unsigned y_row = width;
+-    if (transfer->stride < x + y_row) {
++    size_t y_row = (size_t)width * bytes, x_bytes = (size_t)x * bytes;
++    if (transfer->stride < x_bytes + y_row) {
+         c->pipe->texture_unmap(c->pipe, transfer);
+         free(packed);
+         return -1;
+     }
+     for (unsigned y = 0; y < height; y++)
+         memcpy(packed + (size_t)y * y_row,
+-               src + (size_t)(y0 + y) * transfer->stride + x, y_row);
++               src + (size_t)(y0 + y) * transfer->stride + x_bytes, y_row);
+     c->pipe->texture_unmap(c->pipe, transfer);
+ 
+     memset(&box, 0, sizeof(box));
+@@ -3002,16 +3011,16 @@ tva_encode_copy_source(struct tva_codec *c, struct pipe_video_buffer *source,
+     transfer = NULL;
+     src = c->pipe->texture_map(c->pipe, res[1], 0, PIPE_MAP_READ,
+                                &box, &transfer);
+-    if (!src || !transfer || transfer->stride < x + width) {
++    if (!src || !transfer || transfer->stride < x_bytes + y_row) {
+         if (transfer)
+             c->pipe->texture_unmap(c->pipe, transfer);
+         free(packed);
+         return -1;
+     }
+-    /* Interleaved CbCr: one byte per luma column, half the rows. */
++    /* Interleaved CbCr: one sample per luma column, half the rows. */
+     for (unsigned y = 0; y < uv_height; y++)
+-        memcpy(packed + y_size + (size_t)y * width,
+-               src + (size_t)(y0 / 2 + y) * transfer->stride + x, width);
++        memcpy(packed + y_size + (size_t)y * y_row,
++               src + (size_t)(y0 / 2 + y) * transfer->stride + x_bytes, y_row);
+     c->pipe->texture_unmap(c->pipe, transfer);
+ 
+     *out = packed;

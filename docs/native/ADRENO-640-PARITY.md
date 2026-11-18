@@ -240,3 +240,49 @@ colour, missing hardware sessions or GPU crash. Firefox experiments require
 `--firefox-encode`; that switch does not change the installed default. Do not
 run the hardware Chrome WebCodecs path repeatedly: its prebuilt binary's native
 pixmap assertion remains unresolved ([details](handoff/encode-chrome.md)).
+
+## Session lane results (2026-11-17)
+
+Evidence: `temp/parity-note10-20261116/session/`.
+
+**ION contiguous surfaces in the desktop session** (android-vaapi 14 / -glibc 6, commits
+92a2416..11ddca4): see [DMA-HEAP-ION.md](DMA-HEAP-ION.md#the-desktop-session-bridge-scoped-ion-2026-11-17-note10).
+Bridge-scoped, no session preload, so Turnip/PanVK allocation is unchanged by construction.
+Debug-staged on the phone: 12/12 surfaces contiguous from ION, 48/48 frames bit-exact;
+`LIVECD_DMA_HEAP_ION=0` control falls back. Installed-package verification is pending the
+install queue.
+
+**Chrome compositor stale frame.** Repetition harness: the installed `google-chrome` under
+`tests/browsers/test-fullscreen.py` (VP9, one fullscreen cycle, frames 12 and 36 at the browser
+and GNOME Shell layers), run back to back.
+
+| Run set | Runs | Stale shell frame |
+| --- | --- | --- |
+| Baseline, android-vaapi 11/12 (0101 completion + 0106 late-frame drop installed) | 50 | 1 (frame 13 shown for 36, persistent across 4 captures) |
+| Negative control `LIVECD_VA_DISABLE_COMPLETION=1` | 20 | 20 (every run, both frames) |
+| Baseline with `DMD_VA_LOG=1` tracing | 60 | 0 (one harness ffmpeg error, not a stale frame) |
+
+So the completion wait plus 0106 brings the failure from 100% to about 1-2%; the residual is not
+fixed. The trace shows each picture's copy completes inside `vaEndPicture` (the later
+`vaSyncSurface` waits 0.01 ms), so the residual stale picture is not an unfinished bridge copy:
+the remaining candidates are consumer-side (Chrome not re-presenting the window after a paused
+seek, or GPU reads without a cache invalidate). A software-decode control at the same scale is
+still needed to separate those. Not on by default; nothing changed.
+
+**4K/8K throughput** (installed android-vaapi 12, FFmpeg, frames kept on VA surfaces, 300-frame
+clips decoded as fast as possible; all VA outputs bit-exact against software, NV12 framemd5):
+
+| Clip | VA bridge | FFmpeg NDK MediaCodec | Registry limit |
+| --- | --- | --- | --- |
+| H.264 4K60 40 Mb/s | 56 fps wall (5.38 s incl. start) | 71 fps | 120 |
+| HEVC 4K60 30 Mb/s | 69 fps | 85 fps | 120 |
+| VP9 4K60 30 Mb/s | 83 fps | 83 fps | 120 |
+| HEVC 8K30 60 Mb/s (60 frames) | 16 fps | 20 fps | 30 |
+| H.264 4K60 VA encode (hwupload + h264_vaapi) | 10.8 fps | — | 60 |
+| HEVC 4K60 VA encode | 11.6 fps | — | 60 |
+
+4K30 decode sustains on every codec; 4K60 sustains for HEVC and VP9 and is marginal for H.264.
+8K30 decode does **not** sustain (MediaCodec itself only reached 20 fps here), and 4K encode
+through the bridge is far below real time (the CPU upload and NV12 copy into shared memory
+dominate). Do not advertise 8K or 4K encode. A concurrent test from another lane was running
+during the measurement, so these are lower bounds.

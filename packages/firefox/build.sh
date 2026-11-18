@@ -1,5 +1,5 @@
 # Termux's firefox recipe at 538685c906074926fd19650e38c6dad91379eb0f, kept whole by
-# upstream.json, plus three WebCodecs/WebRTC encoder fixes (1101-1103) that Firefox 159
+# upstream.json, plus three WebCodecs/WebRTC encoder fixes (1101-1104) that Firefox 159
 # lacks. They only matter with media.use-remote-encoder.video.platform on, which the
 # launcher sets by default on Adreno and on opt-in on Mali (docs/native/handoff/encode-firefox.md).
 TERMUX_PKG_HOMEPAGE=https://www.mozilla.org/firefox
@@ -8,7 +8,7 @@ TERMUX_PKG_LICENSE="MPL-2.0"
 TERMUX_PKG_MAINTAINER="@cnshing"
 TERMUX_PKG_VERSION="159.0"
 TERMUX_PKG_SRCURL="https://archive.mozilla.org/pub/firefox/releases/${TERMUX_PKG_VERSION#*really}/source/firefox-${TERMUX_PKG_VERSION#*really}.source.tar.xz"
-TERMUX_PKG_REVISION=102
+TERMUX_PKG_REVISION=103
 TERMUX_PKG_SHA256=3d98df785894057fce60603e845828e758a5411ad79aaaaff2b8230597f500d9
 # ffmpeg and pulseaudio are dependencies through dlopen(3):
 TERMUX_PKG_DEPENDS="ffmpeg, fontconfig, freetype, gdk-pixbuf, glib, gtk3, libandroid-shmem, libandroid-spawn, libc++, libcairo, libevent, libffi, libice, libicu, libjpeg-turbo, libnspr, libnss, libpixman, libsm, libvpx, libwayland, libwebp, libx11, libxcb, libxcomposite, libxdamage, libxext, libxfixes, libxkbcommon, libxrandr, libxtst, pango, pulseaudio, zlib"

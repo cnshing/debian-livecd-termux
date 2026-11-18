@@ -1,0 +1,42 @@
+WebRTC enables the H.264 quality scaler for platform encoders but never
+reports a QP for their output, so a hardware call that starts at 320x180
+never scales up. Parse the slice QP as libwebrtc does for its own encoders.
+
+--- a/dom/media/webrtc/libwebrtcglue/WebrtcMediaDataEncoderCodec.h
++++ b/dom/media/webrtc/libwebrtcglue/WebrtcMediaDataEncoderCodec.h
+@@ -11,6 +11,7 @@
+ #include "MediaResult.h"
+ #include "PlatformEncoderModule.h"
+ #include "WebrtcGmpVideoCodec.h"
++#include "common_video/h264/h264_bitstream_parser.h"
+ #include "common_video/include/bitrate_adjuster.h"
+ #include "modules/video_coding/include/video_codec_interface.h"
+ 
+@@ -89,6 +90,9 @@
+   webrtc::CodecParameterMap mFormatParams;
+   webrtc::CodecSpecificInfo mCodecSpecific;
+   webrtc::BitrateAdjuster mBitrateAdjuster;
++  // Reads each H.264 output picture's QP for the quality scaler. Stateful:
++  // parameter sets arrive only with key frames. Used on mTaskQueue only.
++  webrtc::H264BitstreamParser mH264Parser;
+   uint32_t mMaxFrameRate = {0};
+   uint32_t mMinBitrateBps = {0};
+   uint32_t mMaxBitrateBps = {0};
+--- a/dom/media/webrtc/libwebrtcglue/WebrtcMediaDataEncoderCodec.cpp
++++ b/dom/media/webrtc/libwebrtcglue/WebrtcMediaDataEncoderCodec.cpp
+@@ -569,6 +569,15 @@
+                                    ? webrtc::VideoFrameType::kVideoFrameKey
+                                    : webrtc::VideoFrameType::kVideoFrameDelta;
+             GetVPXQp(mCodecSpecific.codecType, image);
++            if (mCodecSpecific.codecType ==
++                webrtc::VideoCodecType::kVideoCodecH264) {
++              // Without a QP the quality scaler that GetEncoderInfo enables
++              // for H.264 never sees a low QP, so a call that starts at a
++              // low resolution never scales back up.
++              mH264Parser.ParseBitstream(
++                  std::span<const uint8_t>(image.data(), image.size()));
++              image.qp_ = mH264Parser.GetLastSliceQp().value_or(-1);
++            }
+             UpdateCodecSpecificInfo(mCodecSpecific, displaySize,
+                                     frame->mKeyframe);
+           }

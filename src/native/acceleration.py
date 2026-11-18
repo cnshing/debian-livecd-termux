@@ -393,9 +393,9 @@ def firefox_encode_ready(socket=None):
     """Whether Firefox's hardware encoding (WebRTC and WebCodecs) is on.
 
     Adreno: on by default when the session's daemon lists a hardware H.264 encoder and
-    android-firefox-video is revision 7 or later. That runtime is built beside a Firefox
-    with the WebRTC bitrate fix (packages/firefox 1103), and firefox_video_runtime() checks
-    that this very Firefox is installed. "firefox_encode": false turns it off.
+    android-firefox-video is revision 8 or later. That runtime is built beside a Firefox
+    with the WebRTC bitrate and H.264 QP fixes (packages/firefox 1103, 1104), and
+    firefox_video_runtime() checks that this very Firefox is installed. "firefox_encode": false turns it off.
     Mali: opt-in only ("firefox_encode": true), as qualified on the S20; not re-qualified.
     """
     choice = settings().get('firefox_encode')
@@ -404,7 +404,7 @@ def firefox_encode_ready(socket=None):
             return False
     elif choice is False or not os.path.exists('/dev/kgsl-3d0') or not hardware_h264_encoder(socket):
         return False
-    elif choice is not True and (installed_version('android-firefox-video') or ((), 0)) < ((9, 0, 2), 7):
+    elif choice is not True and (installed_version('android-firefox-video') or ((), 0)) < ((9, 0, 2), 8):
         return False
     runtime, _ = firefox_video_runtime()
     try:

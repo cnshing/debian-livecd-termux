@@ -201,15 +201,15 @@ class FirefoxVideo(unittest.TestCase):
         status = Path(self.temporary.name) / 'status'
         listed = 'video/avc OMX.qcom.video.encoder.avc\nvideo/hevc OMX.qcom.video.encoder.hevc\n'
         # (settings, mali, runtime revision, daemon encoder list, runtime has encoders, expected)
-        cases = (({}, False, 7, listed, True, True),                       # Adreno default
-                 ({'firefox_encode': False}, False, 7, listed, True, False),  # user turned it off
-                 ({}, False, 6, listed, True, False),                      # runtime before the WebRTC fix
+        cases = (({}, False, 8, listed, True, True),                       # Adreno default
+                 ({'firefox_encode': False}, False, 8, listed, True, False),  # user turned it off
+                 ({}, False, 7, listed, True, False),                      # runtime before the WebRTC fixes
                  ({'firefox_encode': True}, False, 6, listed, True, True),  # explicit opt-in still works
-                 ({}, False, 7, 'video/hevc OMX.qcom.video.encoder.hevc\n', True, False),  # no H.264 encoder
-                 ({}, False, 7, None, True, False),                        # no daemon list
-                 ({}, False, 7, listed, False, False),                     # runtime without encoders
-                 ({}, True, 7, listed, True, False),                       # Mali: still opt-in
-                 ({'firefox_encode': True}, True, 7, listed, True, True))
+                 ({}, False, 8, 'video/hevc OMX.qcom.video.encoder.hevc\n', True, False),  # no H.264 encoder
+                 ({}, False, 8, None, True, False),                        # no daemon list
+                 ({}, False, 8, listed, False, False),                     # runtime without encoders
+                 ({}, True, 8, listed, True, False),                       # Mali: still opt-in
+                 ({'firefox_encode': True}, True, 8, listed, True, True))
         for config, mali, revision, encoders, runtime_encodes, expected in cases:
             with self.subTest(config=config, mali=mali, revision=revision, encoders=encoders,
                               runtime_encodes=runtime_encodes):

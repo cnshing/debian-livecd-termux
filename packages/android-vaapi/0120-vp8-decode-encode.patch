@@ -1,0 +1,647 @@
+VP8 decoding and encoding through the Termux:VA bridge (debian-livecd-termux).
+
+Gallium has no VP8 video format, so this adds PIPE_VIDEO_FORMAT_VP8 and
+PIPE_VIDEO_PROFILE_VP8 (VAProfileVP8Version0_3) for the bridge alone.
+
+Decode: VA-API slice data starts at the first partition. picture_vp8.c keeps
+the picture and slice parameters and rebuilds the 3-byte frame tag (and the
+7-byte key-frame start code and size) MediaCodec needs in front of it. The
+first partition's size follows from the slice data size and the coefficient
+partition sizes. Every frame is marked shown, as each VA picture fills its
+target surface.
+
+Encode: VP8 reuses the VP9 encoder descriptor (bitrate, frame rate, visible
+size, key frame, coded buffer) and the new append-only CODEC_VP8_ENC (14).
+
+Both are offered only when the daemon lists a hardware codec: decoders in
+<socket>.decoders, encoders in <socket>.encoders (a missing list does not
+count for VP8). TERMUX_VA_DISABLE_VP8=1 hides both.
+
+diff --git a/src/gallium/auxiliary/driver_trace/tr_video.c b/src/gallium/auxiliary/driver_trace/tr_video.c
+index 9cdf8c9..511c3ce 100644
+--- a/src/gallium/auxiliary/driver_trace/tr_video.c
++++ b/src/gallium/auxiliary/driver_trace/tr_video.c
+@@ -73,6 +73,7 @@ unwrap_refrence_frames(struct pipe_picture_desc **picture)
+         return true;
+     }
+     case PIPE_VIDEO_FORMAT_JPEG:
++    case PIPE_VIDEO_FORMAT_VP8:
+         return false;
+     case PIPE_VIDEO_FORMAT_VP9:{
+         struct pipe_vp9_picture_desc *copied = mem_dup(*picture, sizeof(struct pipe_vp9_picture_desc));
+diff --git a/src/gallium/auxiliary/util/u_video.h b/src/gallium/auxiliary/util/u_video.h
+index 5796882..b650597 100644
+--- a/src/gallium/auxiliary/util/u_video.h
++++ b/src/gallium/auxiliary/util/u_video.h
+@@ -86,6 +86,9 @@ u_reduce_video_profile(enum pipe_video_profile profile)
+       case PIPE_VIDEO_PROFILE_AV1_PROFILE2:
+          return PIPE_VIDEO_FORMAT_AV1;
+ 
++      case PIPE_VIDEO_PROFILE_VP8:
++         return PIPE_VIDEO_FORMAT_VP8;
++
+       default:
+          return PIPE_VIDEO_FORMAT_UNKNOWN;
+    }
+diff --git a/src/gallium/auxiliary/vl/vl_codec.c b/src/gallium/auxiliary/vl/vl_codec.c
+index 26f6f85..e4b7622 100644
+--- a/src/gallium/auxiliary/vl/vl_codec.c
++++ b/src/gallium/auxiliary/vl/vl_codec.c
+@@ -32,7 +32,7 @@ bool vl_codec_supported(struct pipe_screen *screen,
+                         enum pipe_video_profile profile,
+                         bool encode)
+ {
+-   static_assert(PIPE_VIDEO_PROFILE_MAX == 28, "Update table below when adding new video profiles");
++   static_assert(PIPE_VIDEO_PROFILE_MAX == 29, "Update table below when adding new video profiles");
+    if (profile == PIPE_VIDEO_PROFILE_AV1_MAIN ||
+        profile == PIPE_VIDEO_PROFILE_AV1_PROFILE2) {
+       if (encode) {
+diff --git a/src/gallium/frontends/va/context.c b/src/gallium/frontends/va/context.c
+index fa8bd16..53a67f5 100644
+--- a/src/gallium/frontends/va/context.c
++++ b/src/gallium/frontends/va/context.c
+@@ -441,6 +441,7 @@ vlVaCreateContext(VADriverContextP ctx, VAConfigID config_id, int picture_width,
+       }
+       break;
+ 
++   case PIPE_VIDEO_FORMAT_VP8:
+    case PIPE_VIDEO_FORMAT_VP9:
+       if (is_encode) {
+          context->desc.vp9enc.rate_ctrl_method = config->rc;
+diff --git a/src/gallium/frontends/va/decode.c b/src/gallium/frontends/va/decode.c
+index 939ba1e..32129a9 100644
+--- a/src/gallium/frontends/va/decode.c
++++ b/src/gallium/frontends/va/decode.c
+@@ -46,6 +46,10 @@ handlePictureParameterBuffer(vlVaDriver *drv, vlVaContext *context, vlVaBuffer *
+       vaStatus = vlVaHandlePictureParameterBufferAV1(drv, context, buf);
+       break;
+ 
++   case PIPE_VIDEO_FORMAT_VP8:
++      vlVaHandlePictureParameterBufferVP8(context, buf);
++      break;
++
+    default:
+       break;
+    }
+@@ -75,6 +79,10 @@ handlePictureParameterBuffer(vlVaDriver *drv, vlVaContext *context, vlVaBuffer *
+       context->decoder->height =
+          context->desc.vp9.picture_parameter.frame_height;
+    }
++   if (format == PIPE_VIDEO_FORMAT_VP8) {
++      context->decoder->width = context->desc.vp8.width;
++      context->decoder->height = context->desc.vp8.height;
++   }
+ 
+    return vaStatus;
+ }
+@@ -136,6 +144,10 @@ handleSliceParameterBuffer(vlVaContext *context, vlVaBuffer *buf)
+       vlVaHandleSliceParameterBufferAV1(context, buf);
+       break;
+ 
++   case PIPE_VIDEO_FORMAT_VP8:
++      vlVaHandleSliceParameterBufferVP8(context, buf);
++      break;
++
+    default:
+       break;
+    }
+@@ -204,6 +216,8 @@ handleVASliceDataBufferType(vlVaContext *context, vlVaBuffer *buf)
+    static const uint8_t start_code_vc1_field[] = { 0x00, 0x00, 0x01, 0x0c };
+    static const uint8_t start_code_vc1_slice[] = { 0x00, 0x00, 0x01, 0x0b };
+    static const uint8_t eoi_jpeg[] = { 0xff, 0xd9 };
++   const uint8_t *data = buf->data;
++   unsigned size = buf->size;
+ 
+    if (!context->decoder)
+       return VA_STATUS_ERROR_INVALID_CONTEXT;
+@@ -251,12 +265,21 @@ handleVASliceDataBufferType(vlVaContext *context, vlVaBuffer *buf)
+          break;
+       case PIPE_VIDEO_FORMAT_AV1:
+          break;
++      case PIPE_VIDEO_FORMAT_VP8: {
++         unsigned header = vlVaDecoderVP8BitstreamHeader(context, buf);
++         if (!header)
++            return VA_STATUS_ERROR_INVALID_PARAMETER;
++         vlVaAddSliceDataBuffer(context, context->desc.vp8.header, header);
++         data += context->desc.vp8.slice_data_offset;
++         size -= context->desc.vp8.slice_data_offset;
++         break;
++      }
+       default:
+          break;
+       }
+    }
+ 
+-   vlVaAddSliceDataBuffer(context, buf->data, buf->size);
++   vlVaAddSliceDataBuffer(context, data, size);
+ 
+    if (format == PIPE_VIDEO_FORMAT_JPEG)
+       vlVaAddSliceDataBuffer(context, eoi_jpeg, sizeof(eoi_jpeg));
+diff --git a/src/gallium/frontends/va/encode.c b/src/gallium/frontends/va/encode.c
+index 137c8b6..4fe12ed 100644
+--- a/src/gallium/frontends/va/encode.c
++++ b/src/gallium/frontends/va/encode.c
+@@ -69,6 +69,7 @@ handleVAEncMiscParameterTypeRateControl(vlVaContext *context, VAEncMiscParameter
+       status = vlVaHandleVAEncMiscParameterTypeRateControlHEVC(context, misc);
+       break;
+ 
++   case PIPE_VIDEO_FORMAT_VP8:
+    case PIPE_VIDEO_FORMAT_VP9: {
+       VAEncMiscParameterRateControl *rc = (VAEncMiscParameterRateControl *)misc->data;
+       if (rc->bits_per_second) {
+@@ -110,6 +111,7 @@ handleVAEncMiscParameterTypeFrameRate(vlVaContext *context, VAEncMiscParameterBu
+       status = vlVaHandleVAEncMiscParameterTypeFrameRateHEVC(context, misc);
+       break;
+ 
++   case PIPE_VIDEO_FORMAT_VP8:
+    case PIPE_VIDEO_FORMAT_VP9: {
+       VAEncMiscParameterFrameRate *rate = (VAEncMiscParameterFrameRate *)misc->data;
+       uint32_t den = rate->framerate >> 16;
+@@ -173,6 +175,16 @@ handleVAEncSequenceParameterBufferType(vlVaDriver *drv, vlVaContext *context, vl
+       break;
+    }
+ 
++   case PIPE_VIDEO_FORMAT_VP8: {
++      VAEncSequenceParameterBufferVP8 *vp8 = buf->data;
++      if (vp8->bits_per_second && !context->desc.vp9enc.target_bitrate)
++         context->desc.vp9enc.target_bitrate = vp8->bits_per_second;
++      /* The visible size; VA surfaces are padded to macroblocks. */
++      context->desc.vp9enc.width = vp8->frame_width;
++      context->desc.vp9enc.height = vp8->frame_height;
++      break;
++   }
++
+ #if VA_CHECK_VERSION(1, 16, 0)
+    case PIPE_VIDEO_FORMAT_AV1:
+       status = vlVaHandleVAEncSequenceParameterBufferTypeAV1(drv, context, buf);
+@@ -483,6 +495,27 @@ handleVAEncPictureParameterBufferType(vlVaDriver *drv, vlVaContext *context, vlV
+       break;
+    }
+ 
++   case PIPE_VIDEO_FORMAT_VP8: {
++      /* As VP9 above. VP8 cannot scale, so the visible size is the
++       * sequence's, and MediaCodec writes the whole frame. */
++      VAEncPictureParameterBufferVP8 *vp8 = buf->data;
++      context->desc.vp9enc.key_frame = !vp8->pic_flags.bits.frame_type ||
++                                       vp8->ref_flags.bits.force_kf;
++      vlVaBuffer *coded_buf = handle_table_get(drv->htab, vp8->coded_buf);
++      if (!coded_buf)
++         return VA_STATUS_ERROR_INVALID_BUFFER;
++
++      if (!coded_buf->derived_surface.resource)
++         coded_buf->derived_surface.resource = pipe_buffer_create(
++            drv->pipe->screen, PIPE_BIND_VERTEX_BUFFER, PIPE_USAGE_STAGING,
++            MAX2(1024 * 1024, coded_buf->size));
++      if (!coded_buf->derived_surface.resource)
++         return VA_STATUS_ERROR_ALLOCATION_FAILED;
++
++      context->coded_buf = coded_buf;
++      break;
++   }
++
+    default:
+       break;
+    }
+diff --git a/src/gallium/frontends/va/meson.build b/src/gallium/frontends/va/meson.build
+index 6bc1cf0..d78b6a6 100644
+--- a/src/gallium/frontends/va/meson.build
++++ b/src/gallium/frontends/va/meson.build
+@@ -9,7 +9,7 @@ libva_c_args = [
+ 
+ libva_files = files(
+     'buffer.c', 'config.c', 'context.c', 'display.c',
+-    'picture.c', 'surface.c', 'decode.c', 'image.c'
++    'picture.c', 'surface.c', 'decode.c', 'image.c', 'picture_vp8.c'
+ )
+ 
+ # termux-va bridge: forwards VA decode over a Unix socket to the Termux
+diff --git a/src/gallium/frontends/va/picture_vp8.c b/src/gallium/frontends/va/picture_vp8.c
+new file mode 100644
+index 0000000..09a2873
+--- /dev/null
++++ b/src/gallium/frontends/va/picture_vp8.c
+@@ -0,0 +1,94 @@
++/*
++ * VP8 decoding through the Termux:VA bridge.
++ * SPDX-License-Identifier: MIT
++ *
++ * A VA-API client parses the uncompressed part of each VP8 frame itself and
++ * submits the rest: the slice data starts at the first (control) partition.
++ * The bridge hands frames to Android's MediaCodec, which needs the complete
++ * frame, so the 3-byte frame tag and, on key frames, the 7-byte start code
++ * and size are rebuilt here (RFC 6386, section 9.1).
++ */
++
++#include "va_private.h"
++
++void
++vlVaHandlePictureParameterBufferVP8(vlVaContext *context, vlVaBuffer *buf)
++{
++   VAPictureParameterBufferVP8 *vp8 = buf->data;
++   struct vlVaVP8PictureDesc *desc = &context->desc.vp8;
++
++   assert(buf->size >= sizeof(VAPictureParameterBufferVP8) && buf->num_elements == 1);
++   desc->width = vp8->frame_width;
++   desc->height = vp8->frame_height;
++   /* VA-API keeps the bitstream's meaning: 0 is a key frame. */
++   desc->key_frame = !vp8->pic_fields.bits.key_frame;
++   desc->version = vp8->pic_fields.bits.version;
++}
++
++void
++vlVaHandleSliceParameterBufferVP8(vlVaContext *context, vlVaBuffer *buf)
++{
++   VASliceParameterBufferVP8 *vp8 = buf->data;
++   struct vlVaVP8PictureDesc *desc = &context->desc.vp8;
++
++   assert(buf->size >= sizeof(VASliceParameterBufferVP8) && buf->num_elements == 1);
++   desc->slice_data_offset = vp8->slice_data_offset;
++   desc->macroblock_offset = vp8->macroblock_offset;
++   desc->num_partitions = MIN2(vp8->num_of_partitions, ARRAY_SIZE(desc->partition_size));
++   for (unsigned i = 0; i < ARRAY_SIZE(desc->partition_size); i++)
++      desc->partition_size[i] = i < desc->num_partitions ? vp8->partition_size[i] : 0;
++}
++
++/* Writes the frame tag (and key-frame header) for this slice data into
++ * desc->header. Returns its length, or 0 if the slice data is inconsistent
++ * with its slice parameters. */
++unsigned
++vlVaDecoderVP8BitstreamHeader(vlVaContext *context, vlVaBuffer *buf)
++{
++   struct vlVaVP8PictureDesc *desc = &context->desc.vp8;
++   unsigned partitions = desc->num_partitions;
++
++   if (partitions < 2 || desc->slice_data_offset > buf->size)
++      return 0;
++
++   /* The slice data holds the first partition, a 3-byte size for every
++    * coefficient partition but the last, then the coefficient partitions.
++    * Clients give the last partition the rest of the buffer, so the first
++    * partition's size follows exactly from the total. partition_size[0] is
++    * only what remains of it after the header the client parsed. */
++   uint64_t rest = 3ull * (partitions - 2);
++   for (unsigned i = 1; i < partitions; i++)
++      rest += desc->partition_size[i];
++   uint64_t total = buf->size - desc->slice_data_offset;
++   if (rest >= total)
++      return 0;
++   uint64_t first = total - rest;
++   if (first < desc->partition_size[0] || first >= (1u << 19))
++      return 0;
++   if (getenv("DMD_VA_LOG"))
++      fprintf(stderr, "tva-vp8: key=%d version=%u %ux%u first=%llu (remaining %u, mb bit %u) partitions=%u\n",
++              desc->key_frame, desc->version, desc->width, desc->height,
++              (unsigned long long)first, desc->partition_size[0],
++              desc->macroblock_offset, partitions);
++
++   /* VA-API has no show_frame: every picture is decoded into its target
++    * surface, so every frame is marked shown and returned by MediaCodec. */
++   uint32_t tag = (desc->key_frame ? 0 : 1) | (desc->version & 7) << 1 | 1 << 4 |
++                  (uint32_t)first << 5;
++   uint8_t *h = desc->header;
++   h[0] = tag;
++   h[1] = tag >> 8;
++   h[2] = tag >> 16;
++   if (!desc->key_frame)
++      return 3;
++   /* Start code, then 14-bit sizes. The scaling bits are lost; they only
++    * suggest how to upscale for display and do not change decoding. */
++   h[3] = 0x9d;
++   h[4] = 0x01;
++   h[5] = 0x2a;
++   h[6] = desc->width;
++   h[7] = (desc->width >> 8) & 0x3f;
++   h[8] = desc->height;
++   h[9] = (desc->height >> 8) & 0x3f;
++   return 10;
++}
+diff --git a/src/gallium/frontends/va/tva_bridge.c b/src/gallium/frontends/va/tva_bridge.c
+index 3dbc376..36a8240 100644
+--- a/src/gallium/frontends/va/tva_bridge.c
++++ b/src/gallium/frontends/va/tva_bridge.c
+@@ -180,6 +180,14 @@ tva_vp9_disabled(void)
+     return tva_option_enabled("TERMUX_VA_DISABLE_VP9");
+ }
+ 
++/* VP8 needs a daemon that lists a hardware VP8 codec; TERMUX_VA_DISABLE_VP8
++ * hides both directions (the launcher sets it on Mali, not yet tested). */
++static bool
++tva_vp8_disabled(void)
++{
++    return tva_option_enabled("TERMUX_VA_DISABLE_VP8");
++}
++
+ static bool
+ tva_av1_disabled(void)
+ {
+@@ -224,6 +232,8 @@ tva_profile_supported(enum pipe_video_profile profile)
+                tva_ten_bit_available("video/x-vnd.on2.vp9");
+     case PIPE_VIDEO_PROFILE_AV1_MAIN:
+         return !tva_av1_disabled();
++    case PIPE_VIDEO_PROFILE_VP8:
++        return !tva_vp8_disabled() && tva_decoder_listed("video/x-vnd.on2.vp8");
+     default:
+         return false;
+     }
+@@ -244,6 +254,9 @@ tva_encode_profile_supported(enum pipe_video_profile profile)
+         return tva_encoder_available("video/hevc");
+     case PIPE_VIDEO_PROFILE_VP9_PROFILE0:
+         return tva_encoder_available("video/x-vnd.on2.vp9");
++    case PIPE_VIDEO_PROFILE_VP8:
++        /* Only a daemon that lists it knows CODEC_VP8_ENC. */
++        return !tva_vp8_disabled() && tva_encoder_listed("video/x-vnd.on2.vp8");
+     default:
+         return false;
+     }
+@@ -265,6 +278,8 @@ tva_codec_id(enum pipe_video_profile profile)
+         return CODEC_VP9;
+     case PIPE_VIDEO_FORMAT_AV1:
+         return CODEC_AV1;
++    case PIPE_VIDEO_FORMAT_VP8:
++        return CODEC_VP8;
+     default:
+         return -1;
+     }
+@@ -289,6 +304,8 @@ tva_encode_codec_id(enum pipe_video_profile profile)
+         return CODEC_HEVC_ENC;
+     case PIPE_VIDEO_FORMAT_VP9:
+         return CODEC_VP9_ENC;
++    case PIPE_VIDEO_FORMAT_VP8:
++        return CODEC_VP8_ENC;
+     default:
+         return -1;
+     }
+@@ -3039,6 +3056,7 @@ tva_encode_picture_bitrate(const struct tva_codec *c,
+                 return h265->rc[i].target_bitrate;
+         break;
+     }
++    case PIPE_VIDEO_FORMAT_VP8:
+     case PIPE_VIDEO_FORMAT_VP9: {
+         const struct vlVaVP9EncPictureDesc *vp9 =
+             (const struct vlVaVP9EncPictureDesc *)picture;
+@@ -3084,6 +3102,7 @@ tva_encode_picture_rate(const struct tva_codec *c,
+         }
+         break;
+     }
++    case PIPE_VIDEO_FORMAT_VP8:
+     case PIPE_VIDEO_FORMAT_VP9: {
+         const struct vlVaVP9EncPictureDesc *vp9 =
+             (const struct vlVaVP9EncPictureDesc *)picture;
+@@ -3287,13 +3306,18 @@ tva_codec_begin_frame(struct pipe_video_codec *codec,
+ 
+     if (c->encoder && picture) {
+         uint32_t color = 0;
+-        if (u_reduce_video_profile(c->base.profile) == PIPE_VIDEO_FORMAT_VP9) {
++        enum pipe_video_format encode_format = u_reduce_video_profile(c->base.profile);
++        if (encode_format == PIPE_VIDEO_FORMAT_VP9 ||
++            encode_format == PIPE_VIDEO_FORMAT_VP8) {
+             const struct vlVaVP9EncPictureDesc *vp9 =
+                 (const struct vlVaVP9EncPictureDesc *)picture;
+-            /* VA input surfaces include storage padding, whereas VP9 codes
+-             * the requested visible dimensions in its frame header. */
+-            c->encode_width = vp9->width;
+-            c->encode_height = vp9->height;
++            /* VA input surfaces include storage padding, whereas VP8 and
++             * VP9 code the requested visible dimensions in their frame
++             * headers. */
++            if (vp9->width && vp9->height) {
++                c->encode_width = vp9->width;
++                c->encode_height = vp9->height;
++            }
+         }
+         switch (u_reduce_video_profile(c->base.profile)) {
+         case PIPE_VIDEO_FORMAT_MPEG4_AVC: {
+@@ -3333,6 +3357,7 @@ tva_codec_begin_frame(struct pipe_video_codec *codec,
+                                     h265->seq.conf_win_bottom_offset);
+             break;
+         }
++        case PIPE_VIDEO_FORMAT_VP8:
+         case PIPE_VIDEO_FORMAT_VP9:
+             c->encode_key = ((const struct vlVaVP9EncPictureDesc *)picture)->key_frame;
+             break;
+@@ -4714,8 +4739,10 @@ hevc_csd_done:
+          * reference pictures must reach MediaCodec, but they do not produce
+          * an output buffer.  Reserving a pending entry for them would leave a
+          * permanent hole in the queue and eventually exhaust it. */
++        /* VP8 frames are all returned: see picture_vp8.c. */
+         const struct pipe_vp9_picture_desc *vp9 =
+-            (const struct pipe_vp9_picture_desc *)picture;
++            format == PIPE_VIDEO_FORMAT_VP9
++                ? (const struct pipe_vp9_picture_desc *)picture : NULL;
+         const bool show_frame = !vp9 ||
+             vp9->picture_parameter.pic_fields.show_frame;
+         if (c->next_unit >= UINT32_MAX) {
+@@ -4745,7 +4772,7 @@ hevc_csd_done:
+             *picture->out_fence = show_frame
+                 ? (struct pipe_fence_handle *)fence : NULL;
+         }
+-        TVA_TRACE("sending whole VP9 frame, len=%zu unit=%u show=%d",
++        TVA_TRACE("sending whole VP8/VP9 frame, len=%zu unit=%u show=%d",
+                   c->acc_len, unit_seq, show_frame);
+         int r = tva_send_unit(c, c->acc, c->acc_len);
+         if (r != TVA_OK) {
+diff --git a/src/gallium/frontends/va/tva_client.c b/src/gallium/frontends/va/tva_client.c
+index 2e76d25..a8fe025 100644
+--- a/src/gallium/frontends/va/tva_client.c
++++ b/src/gallium/frontends/va/tva_client.c
+@@ -912,15 +912,11 @@ static void tva_read_encoders(void)
+     fclose(f);
+ }
+ 
+-bool tva_encoder_available(const char *mime)
++/* One "<mime> <component>" line per hardware codec. */
++static bool tva_list_has(const char *list, const char *mime)
+ {
+-    static util_once_flag once = UTIL_ONCE_FLAG_INIT;
+-    util_call_once(&once, tva_read_encoders);
+-    if (!strcmp(tva_encoders, "*"))
+-        return true;
+-    /* One "<mime> <component>" line per hardware encoder. */
+     size_t len = strlen(mime);
+-    for (const char *line = tva_encoders; line && *line;
++    for (const char *line = list; line && *line;
+          line = strchr(line, '\n') ? strchr(line, '\n') + 1 : NULL) {
+         if (!strncmp(line, mime, len) && line[len] == ' ')
+             return true;
+@@ -956,6 +952,44 @@ bool tva_ten_bit_available(const char *mime)
+     return false;
+ }
+ 
++bool tva_encoder_available(const char *mime)
++{
++    static util_once_flag once = UTIL_ONCE_FLAG_INIT;
++    util_call_once(&once, tva_read_encoders);
++    if (!strcmp(tva_encoders, "*"))
++        return true;
++    return tva_list_has(tva_encoders, mime);
++}
++
++bool tva_encoder_listed(const char *mime)
++{
++    return tva_encoder_available(mime) && strcmp(tva_encoders, "*");
++}
++
++static char tva_decoders[1024];
++
++/* <socket>.decoders: hardware decoders for the codecs the bridge offers
++ * only when present (VP8). Missing means a daemon that predates it. */
++static void tva_read_decoders(void)
++{
++    char endpoint[512], path[600];
++    snprintf(path, sizeof(path), "%s.decoders",
++             tva_default_endpoint(endpoint, sizeof(endpoint)));
++    FILE *f = fopen(path, "re");
++    if (!f)
++        return;
++    size_t n = fread(tva_decoders, 1, sizeof(tva_decoders) - 1, f);
++    tva_decoders[n] = '\0';
++    fclose(f);
++}
++
++bool tva_decoder_listed(const char *mime)
++{
++    static util_once_flag once = UTIL_ONCE_FLAG_INIT;
++    util_call_once(&once, tva_read_decoders);
++    return tva_list_has(tva_decoders, mime);
++}
++
+ int tva_session_send_raw_frame(struct tva_session *s, const void *data,
+                                size_t len, uint32_t flags)
+ {
+diff --git a/src/gallium/frontends/va/tva_client.h b/src/gallium/frontends/va/tva_client.h
+index 910071b..e312e59 100644
+--- a/src/gallium/frontends/va/tva_client.h
++++ b/src/gallium/frontends/va/tva_client.h
+@@ -242,6 +242,10 @@ int tva_session_set_bitrate(struct tva_session *s, uint32_t bitrate);
+  * "<socket>.encoders" file it writes at start-up.  Without the file (an
+  * older daemon), every encoder is assumed available. */
+ bool tva_encoder_available(const char *mime);
++/* As above, but false when the daemon publishes no list. */
++bool tva_encoder_listed(const char *mime);
++/* Whether <socket>.decoders lists a hardware decoder for this MIME type. */
++bool tva_decoder_listed(const char *mime);
+ /* Whether the daemon proved that this MIME type's decoder returns real P010
+  * (<socket>.tenbit).  False with a daemon that predates 10-bit sessions. */
+ bool tva_ten_bit_available(const char *mime);
+diff --git a/src/gallium/frontends/va/tva_protocol.h b/src/gallium/frontends/va/tva_protocol.h
+index 23b35e9..a68eda9 100644
+--- a/src/gallium/frontends/va/tva_protocol.h
++++ b/src/gallium/frontends/va/tva_protocol.h
+@@ -115,6 +115,7 @@ typedef enum {
+     CODEC_HEVC_MAIN10       = 11,   /* decode, P010 out */
+     CODEC_VP9_PROFILE2      = 12,   /* decode, P010 out */
+     CODEC_HEVC_MAIN10_ENC   = 13,   /* encode, P010 in (reserved) */
++    CODEC_VP8_ENC           = 14,   /* encode, NV12 in (debian-livecd-termux) */
+     CODEC_MAX
+ } CodecId;
+ 
+@@ -123,7 +124,7 @@ static inline int codec_is_encoder(int codec)
+     return codec == CODEC_H264_ENC || codec == CODEC_HEVC_ENC ||
+            codec == CODEC_VP9_ENC || codec == CODEC_H264_BASELINE_ENC ||
+            codec == CODEC_H264_MAIN_ENC || codec == CODEC_H264_HIGH_ENC ||
+-           codec == CODEC_HEVC_MAIN10_ENC;
++           codec == CODEC_HEVC_MAIN10_ENC || codec == CODEC_VP8_ENC;
+ }
+ 
+ static inline int codec_is_ten_bit(int codec)
+@@ -138,7 +139,8 @@ static inline int codec_base_id(int codec)
+             codec == CODEC_H264_MAIN_ENC || codec == CODEC_H264_HIGH_ENC) ? CODEC_H264 :
+            (codec == CODEC_HEVC_ENC || codec == CODEC_HEVC_MAIN10 ||
+             codec == CODEC_HEVC_MAIN10_ENC) ? CODEC_HEVC :
+-           (codec == CODEC_VP9_ENC || codec == CODEC_VP9_PROFILE2) ? CODEC_VP9 : codec;
++           (codec == CODEC_VP9_ENC || codec == CODEC_VP9_PROFILE2) ? CODEC_VP9 :
++           codec == CODEC_VP8_ENC ? CODEC_VP8 : codec;
+ }
+ 
+ /*
+diff --git a/src/gallium/frontends/va/va_private.h b/src/gallium/frontends/va/va_private.h
+index 8eaeed7..e9f213d 100644
+--- a/src/gallium/frontends/va/va_private.h
++++ b/src/gallium/frontends/va/va_private.h
+@@ -254,6 +254,8 @@ PipeToProfile(enum pipe_video_profile profile)
+       return VAProfileVP9Profile0;
+    case PIPE_VIDEO_PROFILE_VP9_PROFILE2:
+       return VAProfileVP9Profile2;
++   case PIPE_VIDEO_PROFILE_VP8:
++      return VAProfileVP8Version0_3;
+    case PIPE_VIDEO_PROFILE_AV1_MAIN:
+       return VAProfileAV1Profile0;
+    case PIPE_VIDEO_PROFILE_AV1_PROFILE2:
+@@ -317,6 +319,8 @@ ProfileToPipe(VAProfile profile)
+       return PIPE_VIDEO_PROFILE_VP9_PROFILE0;
+    case VAProfileVP9Profile2:
+       return PIPE_VIDEO_PROFILE_VP9_PROFILE2;
++   case VAProfileVP8Version0_3:
++      return PIPE_VIDEO_PROFILE_VP8;
+    case VAProfileAV1Profile0:
+       return PIPE_VIDEO_PROFILE_AV1_MAIN;
+ #if VA_CHECK_VERSION(1, 23, 0)
+@@ -391,6 +395,25 @@ struct vlVaVP9EncPictureDesc {
+    bool key_frame;
+ };
+ 
++/* Gallium has no VP8 decoder descriptor either. VA-API's slice data starts at
++ * the first partition: VA clients drop the 3-byte frame tag and the 7-byte key
++ * frame start code and size. MediaCodec wants whole frames, so keep what
++ * rebuilding those bytes needs (see picture_vp8.c). The probability and
++ * quantiser buffers repeat values the first partition already codes. */
++struct vlVaVP8PictureDesc {
++   struct pipe_picture_desc base;
++   uint32_t width;
++   uint32_t height;
++   bool key_frame;
++   uint8_t version;
++   uint32_t slice_data_offset;
++   uint32_t macroblock_offset;
++   uint8_t num_partitions;
++   uint32_t partition_size[9];
++   /* Rebuilt frame tag and key-frame header, sent before the slice data. */
++   uint8_t header[10];
++};
++
+ typedef struct vlVaContext {
+    struct pipe_video_codec templat, *decoder;
+    struct pipe_video_buffer *target;
+@@ -406,7 +429,9 @@ typedef struct vlVaContext {
+       struct pipe_h264_enc_picture_desc h264enc;
+       struct pipe_h265_enc_picture_desc h265enc;
+       struct pipe_av1_enc_picture_desc av1enc;
++      /* VP8 encoding uses the VP9 encoder descriptor: same fields. */
+       struct vlVaVP9EncPictureDesc vp9enc;
++      struct vlVaVP8PictureDesc vp8;
+    } desc;
+ 
+    struct {
+@@ -641,6 +666,10 @@ MESAPROC void vlVaHandleSliceParameterBufferVP9(vlVaContext *context, vlVaBuffer
+ MESAPROC void vlVaDecoderVP9BitstreamHeader(vlVaContext *context, vlVaBuffer *buf) TAILV;
+ #undef __U_STUB__
+ 
++void vlVaHandlePictureParameterBufferVP8(vlVaContext *context, vlVaBuffer *buf);
++void vlVaHandleSliceParameterBufferVP8(vlVaContext *context, vlVaBuffer *buf);
++unsigned vlVaDecoderVP8BitstreamHeader(vlVaContext *context, vlVaBuffer *buf);
++
+ #if !VIDEO_CODEC_H264DEC
+ #define __U_STUB__
+ #endif
+diff --git a/src/gallium/include/pipe/p_video_enums.h b/src/gallium/include/pipe/p_video_enums.h
+index 89449d9..0ba718a 100644
+--- a/src/gallium/include/pipe/p_video_enums.h
++++ b/src/gallium/include/pipe/p_video_enums.h
+@@ -43,7 +43,8 @@ enum pipe_video_format
+    PIPE_VIDEO_FORMAT_HEVC,     /**< H.265 */
+    PIPE_VIDEO_FORMAT_JPEG,     /**< JPEG */
+    PIPE_VIDEO_FORMAT_VP9,      /**< VP9 */
+-   PIPE_VIDEO_FORMAT_AV1       /**< AV1 */
++   PIPE_VIDEO_FORMAT_AV1,      /**< AV1 */
++   PIPE_VIDEO_FORMAT_VP8       /**< VP8, decoded and encoded by the Termux:VA bridge only */
+ };
+ 
+ enum pipe_video_profile
+@@ -76,6 +77,7 @@ enum pipe_video_profile
+    PIPE_VIDEO_PROFILE_VP9_PROFILE2,
+    PIPE_VIDEO_PROFILE_AV1_MAIN,
+    PIPE_VIDEO_PROFILE_AV1_PROFILE2,
++   PIPE_VIDEO_PROFILE_VP8,
+    PIPE_VIDEO_PROFILE_MAX
+ };
+ 

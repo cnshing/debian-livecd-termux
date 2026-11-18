@@ -1,0 +1,142 @@
+VP8 for the VA driver (debian-livecd-termux): CODEC_VP8_ENC (14), the VP8
+encoder in <socket>.encoders, hardware VP8 decoders in <socket>.decoders, and
+no codec-config buffer forwarded for VP8 encoders (as for VP9).
+
+Encoder output: AMediaCodec_getOutputBuffer already points at the buffer's
+range offset, so info.offset is not added again (encoder and decoder output). OMX.qcom.video.encoder.vp8
+reports offset 12, and adding it cut the first 12 bytes of every frame.
+
+diff --git a/common/tva_protocol.h b/common/tva_protocol.h
+index 23b35e9..a68eda9 100644
+--- a/common/tva_protocol.h
++++ b/common/tva_protocol.h
+@@ -115,6 +115,7 @@ typedef enum {
+     CODEC_HEVC_MAIN10       = 11,   /* decode, P010 out */
+     CODEC_VP9_PROFILE2      = 12,   /* decode, P010 out */
+     CODEC_HEVC_MAIN10_ENC   = 13,   /* encode, P010 in (reserved) */
++    CODEC_VP8_ENC           = 14,   /* encode, NV12 in (debian-livecd-termux) */
+     CODEC_MAX
+ } CodecId;
+ 
+@@ -123,7 +124,7 @@ static inline int codec_is_encoder(int codec)
+     return codec == CODEC_H264_ENC || codec == CODEC_HEVC_ENC ||
+            codec == CODEC_VP9_ENC || codec == CODEC_H264_BASELINE_ENC ||
+            codec == CODEC_H264_MAIN_ENC || codec == CODEC_H264_HIGH_ENC ||
+-           codec == CODEC_HEVC_MAIN10_ENC;
++           codec == CODEC_HEVC_MAIN10_ENC || codec == CODEC_VP8_ENC;
+ }
+ 
+ static inline int codec_is_ten_bit(int codec)
+@@ -138,7 +139,8 @@ static inline int codec_base_id(int codec)
+             codec == CODEC_H264_MAIN_ENC || codec == CODEC_H264_HIGH_ENC) ? CODEC_H264 :
+            (codec == CODEC_HEVC_ENC || codec == CODEC_HEVC_MAIN10 ||
+             codec == CODEC_HEVC_MAIN10_ENC) ? CODEC_HEVC :
+-           (codec == CODEC_VP9_ENC || codec == CODEC_VP9_PROFILE2) ? CODEC_VP9 : codec;
++           (codec == CODEC_VP9_ENC || codec == CODEC_VP9_PROFILE2) ? CODEC_VP9 :
++           codec == CODEC_VP8_ENC ? CODEC_VP8 : codec;
+ }
+ 
+ /*
+diff --git a/daemon/termux-va.c b/daemon/termux-va.c
+index fa32f77..09bd0ef 100644
+--- a/daemon/termux-va.c
++++ b/daemon/termux-va.c
+@@ -1597,7 +1597,8 @@ static void *output_thread(void *arg)
+                 uint8_t *ob = AMediaCodec_getOutputBuffer(s->codec, oi, &osz);
+                 if (ob) {
+                     int rc = -1;
+-                    size_t off = (size_t)info.offset;
++                    /* The NDK pointer already starts at info.offset (see encoder_drain_output). */
++                    size_t off = 0;
+                     size_t frame_size = (size_t)info.size;
+                     const uint8_t *frame_data = NULL;
+ 
+@@ -2024,7 +2025,11 @@ static int encoder_drain_output(Session *s, uint8_t **csd, size_t *csd_len,
+ 
+         size_t osz = 0;
+         uint8_t *ob = AMediaCodec_getOutputBuffer(s->codec, oi, &osz);
+-        size_t off = info.offset < 0 ? 0 : (size_t)info.offset;
++        /* AMediaCodec_getOutputBuffer returns ABuffer::data(), which already
++         * starts at the range offset; adding info.offset again skips bytes.
++         * OMX.qcom.video.encoder.vp8 reports offset 12, which cut every VP8
++         * frame's first 12 bytes (Java's ByteBuffer applies it once). */
++        size_t off = 0;
+         size_t len = info.size < 0 ? 0 : (size_t)info.size;
+         int rc = 0;
+         if (!ob || off > osz || len > osz - off) {
+@@ -2037,8 +2042,8 @@ static int encoder_drain_output(Session *s, uint8_t **csd, size_t *csd_len,
+             /* VP9 has no codec-config access unit in the IVF/VA-API path.
+              * Pixel's Exynos component reports a short private header here;
+              * forwarding it would make the first VP9 frame undecodable. */
+-            if (s->codec_id == CODEC_VP9_ENC) {
+-                dlog(1, "[%d] dropped VP9 codec-config buffer: %zu bytes",
++            if (s->codec_id == CODEC_VP9_ENC || s->codec_id == CODEC_VP8_ENC) {
++                dlog(1, "[%d] dropped VP8/VP9 codec-config buffer: %zu bytes",
+                      s->id, len);
+                 rc = 0;
+             } else {
+@@ -2190,7 +2195,9 @@ static bool software_codec_name(const char *name)
+  * so the VA driver advertises only those.  Replaced atomically. */
+ static void write_encoder_list(const char *sock_path)
+ {
+-    static const char *const mimes[] = { "video/avc", "video/hevc", "video/x-vnd.on2.vp9" };
++    static const char *const mimes[] = { "video/avc", "video/hevc", "video/x-vnd.on2.vp9",
++                                         "video/x-vnd.on2.vp8" };
++    size_t count = sizeof(mimes) / sizeof(mimes[0]);
+     char path[600], next[620];
+     snprintf(path, sizeof(path), "%s.encoders", sock_path);
+     snprintf(next, sizeof(next), "%s.next", path);
+@@ -2199,7 +2206,7 @@ static void write_encoder_list(const char *sock_path)
+         dlog(0, "cannot write %s: %s", next, strerror(errno));
+         return;
+     }
+-    for (size_t i = 0; i < sizeof(mimes) / sizeof(mimes[0]); i++) {
++    for (size_t i = 0; i < count; i++) {
+         AMediaCodec *codec = AMediaCodec_createEncoderByType(mimes[i]);
+         char *name = NULL;
+         if (codec && AMediaCodec_getName(codec, &name) == AMEDIA_OK && name) {
+@@ -2334,6 +2341,36 @@ static void write_ten_bit_list(const char *sock_path)
+         dlog(0, "cannot publish %s: %s", path, strerror(errno));
+ }
+ 
++/* Write "<mime> <component>" for each hardware decoder of the codecs the VA
++ * driver offers only when one exists (VP8) to <socket>.decoders. */
++static void write_decoder_list(const char *sock_path)
++{
++    static const char *const mimes[] = { "video/x-vnd.on2.vp8" };
++    char path[600], next[620];
++    snprintf(path, sizeof(path), "%s.decoders", sock_path);
++    snprintf(next, sizeof(next), "%s.next", path);
++    FILE *f = fopen(next, "we");
++    if (!f) {
++        dlog(0, "cannot write %s: %s", next, strerror(errno));
++        return;
++    }
++    for (size_t i = 0; i < sizeof(mimes) / sizeof(mimes[0]); i++) {
++        AMediaCodec *codec = AMediaCodec_createDecoderByType(mimes[i]);
++        char *name = NULL;
++        if (codec && AMediaCodec_getName(codec, &name) == AMEDIA_OK && name) {
++            dlog(1, "%s decoder: %s%s", mimes[i], name,
++                 software_codec_name(name) ? " (software, not offered)" : "");
++            if (!software_codec_name(name))
++                fprintf(f, "%s %s\n", mimes[i], name);
++            AMediaCodec_releaseName(codec, name);
++        }
++        if (codec)
++            AMediaCodec_delete(codec);
++    }
++    if (fclose(f) != 0 || rename(next, path) != 0)
++        dlog(0, "cannot publish %s: %s", path, strerror(errno));
++}
++
+ static int encoder_run(Session *s)
+ {
+     uint8_t *input = malloc(MAX_ENCODE_FRAME);
+@@ -3010,6 +3047,7 @@ int main(int argc, char **argv)
+     /* Lock acquired: no live instance.  lockfd stays open on purpose. */
+     write_encoder_list(sock_path);
+     write_ten_bit_list(sock_path);
++    write_decoder_list(sock_path);
+ 
+     struct stat st;
+     if (stat(sock_path, &st) == 0 && S_ISSOCK(st.st_mode)) {

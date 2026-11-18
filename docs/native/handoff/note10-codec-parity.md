@@ -57,23 +57,31 @@ rendered output. Keep the 8-bit suites passing. Secure/DRM output is excluded.
 
 ## VP8 decode and encode
 
-Android registers hardware `OMX.qcom.video.decoder.vp8` and
-`OMX.qcom.video.encoder.vp8`. MediaCodec decoding passed 48/48 numbered
-pictures; mpv can use that existing path. The VA bridge does not expose it.
+**Decode: done, on by default on Adreno** (android-vaapi 16, termux-va 3). Mesa
+had no VP8 pipe format, so `0120-vp8-decode-encode.patch` adds
+`PIPE_VIDEO_PROFILE_VP8` (`VAProfileVP8Version0_3`) for the bridge alone and
+`picture_vp8.c`. VA clients submit the slice data from the first partition on,
+so the bridge rebuilds the 3-byte frame tag and, on key frames, the start code
+and size; the first partition's size is the slice data size minus the
+coefficient partitions and their size table. VA-API has no `show_frame`, and
+each VA picture must fill its surface, so every frame is sent as shown.
+`termux-va` lists hardware VP8 decoders in `<socket>.decoders`; the driver
+offers VP8 only when one is listed (`OMX.qcom.video.decoder.vp8` here). The
+launcher hides it on Mali (`disabled_va_codecs` default), where it is untested.
+FFmpeg VA decoded `chart-vp8` and `chart-vp8-altref` (three hidden alternate
+reference frames, four token partitions) bit-exact against libvpx, 48/48 each;
+with `TERMUX_VA_DISABLE_VP8=1` the same run fails.
 
-Mesa's pinned Gallium has no VP8 pipe video format or VA picture frontend.
-Add the Gallium profile/descriptor, a `picture_vp8.c` handling VA picture,
-slice, IQ and probability data, and reconstruct the VP8 frame/header data
-MediaCodec expects. Merely adding `VAProfileVP8Version0_3` or mapping the
-existing decoder protocol ID cannot supply that missing data. Decoder
-protocol `CODEC_VP8` already exists; encoder sessions need a new append-only
-ID, MIME mapping, encoder discovery and VA encoder plumbing. Keep hardware
-discovery separate from Qualcomm's software MPEG-4/H.263 components.
-
-FFmpeg advertises `vp8_mediacodec`, but this continuation's direct 640x360
-NV12 encode aborted in CodecLooper after Android configured the Qualcomm
-encoder (stack-protector failure, no file output). Do not mark that route
-passing without diagnosing the failure and software-decoding a full stream.
+**Encode: on by default on Adreno.** VP8 sessions use the new append-only
+`CODEC_VP8_ENC` (14) and the VP9 encoder descriptor in the driver; the daemon
+lists `OMX.qcom.video.encoder.vp8` in `<socket>.encoders`. The earlier
+"invalid VP8" output had one cause: `AMediaCodec_getOutputBuffer` already
+points at the buffer's range offset, and the daemon (like FFmpeg's
+`vp8_mediacodec`) added `info.offset` again. The Qualcomm VP8 encoder reports
+offset 12, so the first 12 bytes of every frame were lost. A Java `MediaCodec`
+encode of the same frames (dex via `app_process`) showed offset 12 and valid
+VP8. FFmpeg's `vp8_mediacodec` still has this bug; the stack-protector abort
+seen before did not recur. ENCODE_RESULT
 
 ## Encoding quality and application boundaries
 

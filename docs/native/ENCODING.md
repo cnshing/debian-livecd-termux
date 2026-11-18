@@ -126,7 +126,7 @@ final one, with the same driver and daemon.
 
 | Check | Result |
 | --- | --- |
-| Hardware encoders listed by the daemon | `video/avc OMX.qcom.video.encoder.avc`, `video/hevc OMX.qcom.video.encoder.hevc`. No VP9 hardware: the request is refused, not run in software |
+| Hardware encoders listed by the daemon | `video/avc OMX.qcom.video.encoder.avc`, `video/hevc OMX.qcom.video.encoder.hevc`, and since termux-va 3 `video/x-vnd.on2.vp8 OMX.qcom.video.encoder.vp8`. No VP9 hardware: the request is refused, not run in software |
 | Key frames, H.264 Constrained Baseline/Main/High and HEVC Main | IDR exactly at each requested picture (0, 30, 45, 46, 89), with SPS and PPS before each; no others |
 | Pixels, protocol test | 43.5–46 dB on every plane; a one-frame shift fails 89 of 90 frames, swapped chroma 90 of 90 |
 | Bitrate | 1 and 6 Mb/s targets give 1.00 and 6.01 Mb/s; a change from 6 to 0.6 Mb/s mid-stream takes effect (6.07 to 0.56 Mb/s) |
@@ -213,6 +213,10 @@ All changes are generic: none is specific to a program.
   against 50 dB without it. That is Mesa's VA post-processor, not the bridge.
   Serein's screen share uses it to convert RGB, where some loss is inherent.
 - **Codecs.** No VP9 hardware encoder on this SoC, no AV1 encoder, 8-bit only.
+- **VP8.** `OMX.qcom.video.encoder.vp8` through the bridge (`CODEC_VP8_ENC`), on by default
+  on Adreno. Its output buffers carry offset 12, which the NDK pointer already includes: termux-va
+  4 stopped adding it twice. FFmpeg's own `vp8_mediacodec` still does. See
+  [handoff/note10-codec-parity.md](handoff/note10-codec-parity.md#vp8-decode-and-encode).
 - **Untested:** Termux's own `libva` 2.24.1, which libva's driver ABI should
   accept; the mirror and the package server returned 404. Also untested: this
   setup in the running desktop, and alongside the browser launchers' own preloads.

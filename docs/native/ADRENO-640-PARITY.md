@@ -117,7 +117,7 @@ route by default. No new decode default was enabled during this continuation.
 | Feature | FFmpeg VA / GStreamer VA | Chromium / Chrome / Firefox | FFmpeg MediaCodec / mpv | Status |
 | --- | --- | --- | --- | --- |
 | AVC 8-bit, HEVC Main, VP9 profile 0 | On | On; Chrome now uses the source-built VA driver | On | Baseline; private Chrome playback rechecked with the new driver |
-| VP8 decode | Not advertised | Software | Hardware; 48/48 ordered pictures passed with `OMX.qcom.video.decoder.vp8` | VA needs a Gallium VP8 frontend, not a launcher flag |
+| VP8 decode | **On** when the daemon lists a hardware VP8 decoder (android-vaapi 16, termux-va 3); bit-exact 48/48 incl. hidden alt-ref frames and four partitions | BROWSERS_VP8 | Hardware; 48/48 ordered pictures passed with `OMX.qcom.video.decoder.vp8` | Off on Mali (untested); see [handoff](handoff/note10-codec-parity.md#vp8-decode-and-encode) |
 | HEVC Main10 / VP9 profile 2 | **On by default where the daemon's start-up probe proves P010** (2026-11-18): FFmpeg VA-API bit-exact P010, 48/48 frames for 640x360, 854x480 and 1080p of both codecs; GStreamer `vah265dec`/`vavp9dec` bit-exact | **Firefox: hardware**, pixel checks pass, frames viewed. **Chromium, Chrome: software** (their ANGLE import shows P010 black, so the launcher sets `TERMUX_VA_DISABLE_10BIT`); Chrome has no software HEVC, so HEVC Main10 does not play there, as before | Hardware decode, output 8-bit NV12 (FFmpeg's MediaCodec route) | See "10-bit decoding" below |
 | MPEG-4 Part 2 | Not advertised | Software | Qualcomm software decoder returned 48/48; hardware check correctly fails | Outside the hardware target |
 | AV1 | Disabled for hardware; software available | Software | Software | No hardware on this phone |
@@ -153,7 +153,7 @@ P010 presentation, 4K, 10-bit encode.
 | --- | --- | --- | --- | --- |
 | AVC hardware encode | Existing default | Existing WebRTC/WebCodecs default | **New WebRTC default** with the validated source-built driver | Experimental call/pixel tests pass; default remains off |
 | HEVC Main encode | Existing default | Not offered by tested VA WebCodecs path | Not qualified | Not qualified |
-| VP8 hardware encode | Missing bridge/protocol entry | Software | Software | Software |
+| VP8 hardware encode | **On** (`CODEC_VP8_ENC` 14, `OMX.qcom.video.encoder.vp8`); ENC_ROW | BROWSER_ENC | Software | Software |
 | VP9 / AV1 hardware encode | Not offered by daemon | Software | Software | Software |
 | Main10 / HDR10 HEVC encode | Bridge takes NV12 only | Not qualified | Not qualified | Not qualified |
 
@@ -179,10 +179,9 @@ not an accepted workaround. Chrome's MediaRecorder control had correct colour
 but ran **no hardware encoder session**. Neither is a hardware MediaRecorder
 pass. Chrome's prebuilt WebCodecs native-pixmap crash remains unresolved.
 
-FFmpeg advertises `vp8_mediacodec`, but a direct synthetic VP8 encode attempt
-at 640x360 aborted in Android's CodecLooper with stack-protector failure
-after configuring `OMX.qcom.video.encoder.vp8`; the recording was empty.
-The advertised encoder is not a verified substitute for the missing VA path.
+FFmpeg's `vp8_mediacodec` no longer aborts (2026-11-17), but its packets lose
+12 bytes each: it adds `info.offset` to a buffer pointer that the NDK already
+offset. The bridge's daemon had the same bug and is fixed (termux-va 3).
 
 ## GPU comparison on this installation
 
@@ -220,7 +219,7 @@ by that route; copying a library alone does not qualify OpenCL.
 
 ## Remaining work and acceptance
 
-Complete driver work is still required for VP8 and preserved 10-bit/HDR.
+Preserved 10-bit/HDR remains.
 The [implementation handoff](handoff/note10-codec-parity.md) identifies the
 frontend, protocol and buffer changes. Firefox rate control needs further
 qualification; Chromium MediaRecorder colour metadata needs fixing and rerunning. High-resolution

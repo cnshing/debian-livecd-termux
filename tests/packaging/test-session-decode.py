@@ -36,6 +36,7 @@ class SessionDecode(unittest.TestCase):
         self.assertTrue(preload)
         self.assertNotIn('TERMUX_VA_DISABLE_H264', env)
         self.assertEqual(env['TERMUX_VA_DISABLE_AV1'], '1')
+        self.assertNotIn('TERMUX_VA_DISABLE_VP8', env)
         self.assertNotIn('TERMUX_VA_HEVC_REORDER_PICS', env)
 
     def test_mali_session_returns_hevc_pictures_at_once(self):
@@ -43,6 +44,7 @@ class SessionDecode(unittest.TestCase):
         self.assertEqual(env['TERMUX_VA_HEVC_REORDER_PICS'], '0')
         self.assertEqual(env['TERMUX_VA_DISABLE_H264'], '1')
         self.assertEqual(env['TERMUX_VA_DISABLE_AV1'], '1')
+        self.assertEqual(env['TERMUX_VA_DISABLE_VP8'], '1')
 
     def test_configured_codec_list_is_shared_with_the_launcher(self):
         env, _ = self.session(False, {'disabled_va_codecs': []})

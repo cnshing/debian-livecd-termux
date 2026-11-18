@@ -289,8 +289,9 @@ def decode_safeguards(env, config, mali):
         # The same holds for H.264's max_num_reorder_frames (decode-h264.md).
         env['TERMUX_VA_H264_REORDER_FRAMES'] = '0'
     # Neither phone has an AV1 decoder. H.264 passes on Adreno with the PPS fix (decode-h264.md);
-    # Mali keeps it off until its browser runs are done.
-    for codec in config.get('disabled_va_codecs', ['h264', 'av1'] if mali else ['av1']):
+    # Mali keeps it off until its browser runs are done. VP8 (decode and encode) is offered when
+    # the daemon finds a hardware codec, and was only tested on Adreno.
+    for codec in config.get('disabled_va_codecs', ['h264', 'av1', 'vp8'] if mali else ['av1']):
         env.setdefault('TERMUX_VA_DISABLE_' + codec.upper(), '1')
 
 

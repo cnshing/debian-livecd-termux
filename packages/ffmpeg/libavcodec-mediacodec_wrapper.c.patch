@@ -1,0 +1,19 @@
+AMediaCodec_getOutputBuffer() already points at the buffer's range offset; FFmpeg
+added BufferInfo.offset again on the NDK path, cutting 12 bytes from every frame of
+OMX.qcom.video.encoder.vp8 (Snapdragon 855). Upstream: to be sent to ffmpeg-devel.
+
+--- a/libavcodec/mediacodec_wrapper.c
++++ b/libavcodec/mediacodec_wrapper.c
+@@ -2270,7 +2270,11 @@
+     ssize_t ret;
+ 
+     ret = AMediaCodec_dequeueOutputBuffer(codec->impl, &buf_info, timeoutUs);
+-    info->offset = buf_info.offset;
++    /* AMediaCodec_getOutputBuffer() returns ABuffer::data(), which already
++     * points at the range offset, unlike the JNI ByteBuffer address. Callers
++     * add info->offset to that pointer, so report 0 here, or bytes are lost
++     * (OMX.qcom.video.encoder.vp8 uses offset 12). */
++    info->offset = 0;
+     info->size = buf_info.size;
+     info->presentationTimeUs = buf_info.presentationTimeUs;
+     info->flags = buf_info.flags;

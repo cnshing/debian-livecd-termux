@@ -162,6 +162,8 @@ def run(args, endpoint):
         print(f'  {name}: median round trip {statistics.median(times) * 1000:.1f} ms at {width}x{height}')
 
     check_color(args, endpoint, width, height)
+    if 'video/x-vnd.on2.vp8' in mimes:
+        check_vp8(args, endpoint, frames, source, width, height, keys)
 
     # Negative controls: the same checks must catch a shifted frame and
     # swapped chroma planes.
@@ -221,6 +223,41 @@ def run(args, endpoint):
             check(f'{h}p round trip fits a 30 fps frame', median < 1000 / 30, f'median {median:.1f} ms')
         else:
             print(f'  {h}p round trip: median {median:.1f} ms against {1000 / 30:.1f} ms per frame at 30 fps')
+
+
+def ivf(packets, width, height, rate=30):
+    header = b'DKIF' + struct.pack('<HHIHHIIII', 0, 32, 0x30385056, width, height, rate, 1, len(packets), 0)
+    return header + b''.join(struct.pack('<IQ', len(p), i) + p for i, p in enumerate(packets))
+
+
+def check_vp8(args, endpoint, frames, source, width, height, keys):
+    """VP8 (CODEC_VP8_ENC 14): whole frames, key frames where asked, a full libvpx decode."""
+    count = len(frames)
+    packets, flags, times = encode_clip(endpoint, 14, frames, width, height, keys)
+    stream = args.out / 'vp8.ivf'
+    stream.write_bytes(ivf(packets, width, height))
+    check('vp8: one packet per frame', len(packets) == count, f'{len(packets)} packets')
+    tagged = [i for i, p in enumerate(packets) if p and not p[0] & 1]
+    check('vp8: key frames exactly where requested', tagged == sorted(keys) and
+          [i for i, f in enumerate(flags) if f & 1] == sorted(keys), f'frame tags {tagged}')
+    check('vp8: every key frame has the start code', all(packets[i][3:6] == b'\x9d\x01\x2a' for i in tagged))
+    decode = subprocess.run(['ffmpeg', '-v', 'error', '-nostdin', '-c:v', 'libvpx', '-i', stream,
+                             '-f', 'framemd5', '-'], capture_output=True, text=True)
+    decoded = [line for line in decode.stdout.splitlines() if line and line[0] != '#']
+    check('vp8: libvpx decodes every frame without error', len(decoded) == count and not decode.stderr.strip(),
+          f'{len(decoded)} frames; {decode.stderr.strip()[:200]}')
+    scores = oracle.psnr(stream, source, width, height)
+    bad = oracle.psnr_failures(scores, count)
+    check('vp8: pixels match the source frame by frame', not bad,
+          oracle.summary(scores) + ('; ' + '; '.join(bad[:3]) if bad else ''))
+    print(f'  vp8: median round trip {statistics.median(times) * 1000:.1f} ms at {width}x{height}')
+    # Control: the frames as the daemon sent them before termux-va 3, each missing
+    # its first 12 bytes, must fail.
+    cut = args.out / 'vp8-cut.ivf'
+    cut.write_bytes(ivf([p[12:] for p in packets], width, height))
+    decode = subprocess.run(['ffmpeg', '-v', 'error', '-nostdin', '-c:v', 'libvpx', '-i', cut,
+                             '-f', 'framemd5', '-'], capture_output=True, text=True)
+    check('control: VP8 frames missing 12 bytes fail to decode', bool(decode.stderr.strip()))
 
 
 def check_color(args, endpoint, width, height):

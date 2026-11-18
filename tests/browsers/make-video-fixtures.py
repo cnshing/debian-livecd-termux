@@ -47,7 +47,7 @@ def chart(width, height, number):
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('out', type=Path)
-    p.add_argument('--codecs', nargs='+', choices=('vp9', 'h264', 'h264-fast', 'hevc', 'av1', 'vp8', 'mpeg4'),
+    p.add_argument('--codecs', nargs='+', choices=('vp9', 'h264', 'h264-fast', 'hevc', 'av1', 'vp8', 'vp8-altref', 'mpeg4'),
                    default=['vp9', 'h264', 'h264-fast', 'hevc'])
     p.add_argument('--size', default='640x360')
     p.add_argument('--frames', type=int, default=48)
@@ -58,7 +58,7 @@ def main():
     width, height = map(int, args.size.split('x'))
     if min(width, height) < 128 or width % 2 or height % 2 or not 2 <= args.frames <= 256:
         p.error('Use even dimensions >=128 and 2..256 frames')
-    if args.ten_bit and {'h264', 'h264-fast', 'vp8', 'mpeg4'} & set(args.codecs):
+    if args.ten_bit and {'h264', 'h264-fast', 'vp8', 'vp8-altref', 'mpeg4'} & set(args.codecs):
         p.error('10-bit H.264, VP8 and MPEG-4 are outside the hardware test scope; select vp9/hevc/av1')
     args.out.mkdir(parents=True, exist_ok=False)
     commands = []
@@ -74,7 +74,7 @@ def main():
                 output.write(chart(width, height, number))
         manifest['source_sha256'] = sha256(source)
         for codec in args.codecs:
-            ext = 'webm' if codec in ('vp9', 'av1', 'vp8') else 'mp4'
+            ext = 'webm' if codec in ('vp9', 'av1', 'vp8', 'vp8-altref') else 'mp4'
             name = f'chart-{codec}.{ext}'
             encoder = {'vp9': ['libvpx-vp9', '-deadline', 'good', '-cpu-used', '4', '-crf', '18', '-b:v', '0'],
                        'h264': ['libx264', '-preset', 'medium', '-crf', '18', '-bf', '3'],
@@ -85,9 +85,13 @@ def main():
                        'hevc': ['libx265', '-preset', 'fast', '-crf', '18', '-x265-params', 'pools=none:frame-threads=1'],
                        'av1': ['libaom-av1', '-cpu-used', '8', '-crf', '18', '-b:v', '0'],
                        'vp8': ['libvpx', '-deadline', 'good', '-cpu-used', '4', '-crf', '8', '-b:v', '4M'],
+                       # Hidden alternate reference frames and four token partitions: the
+                       # bridge rebuilds each frame's header from the partition sizes.
+                       'vp8-altref': ['libvpx', '-deadline', 'good', '-cpu-used', '4', '-crf', '8', '-b:v', '4M',
+                                      '-auto-alt-ref', '1', '-lag-in-frames', '16', '-slices', '4'],
                        'mpeg4': ['mpeg4', '-q:v', '2', '-bf', '0']}[codec]
             matrix = 'bt601' if args.matrix == 'smpte170m' else args.matrix
-            run(['ffmpeg', '-v', 'error', '-f', 'rawvideo', '-pixel_format', 'rgb24', '-video_size', args.size,
+            encode = ['ffmpeg', '-v', 'error', '-f', 'rawvideo', '-pixel_format', 'rgb24', '-video_size', args.size,
                  '-framerate', '12', '-i', str(source), '-an', '-vf',
                  f'scale=out_color_matrix={matrix}:out_range={args.range},'
                  f'format={"yuv420p10le" if args.ten_bit else "yuv420p"},'
@@ -95,7 +99,13 @@ def main():
                  f'color_trc={args.matrix}:range={args.range}', '-filter_threads', '1',
                  '-c:v', *encoder, '-threads', '1', '-pix_fmt', 'yuv420p10le' if args.ten_bit else 'yuv420p',
                  '-colorspace', args.matrix, '-color_primaries', args.matrix, '-color_trc', args.matrix,
-                 '-color_range', args.range, str(args.out / name)])
+                 '-color_range', args.range]
+            if codec == 'vp8-altref':
+                # libvpx makes VP8 alternate reference frames only in two passes.
+                log = str(Path(work) / codec)
+                run([*encode, '-pass', '1', '-passlogfile', log, '-f', 'null', '-'])
+                encode += ['-pass', '2', '-passlogfile', log]
+            run([*encode, str(args.out / name)])
             metadata = json.loads(subprocess.check_output(['ffprobe', '-v', 'error', '-select_streams', 'v:0',
                 '-show_entries', 'stream=color_space,color_range,color_primaries,color_transfer', '-of', 'json',
                 str(args.out / name)], text=True))['streams'][0]

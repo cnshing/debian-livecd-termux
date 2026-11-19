@@ -114,8 +114,8 @@ semaphore. It is a safeguard for any DRI3 path without sync and changes nothing 
 Verified 2026-11-19 with revision 14 loaded from a private directory (ICD set after
 `acceleration.prepare`, which otherwise replaces it): 0 of 900 split frames in each of two
 30-second runs, against 11/600, 200/900, 18/900 and 657/900 on revision 13.
-Still to do: install revision 14 (and mesa 108) on the Note10+, then record under mutter with
-video playing.
+Installed on the Note10+ (revision 14, mesa 108) and rechecked with the stock launcher: 0 of 900
+in each of two runs. Still to do: record under mutter with video playing.
 
 Options considered:
 

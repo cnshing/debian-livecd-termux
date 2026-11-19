@@ -31,8 +31,11 @@ class Seeds(unittest.TestCase):
     def test_turnip_downloads_match_gpu_setup(self):
         setup = (ROOT / 'prebuilt/turnip/gpu-setup.py').read_text()
         # gpu-setup.py, and desktop start after a Mesa upgrade, stage through adreno.stage_turnip.
-        self.assertIn("['apt-get', 'download', '%s=' + %s, %s]" % (offline.TURNIP[0], offline.TURNIP[1],
-                      ', '.join(repr(name) for name in offline.DOWNLOADED)), (ROOT / 'src/native/adreno.py').read_text())
+        adreno = (ROOT / 'src/native/adreno.py').read_text()
+        # Turnip is downloaded by itself; each tool separately, so a missing tool cannot block it.
+        self.assertIn("['apt-get', 'download', '%s=' + %s]" % offline.TURNIP, adreno)
+        for name in offline.DOWNLOADED:
+            self.assertIn("['apt-get', 'download', %r]" % name, adreno)
         self.assertIn('stage_turnip(mesa)', setup)
         self.assertIn("'-f=${Version}', 'mesa'", setup)
 

@@ -1,13 +1,15 @@
 --- a/src/freedreno/vulkan/tu_knl_kgsl.cc
 +++ b/src/freedreno/vulkan/tu_knl_kgsl.cc
-@@ -1249,6 +1249,32 @@
+@@ -1249,6 +1249,37 @@
     return kgsl_syncobj_export(&s->syncobj, pFd);
  }
  
-+/* KGSL has no DRM syncobjs, so OPAQUE_FD semaphores would otherwise be unsupported and clients
-+ * that require them, such as Dawn (WebGPU) on Linux, reject the device. A KGSL sync's payload is
-+ * a sync_file, so carry the same fd as an opaque handle. It is only meaningful to this driver, as
-+ * the specification requires of opaque handles; a sync with nothing pending cannot be exported.
++/* KGSL has no DRM syncobjs, so OPAQUE_FD semaphores would otherwise be unsupported, and clients
++ * that require them, such as Dawn (WebGPU) and Chromium's Vulkan shared images on Linux, reject
++ * the device. A KGSL sync's payload is a sync_file, so carry that as the opaque handle. Opaque
++ * handles must always be valid descriptors, while a sync with nothing pending has no sync_file:
++ * such a sync exports /dev/null, which imports back as signaled. Opaque handles are meaningful
++ * only to this driver, as the specification requires.
 + */
 +static VkResult
 +vk_kgsl_sync_import_opaque_fd(struct vk_device *device,
@@ -16,7 +18,7 @@
 +{
 +   if (fd < 0)
 +      return vk_error(device, VK_ERROR_INVALID_EXTERNAL_HANDLE);
-+   return vk_kgsl_sync_import_sync_file(device, sync, fd);
++   return vk_kgsl_sync_import_sync_file(device, sync, sync_valid_fd(fd) ? fd : -1);
 +}
 +
 +static VkResult
@@ -25,15 +27,18 @@
 +                              int *pFd)
 +{
 +   VkResult result = vk_kgsl_sync_export_sync_file(device, sync, pFd);
-+   if (result == VK_SUCCESS && *pFd < 0)
-+      return vk_error(device, VK_ERROR_TOO_MANY_OBJECTS);
++   if (result == VK_SUCCESS && *pFd < 0) {
++      *pFd = open("/dev/null", O_RDONLY | O_CLOEXEC);
++      if (*pFd < 0)
++         return vk_error(device, VK_ERROR_TOO_MANY_OBJECTS);
++   }
 +   return result;
 +}
 +
  const struct vk_sync_type vk_kgsl_sync_type = {
     .size = sizeof(struct vk_kgsl_syncobj),
     .features = (enum vk_sync_features)
-@@ -1265,6 +1291,8 @@
+@@ -1265,6 +1296,8 @@
     .move = vk_kgsl_sync_move,
     .wait = vk_kgsl_sync_wait,
     .wait_many = vk_kgsl_sync_wait_many,

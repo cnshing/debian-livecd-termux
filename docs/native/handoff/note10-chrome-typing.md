@@ -1,7 +1,8 @@
 # Handoff: Chrome text input loses or rewinds the last character (Note10+)
 
-State on 2026-11-19. Root cause found and reproduced; fix in `android-vaapi-glibc` 14, built by CI
-run 44478328410, **not yet installed or verified on the phone**. Shared rules: [README.md](README.md).
+State on 2026-11-19. Root cause found and reproduced; fix in `android-vaapi-glibc` 14 (CI run
+44478328410) passes on the Note10+ when its Turnip is loaded from a private directory; the package
+itself is **not yet installed** there. Shared rules: [README.md](README.md).
 
 ## Symptom
 
@@ -31,6 +32,7 @@ a red `I`; after each key the X server's picture is grabbed and the bars counted
 | `--disable-gpu-compositing` or `--use-angle=gl` | 0 | 0 / 0 |
 | `TU_DEBUG=syncdraw` / `flushall` | 0 | still stale (not GPU timing) |
 | Chromium, default | 0 | 0 / 0 |
+| **Chrome, revision 14 Turnip** (private ICD, same 240 keys and seed) | 0 | **0 / 0** |
 
 Gotcha: `graphics.apply_renderer` (via `desktop.environment`) strips `MESA_VK_WSI_*` and the launcher
 overwrites `TU_DEBUG`; experiments must add them back after `acceleration.prepare` (a private copy of
@@ -43,7 +45,7 @@ before every non-sw X11 present. Revision 14.
 
 ## Next steps
 
-1. Install `android-vaapi-glibc` 14 on the Note10+ (local repo, desktop restart) and run
-   `test-typing.py chrome --keys 240` with default settings: expect 0 stale on both fields.
+1. Install `android-vaapi-glibc` 14 on the Note10+ (local repo, desktop restart; coordinate with
+   the gpu-rectangles lane) and rerun `test-typing.py chrome --keys 240 --seed 7` installed.
 2. Check for a frame-rate or latency regression (video playback, scrolling).
 3. Rerun [note10-gpu-rectangles.md](note10-gpu-rectangles.md): it may share this cause.

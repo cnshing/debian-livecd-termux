@@ -190,13 +190,19 @@ gives 1118 kb/s); the real defect was Firefox's unimplemented WebRTC `SetBitrate
 Shared with Chromium: at 200-500 kb/s on busy content Qualcomm's CBR leaves flat areas stale.
 See [Firefox handoff](handoff/encode-firefox.md).
 
-Chromium's MediaRecorder did invoke Qualcomm's AVC encoder at 1280x720, but
-the software-decoded output failed colour checks (saturation 0.83/lightness
-0.54 instead of 0.70/0.45). Interpreting the samples as full-range BT.709
-recovers the intended colour; this diagnoses missing/wrong colour signalling,
-not an accepted workaround. Chrome's MediaRecorder control had correct colour
-but ran **no hardware encoder session**. Neither is a hardware MediaRecorder
-pass. Chrome's prebuilt WebCodecs native-pixmap crash remains unresolved.
+Fixed 2026-11-18 (ccdf3aa; chromium 156.0.8078.79-4, android-vaapi 12+, termux-va 1+):
+Chromium's VA-API H.264 delegate wrote no `video_signal_type` in its SPS, and Termux:VA
+passed MediaCodec's own parameter sets, which say limited range/BT.470BG, while canvas
+frames are full-range BT.709. Chromium now signals the frame colour space in the packed SPS
+VUI; the bridge reads it and announces it in the encoder handshake (`ENC_XFER_COLOR`); the
+daemon sets MediaCodec `KEY_COLOR_RANGE/STANDARD/TRANSFER`, which `OMX.qcom` writes verbatim
+for H.264 and HEVC. Installed-launcher results: MediaRecorder and WebCodecs from known-colour
+I420 frames in full/limited BT.601/709 decode (FFmpeg, as signalled) within 3 of the source,
+8 of 8; the same streams with the signalling stripped fail (17, 42); canvas MediaRecorder at
+1280x720 reads saturation 0.70/lightness 0.45; WebCodecs H.264 60/60, max error 3; WebRTC
+H.264 288/288 at 640x360. Before: 3 of 4 colour controls failed. FFmpeg `h264_vaapi` in the
+session gets the same fix (4/4). Evidence: `temp/parity-note10-20261116/mediarecorder/`.
+Chrome's prebuilt WebCodecs native-pixmap crash remains unresolved (no source route).
 
 FFmpeg's `vp8_mediacodec` no longer aborts (2026-11-17), but its packets lose
 12 bytes each: it adds `info.offset` to a buffer pointer that the NDK already
@@ -241,7 +247,7 @@ by that route; copying a library alone does not qualify OpenCL.
 Preserved 10-bit/HDR remains.
 The [implementation handoff](handoff/note10-codec-parity.md) identifies the
 frontend, protocol and buffer changes. Firefox rate control is qualified (default on); Qualcomm's low-rate stale flat areas
-(Chromium and Firefox) remain. Chromium MediaRecorder colour metadata needs fixing and rerunning. High-resolution
+(Chromium and Firefox) remain. Chromium MediaRecorder hardware H.264 passes with correct colour (chromium -4). HEVC encode in Chromium needs a new VA-API delegate ([handoff](handoff/encode-chromium.md)). High-resolution
 throughput, OpenCL, WebGPU and stock-only graphics extensions remain gaps or
 unqualified paths; no defaults were changed for those rows.
 

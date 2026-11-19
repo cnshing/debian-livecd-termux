@@ -99,12 +99,10 @@ the session's VA environment):
   launcher. The earlier 1.151 Mb/s was the test content's floor; the defect was Firefox's
   WebRTC `SetBitrate` (patch 1103). Remaining, shared with Chromium: at low rates Qualcomm's
   CBR leaves flat areas stale; try VBR or intra refresh in termux-va ([details](encode-firefox.md)).
-- Chromium MediaRecorder's hardware H.264 output has wrong colour signalling.
-  Inspect frame colour space and range through `VideoTrackRecorder`,
-  `H264VaapiVideoEncoderDelegate::UpdateSPS`, packed SPS handling and the
-  daemon's MediaCodec colour keys. Existing transport carries no such keys.
-  Correcting RGB conversion only in the test would hide the bug. Compare
-  full/limited BT.601/709 controls, WebCodecs and WebRTC before shipping a fix.
+- Done 2026-11-18: Chromium MediaRecorder/WebCodecs colour signalling (chromium -4,
+  bridge `ENC_XFER_COLOR`, daemon `KEY_COLOR_*`), installed-verified; see
+  [ADRENO-640-PARITY.md](../ADRENO-640-PARITY.md). HEVC encode in Chromium is not offered:
+  Chromium 156 has no VA-API H.265 encode delegate ([encode-chromium.md](encode-chromium.md)).
 - Chrome WebCodecs requests native pixmaps and crashes on shared-memory
   input. A launcher flag cannot replace Chromium's source patches. See
   [Chrome handoff](encode-chrome.md). The newly qualified default is WebRTC.

@@ -70,8 +70,9 @@ sends shared memory instead, and revision 3
 lets VA-API upload the resulting NV12 frames. Encoding does not need the
 dma-heap library. WebCodecs needs `bitrateMode: "constant"`, because Chromium
 refuses variable bitrate on VA-API outside ChromeOS. Never add
-`--video-capture-use-gpu-memory-buffer`. Not yet tested: MediaRecorder, HEVC
-WebCodecs, and any Adreno phone. Revision 3 reaches users only once the
+`--video-capture-use-gpu-memory-buffer`. MediaRecorder H.264 passes on Adreno with correct colour signalling from
+revision 4 (`tests/video-encode/test-browser-encode.py --mode colour`). HEVC is not
+offered: Chromium has no VA-API H.265 encoder ([handoff](handoff/encode-chromium.md)). Revision 3 reaches users only once the
 packages build on main has published it.
 [Handoff](handoff/encode-chromium.md).
 

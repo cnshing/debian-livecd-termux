@@ -14,7 +14,7 @@ rules and pass criteria: [README.md](README.md).
 | WebRTC, H.264 and VP9 | H.264 **passes** (Note10+, 2026-11-16): 288 in, 288 out on `OMX.qcom.video.encoder.avc`, received 640x360 picture viewed; no VP9 encoder on this SoC | **passes**: loopback 285 frames per codec, `OMX.Exynos.AVC.Encoder` / `OMX.Exynos.VP9.Encoder` 286 in, 286 out, received 640x360 picture correct, no GPU crash |
 | WebCodecs `VideoEncoder` H.264 | **passes**: 60 in, 60 out on `OMX.qcom.video.encoder.avc`, max colour error 10, 0 frames over 16 | **passes**: 60 in, 60 out on `OMX.Exynos.AVC.Encoder`, clean flush, software decode max colour error 12, 0 frames over 16; frames 0, 29, 59 viewed after ffmpeg decode (labels, moving box and colours right) |
 | WebCodecs `VideoEncoder` VP9 | no hardware VP9 encoder | **passes** on `OMX.Exynos.VP9.Encoder`, 60 in/out, software decode max error 12 (pixels checked in-page; not viewed as an image) |
-| MediaRecorder | not run | not run |
+| MediaRecorder H.264, colour | **passes** from revision 4 (Note10+, 2026-11-18): known-colour full/limited BT.601/709 frames 8/8 within 3 (FFmpeg decoding as signalled), canvas 1280x720 s0.70/l0.45 on `OMX.qcom.video.encoder.avc`; revision 3 failed 3/4 (no VUI colour) | not run (the colour fix is codec-independent; Exynos `KEY_COLOR_*` support untested) |
 
 ## What was wrong, and the fixes
 
@@ -50,12 +50,26 @@ Chromium staged privately (not installed) and started through the installed laun
 
 ## Still open
 
-- On by default on Adreno too since livecd-desktop 0.2.0-24. HEVC WebCodecs is not offered by Chromium's VA-API encoder on either phone.
-- MediaRecorder not tested.
+- On by default on Adreno too since livecd-desktop 0.2.0-24.
+- Colour signalling: revision 4 (`0102-termux-vaapi-encode-colour-space.patch`) writes the frame
+  colour space into the H.264 SPS VUI; Termux:VA forwards it to MediaCodec. Mali/Exynos not re-run.
 - The Exynos encoders refuse MediaCodec's `low-latency` key (logged as `configure failed with
   low-latency: -10000`, then retried without), so call latency is unmeasured.
-- HEVC WebCodecs encode not tested (the S20 has `OMX.Exynos.HEVC.Encoder`; see
-  [s20-codec-parity.md](s20-codec-parity.md)).
+- HEVC encode (WebCodecs, WebRTC, MediaRecorder) is not offered, and is not a launcher or
+  driver change. Assessed 2026-11-17: Chromium 156's VA-API encoder has delegates for H.264, VP8,
+  VP9 and AV1 only (`media/gpu/vaapi/BUILD.gn`); `H265VaapiVideoEncoderDelegate` does not exist
+  (the only HEVC encode delegate is Windows D3D12). The driver side is ready: the bridge and
+  daemon encode HEVC Main on `OMX.qcom.video.encoder.hevc` / `OMX.Exynos.HEVC.Encoder`, take packed
+  VPS/SPS/PPS, and signal colour (`tests/video-encode/test-daemon.py`, hevc-main cases). Work needed:
+  (1) a new `h265_vaapi_video_encoder_delegate.{h,cc}` modelled on the H.264 one: VPS/SPS/PPS and
+  slice-header builders (`media/gpu/h265_builder.cc` only builds what the decoder tests need),
+  `VAEncSequenceParameterBufferHEVC`/picture/slice parameters, IDR-only + P references, CBR rate
+  control; (2) wire it into `VaapiVideoEncodeAccelerator` (`CreateEncodeJob` picture type, profile
+  list in `GetSupportedProfiles`, `VaapiWrapper` HEVC encode profile mapping); (3) blink/WebRTC
+  gating: WebCodecs HEVC encode on Linux requires `BUILDFLAG(ENABLE_HEVC_PARSER_AND_HW_DECODER)`
+  and the platform-HEVC-encoder feature, RTCVideoEncoder needs H.265 in its supported formats, and
+  MediaRecorder needs `hvc1` in `VideoTrackRecorder`'s codec table. Each try is a 4.5-6 h CI build
+  with no local Chromium build, which is why it was not attempted in the parity lane.
 - Revision 3 is on main (PR #12); a fresh install gets it once a release carries it.
 
 ## How to test

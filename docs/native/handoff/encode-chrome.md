@@ -64,6 +64,12 @@ Same cause as Chromium revision 1 ([encode-chromium.md](encode-chromium.md)): on
 patch changes it (Chromium's `0100` + `0101`). WebRTC is not affected because it hands the encoder
 I420 shared-memory frames.
 
+Reassessed 2026-11-17 against Chromium 156's source: the choice is
+`#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)` in
+`VideoEncodeAcceleratorAdapter::InitializeOnAcceleratorThread`, which turns `InputBufferKind::Any`
+into `GpuMemBuf` and sets `StorageType::kGpuMemoryBuffer`; no switch, feature or field trial reads
+around it. WebRTC uses `RTCVideoEncoder`, which never takes this path. Still no supported route.
+
 A bridge-side fix would need Chrome to have real native pixmaps (GBM dma-bufs under Ozone/X11) and
 the VA driver to import them. Neither exists for Termux, so this is not a bridge change.
 

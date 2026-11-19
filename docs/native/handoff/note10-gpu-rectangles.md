@@ -167,3 +167,14 @@ Mutter still ran mesa 107 after mesa 108 was installed: the desktop-start restag
 vulkan-tools 1.4.368 is no longer offered by any source, so the whole download failed with a
 misleading "No Turnip build matches" error. Turnip is now downloaded by itself; vulkan-tools is
 fetched separately and, if that fails, carried over from the previous copy (livecd-desktop 45).
+
+## Other presentation paths (2026-11-19)
+
+| Path | Driver | Present wait |
+| --- | --- | --- |
+| Chrome and other glibc programs (`acceleration.py`, abi `glibc`) | `android-vaapi-glibc` Turnip | revision 14 |
+| GNOME Shell (Zink), Chromium (`chromium-gpu.conf`), Firefox, GTK, native Vulkan | staged Bionic Turnip, `~/.local/opt/livecd-native/gpu` | mesa 108 (0028), once restaged |
+| Mali: PanVK kbase, the Ghostty DMA-BUF stack | Zenith PanVK | not affected: it uses the software path (`sw_device` unless `PANVK_KBASE_DRI3`/`WSI_X11_TERMUX`, which nothing sets and both launchers strip), and that path already waits for the fence (Zenith 106) |
+
+A PanVK copy of 0028 was tried and removed: it does not apply to Zenith's reworked
+`wsi_common_x11.c` (CI run 44496426162) and is not needed.

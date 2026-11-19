@@ -33,7 +33,7 @@ MIRROR = 'https://packages-cf.termux.dev/apt'
 GLIBC = f'{MIRROR}/termux-glibc glibc stable'
 # Hooks call apt-get themselves. These are the files that do, read for the names they install.
 HOOK_SCRIPTS = ['hooks/termux/*', 'browsers/install.sh']
-# install.sh's prebuilt/turnip/gpu-setup.py fetches these with apt-get download, without installing
+# install.sh's prebuilt/turnip/gpu-setup.py (src/native/adreno.py) fetches these with apt-get download, without installing
 # them: Turnip at the installed Mesa's own version, and vulkan-tools.
 TURNIP = ('mesa-vulkan-icd-freedreno', 'mesa')
 DOWNLOADED = ['vulkan-tools']

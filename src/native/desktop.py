@@ -362,6 +362,13 @@ def run(safe, renderer='software'):
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except BlockingIOError:
         raise RuntimeError('A desktop session or setup is already running')
+    try:
+        # Before anything loads Turnip: re-stage it after a Mesa upgrade, add clvk (Adreno only).
+        sys.path.insert(0, str(BASE))
+        import adreno
+        adreno.refresh()
+    except ImportError as error:
+        print('Adreno setup is unavailable: ' + str(error), file=sys.stderr)
     tag = uuid.uuid4().hex
     renderer = 'software' if safe else renderer
     env = environment(renderer)

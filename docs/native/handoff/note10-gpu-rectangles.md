@@ -142,3 +142,28 @@ Options considered:
 
 No rectangles in recordings of Chrome and of video playback at least as long as the runs that
 showed them, with a negative control that still shows them. Open the recordings and look.
+
+## ArcMenu flicker (2026-11-19): same race in mutter's present, fixed by mesa 0028
+
+User report after revision 14: opening and closing ArcMenu by clicking rapidly sometimes shows the
+menu cut off horizontally for a moment. Reproduced with a second gnome-shell on a private display
+(copy of the user's dconf, so ArcMenu and the panel match), 60 randomly paced clicks per trial, a
+lossless `x11grab` recording, and a check for frames with the menu present at the top but missing
+at the bottom. The cut stays at one row for 5 to 9 frames, then the full menu appears.
+
+| Turnip used by mutter (Zink) | Trials | Cut-menu events |
+| --- | --- | --- |
+| mesa 107 (staged copy in use) | 3 | 3 |
+| mesa 107, `CLUTTER_PAINT=disable-clipped-redraws` | 10 | 3 |
+| mesa 108 (0028), private copy | 10 | 0 |
+
+So partial redraws in mutter are not the cause. On KGSL the WSI treats Termux:X11 as a different GPU,
+copies each frame into a linear buffer on the GPU and presents it over DRI3 without waiting. The X
+server can read before that copy finishes; mutter then goes idle, so the cut stays on screen. 0028
+adds the wait.
+
+Mutter still ran mesa 107 after mesa 108 was installed: the desktop-start restage
+(`src/native/adreno.py`) downloaded `vulkan-tools` together with Turnip, and the installed
+vulkan-tools 1.4.368 is no longer offered by any source, so the whole download failed with a
+misleading "No Turnip build matches" error. Turnip is now downloaded by itself; vulkan-tools is
+fetched separately and, if that fails, carried over from the previous copy (livecd-desktop 45).

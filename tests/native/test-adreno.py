@@ -70,6 +70,8 @@ class Upkeep(unittest.TestCase):
         self.stage('26.2.6-106')
 
         def download(command, cwd=None, **_):
+            if 'vulkan-tools' in command:
+                return mock.Mock(returncode=0)
             self.assertIn('mesa-vulkan-icd-freedreno=26.2.6-107', command)
             (Path(cwd) / 'turnip.deb').write_bytes(b'deb')
             return mock.Mock(returncode=0)
@@ -88,6 +90,38 @@ class Upkeep(unittest.TestCase):
         self.assertTrue(self.gpu.with_name('gpu-26.2.6-106').is_dir())
         icd = json.loads((self.gpu / 'share/vulkan/icd.d/freedreno_icd.aarch64.json').read_text())
         self.assertEqual(icd['ICD']['library_path'], str(self.gpu.with_name('gpu-26.2.6-107') / 'lib/libvulkan_freedreno.so'))
+
+    def test_stage_survives_missing_vulkan_tools(self):
+        """An installed vulkan-tools that no source offers any more must not block Turnip."""
+        self.stage('26.2.6-107')
+        old_bin = self.gpu.with_name('gpu-26.2.6-107') / 'bin'
+        old_bin.mkdir()
+        (old_bin / 'vulkaninfo').write_text('old tool')
+        commands = []
+
+        def run(command, cwd=None, check=None, **_):
+            commands.append(command)
+            if command[0] == 'dpkg-deb':
+                prefix = Path(command[-1]) / str(adreno.PREFIX).lstrip('/')
+                icd = prefix / 'share/vulkan/icd.d/freedreno_icd.aarch64.json'
+                icd.parent.mkdir(parents=True)
+                icd.write_text(json.dumps({'ICD': {'library_path': 'x'}}))
+                return mock.Mock(returncode=0)
+            if 'vulkan-tools' in command:
+                return mock.Mock(returncode=100)
+            (Path(cwd) / 'turnip.deb').write_bytes(b'deb')
+            return mock.Mock(returncode=0)
+
+        with mock.patch('subprocess.run', side_effect=run), \
+             mock.patch('subprocess.check_output', return_value='Package: mesa-vulkan-icd-freedreno\nVersion: 26.2.6-108\n'):
+            adreno.stage_turnip('26.2.6-108')
+        downloads = [c for c in commands if c[:2] == ['apt-get', 'download']]
+        self.assertEqual(downloads, [['apt-get', 'download', 'mesa-vulkan-icd-freedreno=26.2.6-108'],
+                                     ['apt-get', 'download', 'vulkan-tools']])
+        self.assertEqual(os.readlink(self.gpu), 'gpu-26.2.6-108')
+        self.assertEqual((self.gpu / 'bin/vulkaninfo').read_text(), 'old tool')
+        lock = json.loads((self.gpu / 'sources.lock.json').read_text())
+        self.assertEqual(lock['carried_over'], ['vulkan-tools'])
 
     def test_opencl_installed_once_with_the_lock_marked(self):
         with mock.patch.object(adreno, 'installed_version', return_value=None), \

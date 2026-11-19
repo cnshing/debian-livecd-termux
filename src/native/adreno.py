@@ -53,9 +53,13 @@ def stage_turnip(mesa):
         downloads.mkdir()
         # apt checks each file against the signed index. A missing Turnip build means Mesa
         # itself is older than the repository's current release.
-        if subprocess.run(['apt-get', 'download', 'mesa-vulkan-icd-freedreno=' + mesa, 'vulkan-tools'],
+        if subprocess.run(['apt-get', 'download', 'mesa-vulkan-icd-freedreno=' + mesa],
                           cwd=downloads).returncode:
             raise RuntimeError('No Turnip build matches Mesa ' + mesa + '. Run pkg upgrade, then this again.')
+        # vulkan-tools (vulkaninfo, vkcube for the GPU checks) is fetched on its own: when the
+        # installed version is no longer offered by any source, a failure here must not keep
+        # the old Turnip selected. The previous copy's tools are carried over instead.
+        tools = subprocess.run(['apt-get', 'download', 'vulkan-tools'], cwd=downloads).returncode == 0
         sources = {'format': 2, 'architecture': 'aarch64', 'mesa_version': mesa, 'packages': []}
         for archive in sorted(downloads.glob('*.deb')):
             fields = subprocess.check_output(['dpkg-deb', '-f', str(archive), 'Package', 'Version'], text=True)
@@ -64,6 +68,9 @@ def stage_turnip(mesa):
                                         'sha256': hashlib.sha256(archive.read_bytes()).hexdigest()})
             subprocess.run(['dpkg-deb', '-x', str(archive), str(staging / 'root')], check=True)
         prefix = staging / 'root' / str(PREFIX).lstrip('/')
+        if not tools and (GPU / 'bin').is_dir():
+            shutil.copytree(GPU / 'bin', prefix / 'bin', symlinks=True, dirs_exist_ok=True)
+            sources['carried_over'] = ['vulkan-tools']
         icd = prefix / 'share/vulkan/icd.d/freedreno_icd.aarch64.json'
         data = json.loads(icd.read_text())
         data['ICD']['library_path'] = str(destination / 'lib/libvulkan_freedreno.so')

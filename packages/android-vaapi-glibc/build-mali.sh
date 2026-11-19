@@ -1,5 +1,5 @@
 #!/bin/bash
-# Build only the private VA driver with the NDK's Clang targeting Debian glibc.
+# Build the private VA driver, and Turnip for Adreno, with the NDK's Clang targeting Debian glibc.
 # Usage: build-mali.sh SOURCE SYSROOT BUILD STAGE
 set -euo pipefail
 source_dir=$(realpath "$1")
@@ -50,3 +50,16 @@ $meson setup "$build_dir/mesa" "$source_dir" --cross-file "$build_dir/cross.ini"
   }
 ninja -C "$build_dir/mesa" -j "${TERMUX_PKG_MAKE_PROCESSES:-2}"
 DESTDIR="$stage" ninja -C "$build_dir/mesa" install
+# Turnip from the same lfdevs source, with turnip-kgsl-opaque-fd-semaphores.patch: Dawn (WebGPU in
+# Chrome) needs OPAQUE_FD semaphores. X11 only, for the same wayland-scanner reason; the desktop is X11.
+$meson setup "$build_dir/turnip" "$source_dir" --cross-file "$build_dir/cross.ini" \
+  --prefix=/usr --libdir=lib/aarch64-linux-gnu --buildtype=release --wrap-mode=nodownload \
+  -Dauto_features=disabled -Dplatforms=x11 -Dgallium-drivers= -Dvulkan-drivers=freedreno \
+  -Dfreedreno-kmds=kgsl -Dvulkan-layers= -Dvideo-codecs= -Dllvm=disabled -Dglx=disabled \
+  -Degl=disabled -Dgles1=disabled -Dgles2=disabled -Dopengl=false -Dgbm=disabled -Dglvnd=disabled \
+  -Dxmlconfig=disabled -Dbuild-tests=false -Dtools= -Dspirv-tools=disabled || {
+    tail -n 150 "$build_dir/turnip/meson-logs/meson-log.txt" >&2
+    exit 1
+  }
+ninja -C "$build_dir/turnip" -j "${TERMUX_PKG_MAKE_PROCESSES:-2}"
+DESTDIR="$stage/turnip" ninja -C "$build_dir/turnip" install

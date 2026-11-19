@@ -111,8 +111,11 @@ KGSL and is clean: Chromium 156 on the same test gave 0 of 900 split frames on m
 `packages/mesa/0028-wsi-x11-wait-for-fences-without-implicit-sync.patch` (mesa 26.2.6-108) adds
 the same wait to the Bionic WSI, only when a swapchain has neither explicit sync nor a dma-buf
 semaphore. It is a safeguard for any DRI3 path without sync and changes nothing on the Note10+ today.
-Still to do: rerun the Chrome default case with revision 14 (expect 0 split frames) and record
-under mutter with video playing.
+Verified 2026-11-19 with revision 14 loaded from a private directory (ICD set after
+`acceleration.prepare`, which otherwise replaces it): 0 of 900 split frames in each of two
+30-second runs, against 11/600, 200/900, 18/900 and 657/900 on revision 13.
+Still to do: install revision 14 (and mesa 108) on the Note10+, then record under mutter with
+video playing.
 
 Options considered:
 

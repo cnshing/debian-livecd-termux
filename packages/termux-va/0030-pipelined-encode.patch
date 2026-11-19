@@ -1,5 +1,5 @@
 diff --git a/daemon/termux-va.c b/daemon/termux-va.c
-index d2ce8a9..df5dcf4 100644
+index d2ce8a9..9b23e7e 100644
 --- a/daemon/termux-va.c
 +++ b/daemon/termux-va.c
 @@ -2019,12 +2019,16 @@ static int encoder_drain_output(Session *s, uint8_t **csd, size_t *csd_len,
@@ -109,7 +109,19 @@ index d2ce8a9..df5dcf4 100644
          uint32_t sz_be;
          if (recv_all(s->fd, &sz_be, sizeof(sz_be)) < 0)
              break;
-@@ -2533,33 +2578,17 @@ static int encoder_run(Session *s)
+@@ -2528,38 +2573,28 @@ static int encoder_run(Session *s)
+         int64_t pts_us = (int64_t)((scaled / s->fps_num) * s->fps_den +
+             ((scaled % s->fps_num) * s->fps_den + s->fps_num / 2) / s->fps_num);
+         /* The first frame is always a sync frame. */
+-        if (force_key && pts > 1)
++        if (force_key && pts > 1) {
++            /* MediaCodec applies a sync request to whichever picture it takes
++             * next. With earlier pictures still queued that is not this one,
++             * so let the output thread return them first (bounded at 2 s). */
++            for (int i = 0; i < 2000 && !out.failed && s->frames_out + 1 < (long)pts; i++)
++                usleep(1000);
+             encoder_request_sync(s);
++        }
          if (AMediaCodec_queueInputBuffer(s->codec, bi, 0, queued_size,
                                           pts_us, 0) != AMEDIA_OK)
              break;

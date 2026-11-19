@@ -324,3 +324,35 @@ clips decoded as fast as possible; all VA outputs bit-exact against software, NV
 through the bridge is far below real time (the CPU upload and NV12 copy into shared memory
 dominate). Do not advertise 8K or 4K encode. A concurrent test from another lane was running
 during the measurement, so these are lower bounds.
+
+### Session lane follow-up (2026-11-18)
+
+- **ION in the session, installed path** (android-vaapi 17, then 18/19, desktop session via
+  `livecd exec`): VP9, HEVC and H.264 each 12–14 surfaces from ION (bridge-scoped), no
+  `contiguous video buffer failed`, 48/48 frames bit-exact; `LIVECD_DMA_HEAP_ION=0` falls back
+  to separate planes, also bit-exact. Turnip/Zink on a private Termux:X11 display: glxgears
+  (Zink) and vkcube (Turnip) rates match with the control on and off, within run-to-run noise
+  (about 500–700 fps; 1000 vkcube frames in 2.1–2.4 s either way), and vkcube's maps contain no
+  `libandroid-dma-heap.so`. `livecd validate` 30/30.
+- **Chrome stale frame is not the VA bridge.** Installed Chrome, same 50-run harness with
+  `--disable-accelerated-video-decode`: 3/50 shell-capture failures (wrong frame, torn barcode),
+  the same classes as hardware decode (1/50). `MESA_VK_WSI_DEBUG=sw` did not help. The cause is in
+  Chrome's presentation to the X server, not decoding; no fix shipped.
+- **Pipelined VA-API encode** (android-vaapi 19, -glibc 11, termux-va 6): the bridge returns from
+  `vaEndPicture` once a picture is sent (packets collected by a reader thread, written in
+  `vaMapBuffer`), the daemon drains MediaCodec on its own thread, and encoder input is read
+  through the cached dma-buf after waiting for pending GPU writes. A requested key frame waits
+  for earlier pictures so it lands on the right picture. Installed session, 4K60 source:
+  H.264 9.9 → 20.9 fps, HEVC 10.0 → 21.2 fps (FFmpeg default async depth; 24–25 fps with
+  `-async_depth 8`). Direct NDK MediaCodec reaches 60 fps, so 4K30/4K60 encode through VA is
+  still **not** real time: the remaining cost is the 12 MB copy through the socket and into
+  MediaCodec's buffer, which needs dma-buf input to remove. `TVA_ENCODE_PIPELINE=0` restores the
+  synchronous bridge. FFmpeg encode suite 46/46; installed Chrome, Chromium and Firefox WebRTC
+  pass. Chrome WebCodecs H.264 fails ("Encoding error") with and without pipelining, as before.
+- **4K60 decode**: H.264 about 58 fps, HEVC/VP9 at or above 60 through the installed session;
+  the remaining gap to direct MediaCodec (71 fps H.264) is the copy into shared memory.
+- **Low-bit-rate stale flat areas** (firefox lane): not reproduced through FFmpeg VA at 80–300
+  kb/s with full-frame colour switches, noisy bars and a 32×18 area-averaged colour grid (all
+  frames ≥ 39 dB after the first half second; CBR, VBR, intra refresh and short GOP all equal).
+  It appears only in browser calls, so the trigger is likely browser rate changes or frame
+  timing; not fixed.

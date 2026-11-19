@@ -55,8 +55,9 @@ termux_step_post_get_source() {
 	for change in "$bridge"/01[0-9][0-9]-*.patch; do
 		patch --batch -d mesa-mali -p1 < "$change"
 	done
-	# Turnip KGSL OPAQUE_FD semaphores, as mesa's 0027, for Chrome's WebGPU (Dawn).
-	patch --batch -d mesa-mali -p1 < "$TERMUX_PKG_BUILDER_DIR/turnip-kgsl-opaque-fd-semaphores.patch"
+	# Turnip KGSL OPAQUE_FD semaphores, as mesa 0027, for Chrome WebGPU (Dawn). In a subdirectory:
+	# the builder applies top-level patches to this recipe's own (empty) source.
+	patch --batch -d mesa-mali -p1 < "$TERMUX_PKG_BUILDER_DIR/turnip/kgsl-opaque-fd-semaphores.patch"
 	cp "$bridge/tva_ion_winsys.h" mesa-mali/src/gallium/frontends/va/
 	python3 "$bridge/configure-bridge.py" mesa-mali/src/gallium/frontends/va/tva_bridge.c
 	printf '\n===== mesa-for-android-container =====\n' >> COPYRIGHTS

@@ -42,6 +42,86 @@ Candidates, most likely first:
 - Windowed, maximised or fullscreen? Fullscreen unredirects the window and skips mutter.
 - Does it follow memory pressure (`MemAvailable`) or other GPU load?
 
+## Source analysis (2026-11-19, confirmed on the phone, see below)
+
+Candidate 1 has a concrete mechanism in Mesa 26.2.6's Vulkan X11 WSI, which both Chrome
+(ANGLE → Turnip) and mutter (Zink/Kopper → Turnip) present through:
+
+- Termux:X11 offers DRI3 and Present, so the WSI hands the swapchain dma-buf straight to the
+  X server (`wsi_common_x11.c`), with no software copy.
+- It then counts on implicit sync. Explicit sync needs DRI3/Present 1.4 drm syncobjs (none on
+  KGSL); the dma-buf semaphore path needs `DMA_BUF_IOCTL_IMPORT/EXPORT_SYNC_FILE`, which the
+  Note10+'s 4.14 kernel lacks, so `wsi_drm_init_swapchain_implicit_sync()` creates nothing.
+  The image is flagged `implicit_sync`, which Turnip honours only on msm and virtio, not KGSL
+  (`tu_knl_kgsl.cc` has no implicit-sync handling).
+- `x11_needs_wait_for_fences()` makes the CPU wait for the render fence before presenting only
+  in MAILBOX mode. In FIFO and IMMEDIATE, `xcb_present_pixmap` goes out while the GPU may still
+  be writing.
+
+So the X server or compositor can sample a buffer whose Adreno GMEM bins have not been resolved
+yet. Bins are rectangles, which matches the symptom. Unresolved bins hold old content or zeros. In
+an ARGB window (Chrome uses a 32-bit visual under a compositing manager) zero is fully
+transparent, which shows what is behind the window; otherwise it shows as black. Video adds GPU
+load, so the GPU finishes later and the race is lost more often.
+
+Mutter's Zink patches 0021–0024 cover dma-bufs that Zink exports and imports, not presents
+through the Vulkan WSI, so they do not close this gap.
+
+Cheap checks, in order:
+
+1. Negative control and possible workaround: `MESA_VK_WSI_DEBUG=sw` on Chrome only. This forces
+   the software WSI, which waits for the fence and copies through SHM. If the rectangles go
+   away, the cause is confirmed. Watch CPU cost at 1920x1080.
+2. Proper fix, a Mesa patch: make `x11_needs_wait_for_fences()` return true (or wait on
+   `chain->base.fences[image_index]` in the present thread) whenever the swapchain has neither
+   explicit sync nor a `dma_buf_semaphore`. This costs about one frame of latency, not a copy.
+   It covers Chrome, Firefox and mutter on any KGSL or no-sync-file kernel, including the S20.
+3. Repeat the test with mutter alone (a GL demo, no browser) to see whether mutter's own Kopper
+   output is affected too.
+
+## Phone result (2026-11-19): the present does not wait for the GPU
+
+Test: Chrome 157 started through the installed launcher on a private Termux:X11 display (no
+window manager, nothing on `:0`). A WebGL page clears the whole window to red or blue on
+alternate frames, with a heavy fragment shader so each frame takes the GPU a while. The X server's
+picture was recorded with `x11grab` at 30 fps and every frame was checked for both colours at
+once. Script: `~/pl-rect/test-rect.py` and `an.py` on the Note10+ (not in Git).
+
+| Run | Frames | Frames with both colours |
+| --- | --- | --- |
+| default (run 1) | 600 | 11 |
+| default (run 2) | 900 | 200 |
+| `MESA_VK_WSI_PRESENT_MODE=mailbox` (same DRI3 path, CPU waits for the fence first) | 900 | 0 |
+| `MESA_VK_WSI_DEBUG=sw` (fence wait + SHM copy) | 900 | 0 |
+
+The bad frames are split horizontally: the next frame on top, the old one below, with small
+steps on the boundary row. That is Adreno's binned rendering caught partway through (bins are
+filled row by row). Mailbox mode changes nothing on this path except adding the fence wait, and
+it removes the problem entirely, so the missing wait is the cause. The page ran at 30 fps in
+every mode.
+
+This is the X-server-level form of the bug. Under mutter, the same unfinished buffer turns into
+the rectangles the user sees. Not yet done: a recording under mutter on the real session
+setup, and video.
+
+Fix, option 2 below, implemented as `packages/mesa/0028-wsi-x11-wait-for-fences-without-implicit-sync.patch`
+(mesa 26.2.6-108), for the Bionic Turnip: mutter's Zink/Kopper output, Chromium, Firefox and
+native Vulkan programs. It waits only when the swapchain has neither explicit sync nor a dma-buf
+semaphore, so drivers with working implicit sync are unaffected. Chrome uses the glibc Turnip from
+`android-vaapi-glibc`, which got the same wait in revision 14 (656cca0,
+[note10-chrome-typing.md](note10-chrome-typing.md), same root cause).
+Still to do: install both on the Note10+, rerun the default case here (expect 0 split frames) and
+record under mutter with video playing.
+
+Options considered:
+
+1. Quick workaround: set `MESA_VK_WSI_PRESENT_MODE=mailbox` for Vulkan clients on KGSL in the
+   launcher. Side effects: no vsync throttling (mailbox drops frames instead of blocking) and
+   possibly one more swapchain image.
+2. Proper fix: patch `x11_needs_wait_for_fences()` in `packages/mesa` to return true when the
+   swapchain has neither explicit sync nor a `dma_buf_semaphore`. That keeps FIFO pacing and
+   also covers mutter's Kopper output.
+
 ## Next steps
 
 1. Reproduce on a private display with an `x11grab` recording (see

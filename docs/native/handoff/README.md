@@ -26,7 +26,7 @@ Two phones were used:
 | Firefox decode | VP9, HEVC, H.264 pass (2026-11-16) | VP9, HEVC pass, on a Zink desktop only | yes; AV1 software, H.264 software on Mali | [decode-firefox.md](decode-firefox.md) |
 | H.264 decode, every VA-API client | passes: FFmpeg, GStreamer, all three browsers (2026-11-16) | off | yes on Adreno; Mali browser runs still to do | [decode-h264.md](decode-h264.md) |
 | Frame sync: stale frames, flicker, tearing | one stale frame in 13 runs under load | not seen | n/a | [decode-frame-sync.md](decode-frame-sync.md) |
-| Note10+ Chrome typing: last character missing or caret rewinds | reproduced; stale DRI3 present in glibc Turnip, fix in android-vaapi-glibc 14 (not phone-verified) | not tested | n/a | [note10-chrome-typing.md](note10-chrome-typing.md) |
+| Note10+ Chrome typing: last character missing or caret rewinds | reproduced; stale DRI3 present in glibc Turnip, fixed in android-vaapi-glibc 14, installed and verified | not tested | n/a | [note10-chrome-typing.md](note10-chrome-typing.md) |
 | Note10+ flickering black or see-through rectangles (Chrome, video) | user report 2026-11-18, not reproduced | not tested | n/a | [note10-gpu-rectangles.md](note10-gpu-rectangles.md) |
 | Native decode: mpv, FFmpeg, GStreamer | mpv passes VP9, H.264, HEVC | mpv passes on its GLES route | mpv yes; VA-API clients see decoders | [decode-native.md](decode-native.md) |
 | Native encode: FFmpeg, GStreamer, Serein | passes | passes in private tests; fresh-install blockers fixed on main, not rechecked | yes where `android-vaapi` is installed | [encode-native.md](encode-native.md) |

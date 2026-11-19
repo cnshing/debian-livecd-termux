@@ -47,3 +47,21 @@
     .import_sync_file = vk_kgsl_sync_import_sync_file,
     .export_sync_file = vk_kgsl_sync_export_sync_file,
  };
+--- a/src/freedreno/vulkan/tu_device.cc
++++ b/src/freedreno/vulkan/tu_device.cc
+@@ -242,11 +242,11 @@
+       .KHR_external_memory = true,
+       .KHR_external_memory_fd = true,
+       .KHR_external_semaphore = true,
+-      /* KGSL exposes binary SYNC_FD fences only.  OPAQUE_FD timeline
+-       * semaphores are unsupported, yet FFmpeg treats this extension as
+-       * evidence that they are available and cannot import dma-heap frames.
++      /* KGSL syncs export and import as SYNC_FD and, carrying the sync_file,
++       * as OPAQUE_FD (tu_knl_kgsl.cc), which Dawn (WebGPU) requires, as
++       * upstream Mesa advertises.
+        */
+-      .KHR_external_semaphore_fd = !is_kgsl(device->instance),
++      .KHR_external_semaphore_fd = true,
+       .KHR_format_feature_flags2 = true,
+       .KHR_fragment_shading_rate = device->info->props.has_attachment_shading_rate,
+       .KHR_get_memory_requirements2 = true,

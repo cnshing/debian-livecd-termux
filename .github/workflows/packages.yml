@@ -133,6 +133,7 @@ jobs:
       run: |
         python3 tests/native/test-graphics.py
         python3 tests/native/test-panvk-device.py
+        python3 tests/native/test-adreno.py
     - name: Test Ghostty context compatibility
       run: python3 tests/native/test-terminal-environment.py
     - name: Test automatic Mali terminal setup and offline fallback

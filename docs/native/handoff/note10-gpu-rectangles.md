@@ -104,14 +104,15 @@ This is the X-server-level form of the bug. Under mutter, the same unfinished bu
 the rectangles the user sees. Not yet done: a recording under mutter on the real session
 setup, and video.
 
-Fix, option 2 below, implemented as `packages/mesa/0028-wsi-x11-wait-for-fences-without-implicit-sync.patch`
-(mesa 26.2.6-108), for the Bionic Turnip: mutter's Zink/Kopper output, Chromium, Firefox and
-native Vulkan programs. It waits only when the swapchain has neither explicit sync nor a dma-buf
-semaphore, so drivers with working implicit sync are unaffected. Chrome uses the glibc Turnip from
-`android-vaapi-glibc`, which got the same wait in revision 14 (656cca0,
-[note10-chrome-typing.md](note10-chrome-typing.md), same root cause).
-Still to do: install both on the Note10+, rerun the default case here (expect 0 split frames) and
-record under mutter with video playing.
+Fix: Chrome's glibc Turnip (`android-vaapi-glibc` revision 14, 656cca0) now waits for each image's
+fence before every X11 present; see [note10-chrome-typing.md](note10-chrome-typing.md), which has
+the same root cause. The Bionic Turnip (Chromium, mutter via Zink, Firefox) does not use DRI3 on
+KGSL and is clean: Chromium 156 on the same test gave 0 of 900 split frames on mesa 107.
+`packages/mesa/0028-wsi-x11-wait-for-fences-without-implicit-sync.patch` (mesa 26.2.6-108) adds
+the same wait to the Bionic WSI, only when a swapchain has neither explicit sync nor a dma-buf
+semaphore. It is a safeguard for any DRI3 path without sync and changes nothing on the Note10+ today.
+Still to do: rerun the Chrome default case with revision 14 (expect 0 split frames) and record
+under mutter with video playing.
 
 Options considered:
 

@@ -50,7 +50,7 @@ $meson setup "$build_dir/mesa" "$source_dir" --cross-file "$build_dir/cross.ini"
   }
 ninja -C "$build_dir/mesa" -j "${TERMUX_PKG_MAKE_PROCESSES:-2}"
 DESTDIR="$stage" ninja -C "$build_dir/mesa" install
-# Turnip from the same lfdevs source, with turnip-kgsl-opaque-fd-semaphores.patch: Dawn (WebGPU in
+# Turnip from the same lfdevs source, with turnip/kgsl-opaque-fd-semaphores.patch: Dawn (WebGPU in
 # Chrome) needs OPAQUE_FD semaphores. X11 only, for the same wayland-scanner reason; the desktop is X11.
 $meson setup "$build_dir/turnip" "$source_dir" --cross-file "$build_dir/cross.ini" \
   --prefix=/usr --libdir=lib/aarch64-linux-gnu --buildtype=release --wrap-mode=nodownload \

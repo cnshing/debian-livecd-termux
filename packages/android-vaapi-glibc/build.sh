@@ -4,7 +4,7 @@ TERMUX_PKG_LICENSE="custom"
 TERMUX_PKG_LICENSE_FILE="COPYRIGHTS"
 TERMUX_PKG_MAINTAINER="@cnshing"
 TERMUX_PKG_VERSION="27.0.0~devel20261025"
-TERMUX_PKG_REVISION=13
+TERMUX_PKG_REVISION=14
 TERMUX_PKG_EXCLUDED_ARCHES="arm, i686, x86_64"
 TERMUX_PKG_SKIP_SRC_EXTRACT=true
 TERMUX_PKG_BUILD_IN_SRC=true
@@ -58,6 +58,9 @@ termux_step_post_get_source() {
 	# Turnip KGSL OPAQUE_FD semaphores, as mesa 0027, for Chrome WebGPU (Dawn). In a subdirectory:
 	# the builder applies top-level patches to this recipe's own (empty) source.
 	patch --batch -d mesa-mali -p1 < "$TERMUX_PKG_BUILDER_DIR/turnip/kgsl-opaque-fd-semaphores.patch"
+	# Its X11 present must wait for each image's fence: Termux:X11 gets DRI3 buffers with no
+	# implicit sync on KGSL and otherwise shows the previous frame (note10-chrome-typing.md).
+	patch --batch -d mesa-mali -p1 < "$TERMUX_PKG_BUILDER_DIR/turnip/kgsl-x11-present-wait.patch"
 	cp "$bridge/tva_ion_winsys.h" mesa-mali/src/gallium/frontends/va/
 	python3 "$bridge/configure-bridge.py" mesa-mali/src/gallium/frontends/va/tva_bridge.c
 	printf '\n===== mesa-for-android-container =====\n' >> COPYRIGHTS

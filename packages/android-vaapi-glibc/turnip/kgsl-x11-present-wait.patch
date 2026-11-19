@@ -1,0 +1,17 @@
+--- a/src/vulkan/wsi/wsi_common_x11.c	2026-11-18 23:13:36.868158377 -0800
++++ b/src/vulkan/wsi/wsi_common_x11.c	2026-11-18 23:13:36.904158553 -0800
+@@ -2056,6 +2056,14 @@
+                           struct wsi_x11_connection *wsi_conn,
+                           VkPresentModeKHR present_mode)
+ {
++   /* Termux:X11 on KGSL: buffers shared over DRI3 carry no implicit fence (KGSL has no
++    * dma-buf reservation objects), so the X server reads a presented image as soon as
++    * PresentPixmap arrives, before the GPU has finished it, and shows the previous frame.
++    * This Turnip is built only for that server: always wait for the image's fence.
++    */
++   if (!wsi_device->sw)
++      return true;
++
+    if (wsi_conn->is_xwayland) {
+       return false;
+    }

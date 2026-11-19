@@ -4,7 +4,7 @@ TERMUX_PKG_LICENSE="custom"
 TERMUX_PKG_LICENSE_FILE="COPYRIGHTS"
 TERMUX_PKG_MAINTAINER="@cnshing"
 TERMUX_PKG_VERSION="27.0.0~devel20261025"
-TERMUX_PKG_REVISION=11
+TERMUX_PKG_REVISION=12
 TERMUX_PKG_EXCLUDED_ARCHES="arm, i686, x86_64"
 TERMUX_PKG_SKIP_SRC_EXTRACT=true
 TERMUX_PKG_BUILD_IN_SRC=true
@@ -55,6 +55,8 @@ termux_step_post_get_source() {
 	for change in "$bridge"/01[0-9][0-9]-*.patch; do
 		patch --batch -d mesa-mali -p1 < "$change"
 	done
+	# Turnip KGSL OPAQUE_FD semaphores, as mesa's 0027, for Chrome's WebGPU (Dawn).
+	patch --batch -d mesa-mali -p1 < "$TERMUX_PKG_BUILDER_DIR/turnip-kgsl-opaque-fd-semaphores.patch"
 	cp "$bridge/tva_ion_winsys.h" mesa-mali/src/gallium/frontends/va/
 	python3 "$bridge/configure-bridge.py" mesa-mali/src/gallium/frontends/va/tva_bridge.c
 	printf '\n===== mesa-for-android-container =====\n' >> COPYRIGHTS
@@ -89,6 +91,8 @@ termux_step_make_install() {
 	install -d "$private/mali/dri"
 	cp -P mali-stage/usr/lib/aarch64-linux-gnu/libgallium*.so* "$private/mali/"
 	cp -P mali-stage/usr/lib/aarch64-linux-gnu/dri/termuxva_drv_video.so "$private/mali/dri/"
+	# lfdevs' Turnip, rebuilt from the same source with OPAQUE_FD semaphores.
+	install -m755 mali-stage/turnip/usr/lib/aarch64-linux-gnu/libvulkan_freedreno.so "$private/$mesa/libvulkan_freedreno.so"
 	# A Bionic launcher must never find glibc's own C library here, and libpci exits on Android.
 	for folder in "$private/$mesa" "$private/lib" "$private/mali"; do
 		for name in libc.so libc.so.6 libdl.so libm.so libpci.so.3; do

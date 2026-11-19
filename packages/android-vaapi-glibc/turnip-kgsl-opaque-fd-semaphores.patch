@@ -1,0 +1,49 @@
+--- a/src/freedreno/vulkan/tu_knl_kgsl.cc
++++ b/src/freedreno/vulkan/tu_knl_kgsl.cc
+@@ -1471,6 +1471,37 @@
+    return kgsl_syncobj_export(container_of(device, struct tu_device, vk), &s->syncobj, pFd);
+ }
+ 
++/* KGSL has no DRM syncobjs, so OPAQUE_FD semaphores would otherwise be unsupported, and clients
++ * that require them, such as Dawn (WebGPU) and Chromium's Vulkan shared images on Linux, reject
++ * the device. A KGSL sync's payload is a sync_file, so carry that as the opaque handle. Opaque
++ * handles must always be valid descriptors, while a sync with nothing pending has no sync_file:
++ * such a sync exports /dev/null, which imports back as signaled. Opaque handles are meaningful
++ * only to this driver, as the specification requires.
++ */
++static VkResult
++vk_kgsl_sync_import_opaque_fd(struct vk_device *device,
++                              struct vk_sync *sync,
++                              int fd)
++{
++   if (fd < 0)
++      return vk_error(device, VK_ERROR_INVALID_EXTERNAL_HANDLE);
++   return vk_kgsl_sync_import_sync_file(device, sync, sync_valid_fd(fd) ? fd : -1);
++}
++
++static VkResult
++vk_kgsl_sync_export_opaque_fd(struct vk_device *device,
++                              struct vk_sync *sync,
++                              int *pFd)
++{
++   VkResult result = vk_kgsl_sync_export_sync_file(device, sync, pFd);
++   if (result == VK_SUCCESS && *pFd < 0) {
++      *pFd = open("/dev/null", O_RDONLY | O_CLOEXEC);
++      if (*pFd < 0)
++         return vk_error(device, VK_ERROR_TOO_MANY_OBJECTS);
++   }
++   return result;
++}
++
+ const struct vk_sync_type vk_kgsl_sync_type = {
+    .size = sizeof(struct vk_kgsl_syncobj),
+    .features = static_cast<enum vk_sync_features>(
+@@ -1487,6 +1518,8 @@
+    .move = vk_kgsl_sync_move,
+    .wait = vk_kgsl_sync_wait,
+    .wait_many = vk_kgsl_sync_wait_many,
++   .import_opaque_fd = vk_kgsl_sync_import_opaque_fd,
++   .export_opaque_fd = vk_kgsl_sync_export_opaque_fd,
+    .import_sync_file = vk_kgsl_sync_import_sync_file,
+    .export_sync_file = vk_kgsl_sync_export_sync_file,
+ };

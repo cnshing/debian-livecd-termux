@@ -45,5 +45,8 @@ before every non-sw X11 present. Revision 14.
 
 ## Next steps
 
-1. Check for a frame-rate or latency regression (video playback, scrolling).
+Performance, 2026-11-19 (private display, canvas animation plus 1080p VP9 video for 15 s, two runs
+each): rev 13 and rev 14 both ran at the display's 30 fps cap, frame time p95 and max 33.5 ms, and
+dropped 11-13 of about 260 video frames. No regression is visible, though the private display's
+30 Hz cap hides any loss of headroom above it.
 2. The same cause explained [note10-gpu-rectangles.md](note10-gpu-rectangles.md) (that lane: rev 14 0/900).

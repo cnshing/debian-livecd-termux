@@ -1,0 +1,32 @@
+WSI/X11: wait for rendering before presenting when nothing else syncs.
+
+Without DRI3/Present 1.4 explicit sync, the X11 WSI attaches the render fence
+to the dma-buf through DMA_BUF_IOCTL_IMPORT_SYNC_FILE. The S20's 4.19 kernel
+lacks that ioctl, so no dma_buf_semaphore exists, and kbase attaches no
+implicit fences. On raw DRI3 (PANVK_KBASE_DRI3=raw) in FIFO or IMMEDIATE
+mode, xcb_present_pixmap then goes out while Mali is still rendering, the
+race that split Chrome frames and cut ArcMenu on the Note10+.
+
+Rebased from packages/mesa/0028 onto Zenith's reworked file, keeping the
+software path's wait (series patch 106).
+
+--- a/src/vulkan/wsi/wsi_common_x11.c
++++ b/src/vulkan/wsi/wsi_common_x11.c
+@@ -3034,9 +3034,16 @@
+       /* Not necessary to block when we have explicit sync */
+       /* sw images are read by the CPU (X server or XPutImage): wait for the
+        * blit here instead of in vkQueuePresentKHR. */
++      /* Without explicit sync and without a dma-buf semaphore, the X server
++       * only waits for rendering if the kernel driver attaches implicit
++       * fences to the dma-buf.  kbase and KGSL do not, and kernels without
++       * DMA_BUF_IOCTL_IMPORT_SYNC_FILE cannot attach one for us, so the
++       * server would read a partly rendered image.  Wait on the CPU instead.
++       */
+       bool need_fence_wait =
+             (chain->base.wsi->sw ||
+-             x11_needs_wait_for_fences(chain->base.wsi, wsi_conn, present_mode)) &&
++             x11_needs_wait_for_fences(chain->base.wsi, wsi_conn, present_mode) ||
++             chain->base.dma_buf_semaphore == VK_NULL_HANDLE) &&
+             !chain->base.image_info.explicit_sync;
+ 
+       bool need_timing_fence_wait = x11_swapchain_present_timing_is_out_of_order_completion(

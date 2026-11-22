@@ -177,7 +177,7 @@ same Linux client protocol and desktop controls.
 
 ## Timestamped sink candidate built on 2026 11 22
 
-Branch `fix/pulse-aaudio-timestamps` contains PulseAudio `17.0-100`, carrying
+Branch [fix/pulse-aaudio-timestamps](https://github.com/cnshing/debian-livecd-termux/tree/fix/pulse-aaudio-timestamps) contains PulseAudio `17.0-100`, carrying
 Termux's pinned PulseAudio 17 build patches and Android modules. Its AAudio sink
 now advertises `PA_SINK_LATENCY` and calculates remaining output frames using
 `AAudioStream_getTimestamp(CLOCK_MONOTONIC)`, extrapolated to the query time.

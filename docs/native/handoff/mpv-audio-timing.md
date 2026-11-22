@@ -198,7 +198,7 @@ not need to rebuild against it.
 
 The candidate has not been installed or selected by the desktop. Runtime
 qualification on a private server is still required before claiming this fixes
-playback or changing the temporary mpv AAudio preference. The prepared test
+playback or changing the temporary mpv AAudio preference. The prepared `tests/audio/test-aaudio-device.py` test
 covers measured sink latency, hardware timestamp activation, playback stability,
 volume/mute, monitor capture, two clients, pause/resume, seeking, suspend/resume
 and repeated module unload/reload. A subsequent real-file and route test remains

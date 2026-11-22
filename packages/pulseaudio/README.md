@@ -21,3 +21,19 @@ route changes, real playback and desktop integration. See
 The client library ABI is unchanged. The recipe is a separate behavior-only CI
 job so other desktop packages continue building against Termux's client headers
 and libraries rather than requiring a rebuild of every PulseAudio consumer.
+
+For private runtime qualification after extracting the CI package (not installing
+it), run inside `livecd-native exec`:
+
+```sh
+python tests/audio/test-aaudio-device.py \
+  --candidate-prefix /path/to/extracted/data/data/com.termux/files/usr \
+  --out "$HOME/aaudio-qualification-new"
+```
+
+The output directory must be new. The test starts and cleans up its own Xvfb
+display and PulseAudio server. It uses only a generated video/tone and records
+the private sink monitor. It does not replace the desktop's server or record a
+microphone. The default run includes two minutes of playback and requires at
+least 90 seconds when customized. Passing this test does not qualify physical
+lip sync, Bluetooth routing, calls or GNOME's UI.

@@ -102,6 +102,12 @@ try:
  result['output_drops']=call('get_property','frame-drop-count')
  result['final_avsync']=call('get_property','avsync')
  call('quit');f.close();s.close();result['player_exit']=p.wait(timeout=10)
+ result['hardware_timestamp_activations']=(O/'server.log').read_text().count('hardware presentation timestamps active')
+ rows=[json.loads(l) for l in (O/'timing.jsonl').read_text().splitlines()]
+ rows=[r for r in rows if r.get('frame-drop-count') is not None]
+ steady=[r for r in rows if r['wall']>=max(40,rows[-1]['wall']-60)]
+ result['steady_output_drops']=steady[-1]['frame-drop-count']-steady[0]['frame-drop-count']
+ result['steady_seconds']=steady[-1]['wall']-steady[0]['wall']
  # Each unload/reload must release the old stream and recreate timestamp state.
  result['module_reload_cycles']=0
  for _ in range(3):
@@ -110,12 +116,6 @@ try:
   pactl('unload-module',idx)
   pactl('load-module','module-aaudio-sink','sink_name=qualification')
   time.sleep(.3);result['module_reload_cycles']+=1
- result['hardware_timestamp_activations']=(O/'server.log').read_text().count('hardware presentation timestamps active')
- rows=[json.loads(l) for l in (O/'timing.jsonl').read_text().splitlines()]
- rows=[r for r in rows if r.get('frame-drop-count') is not None]
- steady=[r for r in rows if r['wall']>=max(40,rows[-1]['wall']-60)]
- result['steady_output_drops']=steady[-1]['frame-drop-count']-steady[0]['frame-drop-count']
- result['steady_seconds']=steady[-1]['wall']-steady[0]['wall']
  assert result['normal_rms']>50 and result['half_volume_rms']<result['normal_rms']/2 and result['muted_rms']<1
  assert len(result['concurrent_sink_inputs'].splitlines())==2 and result['second_exit']==0
  assert result['hardware_timestamp_activations']>=2

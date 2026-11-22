@@ -1,7 +1,7 @@
 # Android PulseAudio presentation latency
 
 This recipe carries Termux's PulseAudio 17.0-5 Android modules and build patches
-from the builder revision recorded in `upstream.json`. Revision 101 repairs
+from the builder revision recorded in `upstream.json`. Revision 103 repairs
 the AAudio sink's playback latency reporting and callback shutdown; the desktop still selects its
 existing sink until the runtime change is separately qualified.
 
@@ -40,6 +40,11 @@ lip sync, Bluetooth routing, calls or GNOME's UI.
 
 AAudio callbacks synchronously request rendering from the sink IO thread. Closing
 the stream on that same IO thread can deadlock while Android joins a callback
-waiting for rendering. The main thread now detaches the handle through an IO
-message before closing it, allowing IO to drain pending callbacks with STOP.
-The device qualification includes suspend/resume and repeated module reloads.
+waiting for rendering. The main thread explicitly stops playback while IO can still render, then
+detaches the handle through an IO message before closing it. Late callbacks
+return silence with CONTINUE so they cannot initiate a competing Android STOP
+transition while close joins them. A debugger caught that second deadlock in
+Android's systemStopFromCallback() when the first repair returned STOP.
+The device qualification includes three suspend/resume cycles, ten module
+reloads by default, and a clean server exit. Increase `--reload-cycles` for
+stress qualification.

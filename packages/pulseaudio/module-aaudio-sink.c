@@ -274,9 +274,9 @@ static int sink_process_msg(pa_msgobject *o, int code, void *data, int64_t offse
 };
 
 /* AAudioStream_close() joins the callback thread. That callback synchronously
- * waits for our IO thread, so closing from the IO thread can deadlock. Detach
- * the handle there first, then close from main while IO continues draining
- * callback messages (which now return STOP). */
+ * waits for our IO thread, so closing from the IO thread can deadlock. Stop
+ * while IO can render, detach the handle there, then close from main while IO
+ * continues draining any late callbacks with silence. */
 static void close_stream_main(struct userdata *u) {
     AAudioStream *stream = NULL;
 

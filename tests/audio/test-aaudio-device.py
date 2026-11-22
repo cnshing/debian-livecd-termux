@@ -7,8 +7,10 @@ ap=argparse.ArgumentParser()
 ap.add_argument('--candidate-prefix',type=Path,required=True)
 ap.add_argument('--out',type=Path,required=True)
 ap.add_argument('--seconds',type=int,default=120)
+ap.add_argument('--reload-cycles',type=int,default=10)
 a=ap.parse_args()
 if a.seconds<90:ap.error("--seconds must be at least 90 for the steady playback window")
+if a.reload_cycles<3:ap.error("--reload-cycles must be at least 3")
 O=a.out.absolute();O.mkdir(parents=True,mode=0o700,exist_ok=False)
 prefix=a.candidate_prefix.absolute();base=os.environ.copy()
 procs=[];logs=[];result={};p=None
@@ -93,7 +95,9 @@ try:
  result['after_seek_time']=call('get_property','time-pos')
  second=start(['mpv','--no-config','--no-video','--ao=pulse','--length=4',str(fixture)],'second-client',client)
  time.sleep(1);result['concurrent_sink_inputs']=pactl('list','short','sink-inputs');result['second_exit']=second.wait(timeout=12)
- pactl('suspend-sink','qualification',1);time.sleep(1);pactl('suspend-sink','qualification',0)
+ result['suspend_resume_cycles']=0
+ for _ in range(3):
+  pactl('suspend-sink','qualification',1);time.sleep(1);pactl('suspend-sink','qualification',0);time.sleep(1);result['suspend_resume_cycles']+=1
  result['sink_samples']=[]
  while time.monotonic()-t0<a.seconds:
   if server.poll() is not None or p.poll() is not None:raise RuntimeError('Server/player exited during playback')
@@ -110,7 +114,7 @@ try:
  result['steady_seconds']=steady[-1]['wall']-steady[0]['wall']
  # Each unload/reload must release the old stream and recreate timestamp state.
  result['module_reload_cycles']=0
- for _ in range(3):
+ for _ in range(a.reload_cycles):
   modules=pactl('list','short','modules')
   idx=next(l.split()[0] for l in modules.splitlines() if '\tmodule-aaudio-sink\t' in l)
   pactl('unload-module',idx)
@@ -118,7 +122,7 @@ try:
   time.sleep(.3);result['module_reload_cycles']+=1
  assert result['normal_rms']>50 and result['half_volume_rms']<result['normal_rms']/2 and result['muted_rms']<1
  assert len(result['concurrent_sink_inputs'].splitlines())==2 and result['second_exit']==0
- assert result['hardware_timestamp_activations']>=2
+ assert result['hardware_timestamp_activations']>=4
  assert result['steady_output_drops']==0
  server.terminate();result['server_exit']=server.wait(timeout=10)
  assert result['server_exit']==0

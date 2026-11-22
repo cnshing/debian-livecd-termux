@@ -6,6 +6,15 @@ output eliminated the drops in the tested H.264 and HEVC clips. AAudio is the
 temporary mpv default and has been applied to the device. The goal is to repair
 the PulseAudio path and restore it as mpv's default.
 
+As of 2026-11-22, the timestamped PulseAudio AAudio sink revision 103 has passed
+private synthetic playback, desktop stream controls, three suspend/resume cycles,
+30 module reloads and clean server exit. It also repairs a debugger-confirmed
+Android close/callback deadlock discovered during qualification. Real 4K private
+software-rendering tests still have occasional output drops, including the
+direct-AAudio control. The candidate has **not** replaced the installed package
+or the desktop server; `ao=aaudio,pulse` remains on the device. Physical A/V,
+desktop hardware rendering and Android disconnect/route recovery remain open.
+
 ## Reproduction and measurements
 
 The device runs Android 11, `mpv-x 0.41.0-7`, `pulseaudio 17.0-5` and
@@ -175,10 +184,14 @@ bypasses it. Restoring `ao=pulse` does not require restoring OpenSL ES as the
 server's Android backend: an accurately implemented AAudio sink can preserve the
 same Linux client protocol and desktop controls.
 
-## Timestamped sink candidate built on 2026 11 22
+## Timestamped sink candidate built on 2026-11-22
 
-Branch [fix/pulse-aaudio-timestamps](https://github.com/cnshing/debian-livecd-termux/tree/fix/pulse-aaudio-timestamps) contains PulseAudio `17.0-100`, carrying
-Termux's pinned PulseAudio 17 build patches and Android modules. Its AAudio sink
+The `packages/pulseaudio` recipe on main now contains the opt-in sink repair,
+PulseAudio `17.0-103`, carrying Termux's pinned PulseAudio 17 build patches and
+Android modules. Development history is on branch
+[fix/pulse-aaudio-timestamps](https://github.com/cnshing/debian-livecd-termux/tree/fix/pulse-aaudio-timestamps).
+The recipe and desktop launcher still select OpenSL ES by default; adding this
+recipe does not switch the desktop backend. Its AAudio sink
 now advertises `PA_SINK_LATENCY` and calculates remaining output frames using
 `AAudioStream_getTimestamp(CLOCK_MONOTONIC)`, extrapolated to the query time.
 It includes the callback being rendered before Android increments its written
@@ -196,15 +209,133 @@ The built module imports the timestamp, written-frame and read-frame APIs.
 The package is a separate behavior-only build job, so client applications do
 not need to rebuild against it.
 
-The candidate has not been installed or selected by the desktop. Runtime
-qualification on a private server is still required before claiming this fixes
-playback or changing the temporary mpv AAudio preference. The prepared `tests/audio/test-aaudio-device.py` test
-covers measured sink latency, hardware timestamp activation, playback stability,
-volume/mute, monitor capture, two clients, pause/resume, seeking, suspend/resume
-and repeated module unload/reload. A subsequent real-file and route test remains
-necessary. These tests must use the candidate server and its matching modules
-and libraries together: the stock package reports `17.0-dirty`, while the
-release-archive candidate reports `17.0`, and PulseAudio checks module versions.
+The candidate has not been installed or selected by the desktop. Tests use the
+candidate server and its matching modules and libraries together: the stock
+package reports `17.0-dirty`, while the release-archive candidate reports `17.0`,
+and PulseAudio checks module versions.
+
+### Device qualification on 2026-11-22
+
+The initial revision 100 ran on its own server and private Xvfb display. It
+reported `PA_SINK_LATENCY`, activated Android hardware presentation timestamps
+at startup and after suspend/resume, and reported about 234 ms of remaining
+playback latency in one running sample (configured buffer latency about 20 ms).
+Those are different quantities; the earlier fixed buffer estimate did not
+measure the hardware presentation delay.
+
+The synthetic playback test measured RMS 2883 at full stream volume, 361 at
+50 percent and zero when muted. Concurrent clients, pause/resume, seek and
+active sink suspend/resume succeeded. Four output drops occurred around the
+intentional state changes; the interval from 40 to 123 seconds had no additional
+output drops and no decoder drops. These counters do not measure physical lip
+sync or screen presentation.
+
+A separate 90-second 1080p H.264 SMB run with revision 100 completed with zero
+output or decoder drops and no cache pauses, using `ao=pulse`, hardware decode
+and a private `vo=x11` display. The last mpv A/V estimate was about 11 ms; this
+is an internal estimate, not a physical alignment measurement.
+
+The overall synthetic test **failed** when unloading the idle module: a following load
+request timed out, and the private server required forced cleanup. The upstream
+module closes AAudio from its sink IO thread, while Android's callback waits
+synchronously for that same thread to render. `AAudioStream_close()` can join
+that callback, creating a circular wait. A passing short playback run had
+missed this lifecycle defect.
+
+Revision 101 moved close to main after detaching the handle through an IO
+message. That avoids blocking rendering, but qualification still found an
+intermittent Android close deadlock. A repeat passed suspend/resume and all
+three reloads, then hung during graceful server shutdown. A debugger attached
+to this private process found:
+
+- Main: `AAudioStream_close -> safeReleaseClose -> AudioStreamTrack::close_l ->
+  AudioTrack::~AudioTrack -> Thread::requestExitAndWait`.
+- AudioTrack callback: `processCallbackCommon -> systemStopFromCallback ->
+  mutex::lock`.
+- The PulseAudio sink IO thread was idle in `pa_rtpoll_run`, so this second hang
+  was inside Android's close-versus-callback state transition, rather than an
+  unserviced PulseAudio render message.
+
+Revision 103 explicitly requests stop while rendering remains available and
+waits for the STOPPING state to complete. It then detaches the handle through
+IO before main closes it. A late callback fills silence and returns CONTINUE,
+leaving the state transition to the explicit stop/close owner. It cannot query
+a detached stream or initiate a competing STOP transition. Revision 102 only
+added tracing to the unsuccessful revision 101 and is not a rollout candidate.
+
+[CI run 45005563174](https://github.com/cnshing/debian-livecd-termux/actions/runs/45005563174)
+built revision 103 from `14b94b6`. The main package SHA-256 is
+`0560b0cfb744a8b53964f4c10c90b7df69eb60c4a357c932d27d18f6692c041d`.
+Runtime qualification includes clean server exit as well as suspend/resume and
+repeated module reloads; shorter playback checks missed these failures.
+
+The first uninstrumented revision 103 run passed: stream volume/mute and monitor
+capture, two concurrent clients, pause/resume, seek, active suspend/resume,
+three module unload/reload cycles and a normal server exit (status 0). Hardware
+timestamps activated initially and after reopen. Three output drops occurred
+around deliberate state changes; the final 59-second window had zero additional
+output drops, with no decoder drops or cache pauses. The final mpv A/V estimate
+was about 1.3 ms. Running sink-latency samples ranged from about 68 to 236 ms;
+median about 226 ms. This remains an internal timing check.
+
+A second uninstrumented revision 103 run passed three active suspend/resume
+cycles, 30 module unload/reload cycles and normal server exit. Hardware
+timestamps activated four times. It recorded ten output drops around intentional
+state changes and zero additional drops in the final 54-second steady window;
+no decoder drops. Volume/mute and concurrent-client checks passed again. The
+final mpv A/V estimate was about 0.45 ms. These repeated lifecycle checks support
+the stop/detach/close repair on this device, without establishing Android route
+or call handling on other devices.
+
+A traced 90-second 4K HEVC SMB run on revision 103 did **not** pass the
+zero-drop acceptance criterion: three output drops, all after 40 seconds,
+zero decoder drops and no cache pauses. It used `mediacodec-copy` and private
+`vo=x11` software scaling. Over 12,376 raw timing samples after the first five
+seconds, no forward or backward audio-clock step error exceeded one 24 fps
+frame; maximum absolute step error was about 34.8 ms and the 99th percentile
+about 12.0 ms. This differs markedly from the original OpenSL ES trace but is
+not proof that every remaining video drop is fixed. An untraced repeat also
+recorded three output drops in 90 seconds, with zero decoder drops and no cache
+pauses. Tracing overhead alone therefore does not explain this remaining issue.
+Direct-AAudio and native/interpolated PulseAudio-timing controls on the same
+private renderer are the next comparison.
+
+A 90-second direct-AAudio control on the same private `vo=x11` display also
+recorded one output drop (zero decoder drops, no cache pauses). Thus this
+private 4K rendering setup has occasional drops independently of PulseAudio.
+The repaired PulseAudio run's three drops versus this control's one drop do not
+establish equivalence, and both fail the strict zero-drop criterion. Keep the
+real desktop's hardware-rendering comparison in the remaining acceptance work.
+
+An untraced 90-second 1080p H.264 SMB repeat on revision 103 passed with zero
+output or decoder drops and no cache pauses; the final mpv A/V estimate was
+about 2.5 ms. This repeats the revision 100 result with the shutdown repair.
+
+A 90-second revision 103 HEVC repeat with `pulse-latency-hacks=no` also recorded
+three total output drops (two in its measured steady window), zero decoder drops
+and no cache pauses. Its final mpv A/V estimate was about 0.03 ms. Interpolated
+PulseAudio timing therefore does not by itself satisfy the remaining 4K
+zero-drop criterion in this setup. Do not change the managed mpv timing option
+or restore `ao=pulse` based on these results alone.
+
+The device still has the stock `pulseaudio 17.0-5`, executable managed mpv
+launcher and `ao=aaudio,pulse` preference. All candidate runs used extracted
+packages and private processes. No desktop/audio-server restart was performed.
+Host evidence, the debugger backtrace and real-media probe scripts are ignored
+under `temp/pulse-timestamps/`; phone logs are under `~/pulse-timestamps/`.
+The latest extracted package is retained in `~/pulse-timestamps/stage103/` for
+follow-up qualification. Private media names and addresses remain untracked.
+
+The reusable `tests/audio/test-aaudio-device.py` covers measured sink latency,
+hardware timestamp activation, playback stability, volume/mute, private monitor
+capture, two clients, pause/resume, seeking, suspend/resume and repeated module
+unload/reload. Real-file playback, physical A/V alignment, GNOME controls,
+microphone coexistence, Bluetooth routes and call interruptions remain separate
+acceptance checks. Review the inherited `error_callback()` before route tests:
+it calls `pa_sink_suspend()` directly from Android's error callback thread
+instead of posting recovery to the PulseAudio main loop. The successful stop
+and reload tests do not exercise this disconnect-recovery path. All captured audio in these tests comes from a generated
+private tone, never a microphone or the live desktop monitor.
 
 ## Repair and acceptance plan
 

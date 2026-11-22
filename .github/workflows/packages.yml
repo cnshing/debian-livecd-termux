@@ -103,6 +103,8 @@ jobs:
       run: |
         cc -std=c11 -Wall -Wextra -Werror -fsanitize=undefined tests/audio/test-aaudio-latency.c -o /tmp/test-aaudio-latency
         /tmp/test-aaudio-latency
+    - name: Test native Android audio backend selection
+      run: python3 tests/audio/test-native-backend.py
     - name: Test the AutoEq converter
       run: python3 tests/audio/test-autoeq.py
     - name: Test EasyEffects output recovery

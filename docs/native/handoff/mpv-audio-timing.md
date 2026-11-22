@@ -6,14 +6,13 @@ output eliminated the drops in the tested H.264 and HEVC clips. AAudio is the
 temporary mpv default and has been applied to the device. The goal is to repair
 the PulseAudio path and restore it as mpv's default.
 
-As of 2026-11-22, the timestamped PulseAudio AAudio sink revision 103 has passed
-private synthetic playback, desktop stream controls, three suspend/resume cycles,
-30 module reloads and clean server exit. It also repairs a debugger-confirmed
-Android close/callback deadlock discovered during qualification. Real 4K private
-software-rendering tests still have occasional output drops, including the
-direct-AAudio control. The candidate has **not** replaced the installed package
-or the desktop server; `ao=aaudio,pulse` remains on the device. Physical A/V,
-desktop hardware rendering and Android disconnect/route recovery remain open.
+As of 2026-11-22, the user explicitly selected the repaired PulseAudio AAudio
+backend for this Note10+. The running desktop now uses `AAudio_sink` from the
+matched revision 103 runtime, and mpv has been restored to `ao=pulse`. Only audio
+was restarted; GNOME's owner and Shell processes stayed running. Desktop
+validation passed all 30 checks and GNOME's Gvc stream volume/mute controls
+worked. The device activation and remaining qualification are recorded below.
+The shared defaults remain unchanged for other devices.
 
 ## Reproduction and measurements
 
@@ -52,17 +51,17 @@ names, server addresses and credentials must stay out of tracked reports.
 
 ## Temporary change and rollback
 
-The Video Player overlay's default `mpv.conf` now prefers `ao=aaudio,pulse`. The running
-device's `~/.config/livecd-native/mpv/mpv.conf` has the same preference, effective on
-the next player launch. Rendering and decoding settings are unchanged. The
+The Video Player overlay's default `mpv.conf` now prefers `ao=aaudio,pulse`. The device initially had the same preference; its explicit backend activation
+below now overrides that setting with `ao=pulse`. Rendering and decoding settings are unchanged. The
 previous device file is saved as `~/mpv-pacing/mpv.conf.before-aaudio`.
 The second output in the preference list allows PulseAudio to initialize when
 AAudio is unavailable; this fallback retains the timing issue on this device.
 
 The overlay uses `home-defaults`, so changing the repository default does not
 migrate an existing user's configuration. This device was updated explicitly.
-Revert `ao=aaudio,pulse` to `ao=pulse` on the device and in the overlay after the
-acceptance checks below pass. Do not remove the desktop's PulseAudio server.
+This device now uses `ao=pulse` under the explicit activation below. Restore
+the shared overlay default only after qualification on the other supported
+devices. Keep the desktop's PulseAudio server.
 
 ## Why PulseAudio exists and what AAudio bypasses
 
@@ -178,9 +177,10 @@ Pause/resume and an absolute seek to 30 seconds succeeded; the player advanced
 to about 32.96 seconds after the seek. These are private-server integration
 checks, not validation of GNOME's UI, microphone coexistence or Bluetooth.
 
-PulseAudio is still the intended compatibility layer. The desktop's server,
-microphone bridge and other applications keep using it while mpv temporarily
-bypasses it. Restoring `ao=pulse` does not require restoring OpenSL ES as the
+PulseAudio is still the intended compatibility layer. During the workaround,
+the desktop server, microphone bridge and other applications kept using it
+while mpv bypassed it. The explicit device activation below restores mpv to
+that same compatibility layer. Restoring `ao=pulse` does not require restoring OpenSL ES as the
 server's Android backend: an accurately implemented AAudio sink can preserve the
 same Linux client protocol and desktop controls.
 
@@ -209,8 +209,8 @@ The built module imports the timestamp, written-frame and read-frame APIs.
 The package is a separate behavior-only build job, so client applications do
 not need to rebuild against it.
 
-The candidate has not been installed or selected by the desktop. Tests use the
-candidate server and its matching modules and libraries together: the stock
+During the private qualification below, the candidate had not yet replaced
+the desktop server. Tests used the candidate server and its matching modules and libraries together: the stock
 package reports `17.0-dirty`, while the release-archive candidate reports `17.0`,
 and PulseAudio checks module versions.
 
@@ -318,9 +318,10 @@ PulseAudio timing therefore does not by itself satisfy the remaining 4K
 zero-drop criterion in this setup. Do not change the managed mpv timing option
 or restore `ao=pulse` based on these results alone.
 
-The device still has the stock `pulseaudio 17.0-5`, executable managed mpv
-launcher and `ao=aaudio,pulse` preference. All candidate runs used extracted
-packages and private processes. No desktop/audio-server restart was performed.
+Before the explicit activation below, the device retained stock `pulseaudio
+17.0-5`, the executable managed mpv launcher and `ao=aaudio,pulse`. Those earlier
+candidate runs used extracted packages and private processes, with no live
+desktop/audio-server restart.
 Host evidence, the debugger backtrace and real-media probe scripts are ignored
 under `temp/pulse-timestamps/`; phone logs are under `~/pulse-timestamps/`.
 The latest extracted package is retained in `~/pulse-timestamps/stage103/` for
@@ -336,6 +337,87 @@ it calls `pa_sink_suspend()` directly from Android's error callback thread
 instead of posting recovery to the PulseAudio main loop. The successful stop
 and reload tests do not exercise this disconnect-recovery path. All captured audio in these tests comes from a generated
 private tone, never a microphone or the live desktop monitor.
+
+## Device activation requested on 2026-11-22
+
+The original OpenSL ES default came from Termux. Upstream explains that it
+covered older Android versions where AAudio was absent, and avoided early
+AAudio bugs and the imperfect no-close workaround:
+[Termux discussion](https://github.com/termux/termux-packages/issues/27978).
+PulseAudio does not require OpenSL ES as its Android backend.
+
+At the user's request, the desktop now runs:
+
+`mpv (ao=pulse) -> existing desktop PulseAudio socket -> repaired AAudio sink -> Android`
+
+The matched CI runtime was copied into
+`~/.local/opt/livecd-native/pulseaudio-17.0-103/`. The installed system package
+remains `pulseaudio 17.0-5`; only the desktop server uses the isolated candidate
+binary, modules and libraries. This avoids replacing libraries under running
+applications. `pactl info` on the desktop socket reports server 17.0 and default
+sink `AAudio_sink`. The server log confirms hardware presentation timestamps.
+
+Device configuration in `~/.config/livecd-native/audio.json` contains:
+
+```json
+{
+  "backend": "aaudio",
+  "server_prefix": "/data/data/com.termux/files/home/.local/opt/livecd-native/pulseaudio-17.0-103"
+}
+```
+
+`src/native/audio.py` builds the server command and its private library search
+path. `desktop.py` uses this device selection on subsequent starts; validation
+and the application audio check recognize the selected sink. The shared default
+is still `sles`, and the mpv overlay still prefers direct AAudio for devices that
+have not opted into the repaired backend. The candidate path affects the server
+environment, not the libraries loaded by ordinary clients.
+
+The running server alone was replaced on the same Unix socket and under the
+existing native session tag. GNOME owner PID 4414 and Shell PID 4680 stayed the
+same. EasyEffects recreated its downstream tunnel. Bluetooth microphone auto
+mode was stopped before replacing the server, then restored with the same
+selected device and default-source policy. It publishes
+`android_bluetooth_input`; no call route is held and the idle microphone remains
+off with its silent fallback. No microphone audio was captured.
+
+The device's managed mpv configuration now says `ao=pulse`. Per-user controller
+files were updated to support the persistent device selection; APT-owned files
+were not overwritten. Original files, symlink targets, audio settings and server
+command are backed up under `~/pulse-backend-activation/before/`. The active
+runtime record and server log are in `~/pulse-backend-activation/`.
+
+Live desktop validation passed all 30 checks. The GNOME Gvc model selected
+`AAudio_sink`; setting the owned mpv stream to volume 32768 from 65536 and muting
+it was confirmed through PulseAudio, then the original volume and mute state
+were restored. No user application's stream controls were changed.
+
+A two-minute H.264 SMB run through this live server, hardware decode and a
+private Xvfb `vo=x11` display completed with zero output or decoder drops and no
+cache pauses. Its final mpv A/V estimate was about 3.8 ms. This test exercised
+the live server rather than starting another private audio server. No input was
+sent to the user's display.
+
+The two-minute HEVC SMB run on the same live backend recorded one output drop
+before 20 seconds and no additional drops in its final 59-second steady window.
+It had zero decoder drops and no cache pauses; the final mpv A/V estimate was
+about 0.2 ms. Both playback processes exited normally, and the candidate server
+remained running afterward. The private display still uses software scaling;
+physical lip sync and normal-window hardware presentation remain separate checks.
+
+Local copies of the activation evidence are under
+`temp/pulse-timestamps/live-evidence/`, with desktop validation and Gvc results
+in `live-backend-validation.json` and `live-gvc-result.json` beside it.
+
+Host checks for default selection, isolated server libraries, safe microphone
+fallback and invalid configuration pass, as do native status and packaging
+regressions. The backend selection is included in the livecd-desktop revision 47
+source and its regression runs in the package workflow.
+
+To roll back, select `backend: sles` with no `server_prefix`, restore
+`ao=aaudio,pulse`, and restart the audio server or desktop at a suitable time.
+The backup records retain the previous configuration. The candidate runtime
+must remain while `server_prefix` refers to it.
 
 ## Repair and acceptance plan
 
@@ -358,9 +440,9 @@ private tone, never a microphone or the live desktop monitor.
 4. Repeat desktop stream volume/mute, monitor capture and concurrent-client
    checks, then qualify GNOME controls, microphone coexistence, Bluetooth route
    changes, reconnects and call interruptions. Use synthetic sources for capture.
-5. Restore `ao=pulse` on the device and in the overlay when the repaired backend
-   passes those checks. Keep AAudio explicit as a fallback until other supported
-   devices and Android versions are qualified.
+5. The user has explicitly opted this device into `ao=pulse` for live testing.
+   Keep other devices on the temporary default until the remaining checks pass;
+   retain the documented device rollback if live playback regresses.
 
 Primary references: [mpv 0.41 PulseAudio output](https://github.com/mpv-player/mpv/blob/v0.41.0/audio/out/ao_pulse.c),
 [mpv 0.41 direct AAudio output](https://github.com/mpv-player/mpv/blob/v0.41.0/audio/out/ao_aaudio.c),

@@ -10,7 +10,8 @@ import sys
 import time
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from desktop import DATA, ROOT, PREFIX, SESSION_LOG_START, STATE, bus_call, process_identity, shell_pid
+from desktop import CONFIG, DATA, ROOT, PREFIX, SESSION_LOG_START, STATE, bus_call, process_identity, shell_pid
+from audio import expected_sink
 from graphics import process_gpu, zink_driver
 from gi.repository import Gio
 
@@ -25,7 +26,8 @@ def main():
     check('shell_48', subprocess.check_output([str(ROOT / 'bin/gnome-shell'), '--version'], text=True).strip().startswith('GNOME Shell 48.'))
     check('private_home_config', os.environ.get('XDG_CONFIG_HOME') == str(Path.home() / '.config/livecd-native'))
     sinks = subprocess.check_output(['pactl', 'list', 'short', 'sinks'], text=True)
-    check('native_audio', os.environ.get('PULSE_SERVER', '').startswith('unix:') and 'OpenSL_ES_sink' in sinks, sinks.strip())
+    check('native_audio', os.environ.get('PULSE_SERVER', '').startswith('unix:') and
+          expected_sink(CONFIG) in {line.split()[1] for line in sinks.splitlines()}, sinks.strip())
     wm = subprocess.check_output(['xprop', '-root', '_NET_SUPPORTING_WM_CHECK'], text=True)
     check('window_manager', 'window id #' in wm, wm.strip())
     renderer = os.environ.get('LIVECD_NATIVE_RENDERER', 'software')

@@ -14,6 +14,8 @@ import sys
 
 sys.path.insert(0, str(Path.home() / '.local/lib/livecd-native'))
 from capture import screenshot
+from audio import expected_sink
+from desktop import CONFIG
 
 ROOT = Path.home() / 'Documents/livecd-native-validation'
 LOG = Path.home() / '.local/state/livecd-native'
@@ -163,14 +165,15 @@ def main():
             audio.setparams((2, 2, 48000, 0, 'NONE', 'not compressed'))
             frame = b''.join(struct.pack('<hh', *(int(2000 * math.sin(2*math.pi*440*n/48000)),)*2) for n in range(48000))
             audio.writeframes(frame * 2)
+        audio_sink = expected_sink(CONFIG)
         raw = LOG / 'audio-monitor.raw'
         with raw.open('wb') as capture:
-            recorder = subprocess.Popen(['parec', '--device=OpenSL_ES_sink.monitor', '--format=s16le',
+            recorder = subprocess.Popen(['parec', '--device=' + audio_sink + '.monitor', '--format=s16le',
                 '--rate=48000', '--channels=2'], stdout=capture, stderr=subprocess.DEVNULL)
             try:
                 time.sleep(0.5)
                 # Name the sink: with a Bluetooth headset connected, the default is the headset.
-                subprocess.run(['paplay', '--device=OpenSL_ES_sink', str(tone)], check=True, timeout=15)
+                subprocess.run(['paplay', '--device=' + audio_sink, str(tone)], check=True, timeout=15)
                 time.sleep(0.5)
             finally:
                 recorder.terminate()

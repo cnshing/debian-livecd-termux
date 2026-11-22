@@ -20,6 +20,7 @@ from graphics import apply_renderer, legacy_drawing, preferred_renderer
 from terminal import environment as terminal_environment
 from terminal import command as ghostty_command
 from integrations import Integrations
+from audio import server as audio_server
 
 PREFIX = Path('/data/data/com.termux/files/usr')
 BASE = Path.home() / '.local/lib/livecd-native'
@@ -401,20 +402,16 @@ def run(safe, renderer='software'):
         subprocess.run([str(PREFIX / 'bin/am'), 'start', '--user', '0', '-n', 'com.termux.x11/.MainActivity'], check=False)
         pulse = RUNTIME / 'pulse.sock'
         pulse.unlink(missing_ok=True)
-        audio_env = os.environ.copy()
+        audio_command, audio_env, audio_sink = audio_server(CONFIG, pulse)
         audio_env['LIVECD_NATIVE_SESSION'] = tag
-        children.append(subprocess.Popen(['pulseaudio', '--daemonize=no', '--exit-idle-time=-1',
-            '--use-pid-file=no', '-n', '--load=module-sles-sink',
-            # Otherwise the default source is the speaker monitor, which clients record as a microphone.
-            '--load=module-null-source source_name=android_no_microphone format=s16le rate=48000 channels=1 description="No microphone"',
-            '--load=module-native-protocol-unix socket=' + str(pulse) + ' auth-anonymous=1'], env=audio_env, start_new_session=True))
+        children.append(subprocess.Popen(audio_command, env=audio_env, start_new_session=True))
         deadline = time.monotonic() + 10
         while subprocess.run(['pactl', 'info'], env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode:
             if children[-1].poll() is not None or time.monotonic() > deadline:
                 raise RuntimeError('Native PulseAudio did not become ready')
             time.sleep(0.1)
         sinks = subprocess.check_output(['pactl', 'list', 'short', 'sinks'], env=env, text=True)
-        if 'OpenSL_ES_sink' not in sinks:
+        if audio_sink not in {line.split()[1] for line in sinks.splitlines()}:
             raise RuntimeError('PulseAudio has no Android output sink')
         bus_config = runtime / 'system.conf'
         bus_config.write_text('<busconfig><type>session</type><auth>EXTERNAL</auth><listen>'

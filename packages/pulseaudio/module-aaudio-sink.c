@@ -66,7 +66,8 @@ PA_MODULE_USAGE(
 
 enum {
     SINK_MESSAGE_RENDER = PA_SINK_MESSAGE_MAX,
-    SINK_MESSAGE_OPEN_STREAM
+    SINK_MESSAGE_OPEN_STREAM,
+    SINK_MESSAGE_DETACH_STREAM
 };
 
 struct userdata {
@@ -111,8 +112,8 @@ static const char* const valid_modargs[] = {
 static int process_render(struct userdata *u, void *audioData, int64_t numFrames) {
     pa_assert(u->sink->thread_info.state != PA_SINK_INIT);
 
-    /* a render message could be queued after a set state message */
-    if (!PA_SINK_IS_LINKED(u->sink->thread_info.state))
+    /* A queued callback must stop after the main thread detaches its stream. */
+    if (!u->stream || !PA_SINK_IS_LINKED(u->sink->thread_info.state))
         return AAUDIO_CALLBACK_RESULT_STOP;
 
     u->memchunk.memblock = pa_memblock_new_fixed(u->core->mempool, audioData, u->frame_size * numFrames, false);
@@ -246,6 +247,10 @@ static int sink_process_msg(pa_msgobject *o, int code, void *data, int64_t offse
         case PA_SINK_MESSAGE_GET_LATENCY:
             *((pa_usec_t *) data) = get_playback_latency(u);
             return 0;
+        case SINK_MESSAGE_DETACH_STREAM:
+            *((AAudioStream **) data) = u->stream;
+            u->stream = NULL;
+            return 0;
         case SINK_MESSAGE_RENDER:
             return process_render(u, data, offset);
         case SINK_MESSAGE_OPEN_STREAM:
@@ -261,11 +266,38 @@ static int sink_process_msg(pa_msgobject *o, int code, void *data, int64_t offse
     return pa_sink_process_msg(o, code, data, offset, memchunk);
 };
 
+/* AAudioStream_close() joins the callback thread. That callback synchronously
+ * waits for our IO thread, so closing from the IO thread can deadlock. Detach
+ * the handle there first, then close from main while IO continues draining
+ * callback messages (which now return STOP). */
+static void close_stream_main(struct userdata *u) {
+    AAudioStream *stream = NULL;
+
+    if (u->thread && u->sink)
+        pa_asyncmsgq_send(u->thread_mq.inq, PA_MSGOBJECT(u->sink),
+                         SINK_MESSAGE_DETACH_STREAM, &stream, 0, NULL);
+    else {
+        stream = u->stream;
+        u->stream = NULL;
+    }
+
+    if (stream) {
+        if (u->no_close)
+            AAudioStream_requestStop(stream);
+        else
+            AAudioStream_close(stream);
+    }
+}
+
 static int state_func_main(pa_sink *s, pa_sink_state_t state, pa_suspend_cause_t suspend_cause) {
     struct userdata *u = s->userdata;
     uint32_t idx;
     pa_sink_input *i;
     pa_idxset *inputs;
+
+    if (PA_SINK_IS_OPENED(s->state) &&
+        (state == PA_SINK_SUSPENDED || state == PA_SINK_UNLINKED))
+        close_stream_main(u);
 
     if (s->state == PA_SINK_SUSPENDED && PA_SINK_IS_OPENED(state)) {
         if (pa_asyncmsgq_send(u->aaudio_msgq, PA_MSGOBJECT(u->sink), SINK_MESSAGE_OPEN_STREAM, NULL, 0, NULL) < 0)
@@ -297,23 +329,10 @@ static int state_func_main(pa_sink *s, pa_sink_state_t state, pa_suspend_cause_t
 static int state_func_io(pa_sink *s, pa_sink_state_t state, pa_suspend_cause_t suspend_cause) {
     struct userdata *u = s->userdata;
 
-    if (PA_SINK_IS_OPENED(s->thread_info.state) &&
-        (state == PA_SINK_SUSPENDED || state == PA_SINK_UNLINKED)) {
-        if (!u->no_close)
-            AAudioStream_close(u->stream);
-        else
-            AAudioStream_requestStop(u->stream);
-    } else if (s->thread_info.state == PA_SINK_SUSPENDED && PA_SINK_IS_OPENED(state)) {
+    if (PA_SINK_IS_OPENED(state) &&
+        (s->thread_info.state == PA_SINK_SUSPENDED || s->thread_info.state == PA_SINK_INIT)) {
         if (AAudioStream_requestStart(u->stream) < 0)
             pa_log("AAudioStream_requestStart() failed.");
-    } else if (s->thread_info.state == PA_SINK_INIT && PA_SINK_IS_LINKED(state)) {
-        if (PA_SINK_IS_OPENED(state)) {
-            if (AAudioStream_requestStart(u->stream) < 0)
-                pa_log("AAudioStream_requestStart() failed.");
-        } else {
-            if (!u->no_close)
-                AAudioStream_close(u->stream);
-        }
     }
     return 0;
 }
@@ -475,6 +494,8 @@ void pa__done(pa_module*m) {
 
     if (!(u = m->userdata))
         return;
+
+    close_stream_main(u);
 
     if (u->sink)
         pa_sink_unlink(u->sink);

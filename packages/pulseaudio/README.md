@@ -1,8 +1,8 @@
 # Android PulseAudio presentation latency
 
 This recipe carries Termux's PulseAudio 17.0-5 Android modules and build patches
-from the builder revision recorded in `upstream.json`. Revision 100 changes only
-the AAudio sink's playback latency reporting; the desktop still selects its
+from the builder revision recorded in `upstream.json`. Revision 101 repairs
+the AAudio sink's playback latency reporting and callback shutdown; the desktop still selects its
 existing sink until the runtime change is separately qualified.
 
 The AAudio sink advertises `PA_SINK_LATENCY` and reports queued frames relative
@@ -37,3 +37,9 @@ the private sink monitor. It does not replace the desktop's server or record a
 microphone. The default run includes two minutes of playback and requires at
 least 90 seconds when customized. Passing this test does not qualify physical
 lip sync, Bluetooth routing, calls or GNOME's UI.
+
+AAudio callbacks synchronously request rendering from the sink IO thread. Closing
+the stream on that same IO thread can deadlock while Android joins a callback
+waiting for rendering. The main thread now detaches the handle through an IO
+message before closing it, allowing IO to drain pending callbacks with STOP.
+The device qualification includes suspend/resume and repeated module reloads.

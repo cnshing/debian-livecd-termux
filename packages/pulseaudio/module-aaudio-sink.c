@@ -26,6 +26,7 @@
 #include <errno.h>
 #include <unistd.h>
 #include <time.h>
+#include <string.h>
 
 #include "aaudio-latency.h"
 
@@ -66,7 +67,8 @@ PA_MODULE_USAGE(
 
 enum {
     SINK_MESSAGE_RENDER = PA_SINK_MESSAGE_MAX,
-    SINK_MESSAGE_OPEN_STREAM
+    SINK_MESSAGE_OPEN_STREAM,
+    SINK_MESSAGE_DETACH_STREAM
 };
 
 struct userdata {
@@ -111,7 +113,12 @@ static const char* const valid_modargs[] = {
 static int process_render(struct userdata *u, void *audioData, int64_t numFrames) {
     pa_assert(u->sink->thread_info.state != PA_SINK_INIT);
 
-    /* a render message could be queued after a set state message */
+    /* Close owns stopping the stream. A late callback must not initiate a
+     * competing Android state transition while close is joining it. */
+    if (!u->stream) {
+        memset(audioData, 0, u->frame_size * numFrames);
+        return AAUDIO_CALLBACK_RESULT_CONTINUE;
+    }
     if (!PA_SINK_IS_LINKED(u->sink->thread_info.state))
         return AAUDIO_CALLBACK_RESULT_STOP;
 
@@ -246,6 +253,11 @@ static int sink_process_msg(pa_msgobject *o, int code, void *data, int64_t offse
         case PA_SINK_MESSAGE_GET_LATENCY:
             *((pa_usec_t *) data) = get_playback_latency(u);
             return 0;
+        case SINK_MESSAGE_DETACH_STREAM:
+            pa_log_debug("AAudio detaching stream in IO thread");
+            *((AAudioStream **) data) = u->stream;
+            u->stream = NULL;
+            return 0;
         case SINK_MESSAGE_RENDER:
             return process_render(u, data, offset);
         case SINK_MESSAGE_OPEN_STREAM:
@@ -261,11 +273,56 @@ static int sink_process_msg(pa_msgobject *o, int code, void *data, int64_t offse
     return pa_sink_process_msg(o, code, data, offset, memchunk);
 };
 
+/* AAudioStream_close() joins the callback thread. That callback synchronously
+ * waits for our IO thread, so closing from the IO thread can deadlock. Stop
+ * while IO can render, detach the handle there, then close from main while IO
+ * continues draining any late callbacks with silence. */
+static void close_stream_main(struct userdata *u) {
+    AAudioStream *stream = NULL;
+
+    /* Stop while rendering remains available. Closing a running legacy
+     * AudioTrack stream can hang or crash on Android 11. */
+    if (u->stream) {
+        aaudio_stream_state_t state = AAudioStream_getState(u->stream);
+        aaudio_result_t result = AAudioStream_requestStop(u->stream);
+        if (result == AAUDIO_OK) {
+            for (int i = 0; i < 10; i++) {
+                state = AAudioStream_getState(u->stream);
+                if (state != AAUDIO_STREAM_STATE_STOPPING)
+                    break;
+                AAudioStream_waitForStateChange(u->stream, state, &state, 100000000);
+            }
+        }
+        pa_log_debug("AAudio closing stream: stop result=%d state=%d", result, state);
+    }
+    pa_log_debug("AAudio closing stream: detach requested");
+    if (u->thread && u->sink)
+        pa_asyncmsgq_send(u->thread_mq.inq, PA_MSGOBJECT(u->sink),
+                         SINK_MESSAGE_DETACH_STREAM, &stream, 0, NULL);
+    else {
+        stream = u->stream;
+        u->stream = NULL;
+    }
+
+    pa_log_debug("AAudio closing stream: detach complete");
+    if (stream) {
+        if (u->no_close)
+            AAudioStream_requestStop(stream);
+        else
+            AAudioStream_close(stream);
+    }
+    pa_log_debug("AAudio closing stream: close complete");
+}
+
 static int state_func_main(pa_sink *s, pa_sink_state_t state, pa_suspend_cause_t suspend_cause) {
     struct userdata *u = s->userdata;
     uint32_t idx;
     pa_sink_input *i;
     pa_idxset *inputs;
+
+    if (PA_SINK_IS_OPENED(s->state) &&
+        (state == PA_SINK_SUSPENDED || state == PA_SINK_UNLINKED))
+        close_stream_main(u);
 
     if (s->state == PA_SINK_SUSPENDED && PA_SINK_IS_OPENED(state)) {
         if (pa_asyncmsgq_send(u->aaudio_msgq, PA_MSGOBJECT(u->sink), SINK_MESSAGE_OPEN_STREAM, NULL, 0, NULL) < 0)
@@ -297,23 +354,10 @@ static int state_func_main(pa_sink *s, pa_sink_state_t state, pa_suspend_cause_t
 static int state_func_io(pa_sink *s, pa_sink_state_t state, pa_suspend_cause_t suspend_cause) {
     struct userdata *u = s->userdata;
 
-    if (PA_SINK_IS_OPENED(s->thread_info.state) &&
-        (state == PA_SINK_SUSPENDED || state == PA_SINK_UNLINKED)) {
-        if (!u->no_close)
-            AAudioStream_close(u->stream);
-        else
-            AAudioStream_requestStop(u->stream);
-    } else if (s->thread_info.state == PA_SINK_SUSPENDED && PA_SINK_IS_OPENED(state)) {
+    if (PA_SINK_IS_OPENED(state) &&
+        (s->thread_info.state == PA_SINK_SUSPENDED || s->thread_info.state == PA_SINK_INIT)) {
         if (AAudioStream_requestStart(u->stream) < 0)
             pa_log("AAudioStream_requestStart() failed.");
-    } else if (s->thread_info.state == PA_SINK_INIT && PA_SINK_IS_LINKED(state)) {
-        if (PA_SINK_IS_OPENED(state)) {
-            if (AAudioStream_requestStart(u->stream) < 0)
-                pa_log("AAudioStream_requestStart() failed.");
-        } else {
-            if (!u->no_close)
-                AAudioStream_close(u->stream);
-        }
     }
     return 0;
 }
@@ -475,6 +519,8 @@ void pa__done(pa_module*m) {
 
     if (!(u = m->userdata))
         return;
+
+    close_stream_main(u);
 
     if (u->sink)
         pa_sink_unlink(u->sink);

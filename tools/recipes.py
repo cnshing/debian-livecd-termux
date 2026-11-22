@@ -43,8 +43,9 @@ EXACT_DEPENDENCIES = {'chromium'}
 # Overrides that change only how a package behaves, not the headers or libraries others build against:
 # mesa only adds locking inside its VirGL vtest client. Recipes that depend on one build against
 # Termux's own recipe of that name instead, so it gets a job of its own and Chromium's exact-version
-# build does not compile it.
-BEHAVIOUR_ONLY = {'mesa'}
+# build does not compile it. PulseAudio adds Android sink behavior without
+# changing the client ABI or headers consumed by the other recipes.
+BEHAVIOUR_ONLY = {'mesa', 'pulseaudio'}
 # Build-machine libraries that a recipe's own tools link when it is cross-compiled. They are installed
 # in the builder container before the build, since termux-packages refuses sudo inside a recipe.
 HOST_PACKAGES = {'lsp-plugins-lv2': ['libcairo2-dev', 'libsndfile1-dev'],

@@ -45,6 +45,76 @@ Local evidence: `temp/storage-dns/results.json`,
 `temp/storage-dns/discover.py`, and `temp/connectivity-storage-dns.txt`.
 Private server names, endpoints and raw network configuration remain local.
 
+## Chrome resolver failure reproduced (2026-11-21)
+
+The Note10+ still has a separate LAN DNS failure in Google Chrome's glibc
+environment. The earlier native resolver and SMB discovery checks did not fix
+this path. With Android Private DNS Off, Android's system `ping` and native
+Termux Python resolved a private `home.arpa` test name. Native Python fetched
+HTTP 200 using either the hostname or its address. The desktop session was
+stopped during these checks; the installed Chrome launcher was tested headless.
+
+Both `$PREFIX/etc/resolv.conf` and glibc's symlink to it still selected Google's
+public DNS servers. Direct queries to both public servers returned NXDOMAIN;
+the network-provided DNS server returned an A record. With preload and library
+environment variables removed, glibc `getent ahostsv4` exited 2. Chrome's NetLog
+recorded a DNS error and its headless stderr reported
+`net::ERR_NAME_NOT_RESOLVED`.
+
+Temporarily replacing only glibc's resolver symlink with a file selecting the
+current network's DNS server made `getent` exit 0 and Chrome's NetLog report the
+correct A record. The original symlink was restored after testing; the shared
+Termux resolver file and Android settings were unchanged. This establishes the
+DNS cause, but does not establish a successful Chrome page load: after DNS
+succeeded, headless Chrome reported `net::ERR_BLOCKED_BY_CLIENT`, which needs a
+separate browser investigation.
+
+The installer currently links resolver files; it does not synchronize glibc DNS
+with Android when networks change. The immediate configuration remedy is to use
+the current network's DNS server in glibc's resolver file, with its search domain
+when short names are needed. A durable fix must follow network changes or bridge
+glibc queries to Android's resolver. Hard-coding a private hostname, address, or
+router into the package would not provide that behavior. Avahi service discovery
+does not repair unicast `home.arpa` DNS.
+
+Raw Chrome logs and private test inputs are intentionally excluded from tracked
+documentation.
+
+Follow-up checks using the controller's software-renderer desktop environment
+also passed native Python resolution and a native `curl` HTTP request (200).
+Chromium's NetLog showed its system resolver returning the correct LAN address
+with the original DNS configuration untouched. A separate Firefox headless
+profile also used native DNS and obtained a cached record for the test name;
+that control disabled DNS-over-HTTPS explicitly. These checks narrow the
+reproduced DNS failure to Chrome's glibc path rather than a general desktop
+network failure. Chromium also reported `ERR_BLOCKED_BY_CLIENT` during page
+loading, independently of its successful hostname lookup.
+
+## Shared resolver fix verified (2026-11-21)
+
+The `bionilux` 0.5.0-3 recipe now supplies the Android NSS module described below.
+A local package was installed on the Note10+, retaining the installed unchanged
+Bionilux launcher/preloads and adding the newly cross-compiled NSS module and
+package configuration scripts. No browser launcher or application binary was
+changed. The shared Termux `resolv.conf` remains unchanged.
+
+With that package installed, glibc `getent` passed the private hostname, public
+IPv4/IPv6, localhost and reverse lookup checks; a nonexistent `.invalid` name
+correctly exited 2. Chrome's NetLog showed successful system resolver lookups
+for the private name. A fresh Chrome profile loaded the actual application via
+DevTools after disabling `HttpsFirstBalancedModeAutoEnable` for that headless
+test process only. This resolves the earlier page-load uncertainty: HTTPS-first
+handling of the HTTP navigation caused the headless `ERR_BLOCKED_BY_CLIENT`.
+No persistent browser security setting was changed. Native `curl` still returned
+HTTP 200.
+
+The host regression suite is `python3 tests/browsers/test-android-dns.py` (12
+tests): fragmented protocol replies, IPv4/IPv6, canonical names, scope IDs,
+reverse lookup, negative/transient errors, small/unaligned buffers, malformed
+replies, concurrent calls, configuration migration and removal. The packaging
+suite also passed. Live network/VPN switching was not exercised; each request
+uses network ID zero rather than saving a network ID or DNS server address.
+
 ## Why upstream omits these backends
 
 The [initial GVfs addition, PR #13972](https://github.com/termux/termux-packages/pull/13972)
@@ -105,11 +175,39 @@ encrypted DNS when supported. This can make local DNS records available when the
 network's server provides them. See Google's
 [Android Private DNS instructions](https://developers.google.com/speed/public-dns/docs/using#android).
 
-Applications that read `$PREFIX/etc/resolv.conf` directly need their own resolver
-configuration using the current network's DNS server and search domain. The
-[glibc Chrome setup](../../overlays/Browser+Chromium/browsers/install-chrome.py)
-uses this file separately from native Android applications. Review that
-configuration when switching networks.
+The shared glibc resolver integration in `bionilux` 0.5.0-3 installs
+`libnss_android.so.2` and selects `hosts: files android` in glibc's
+`nsswitch.conf`. It asks Android's existing `/dev/socket/dnsproxyd` service for
+hostname lookups using the calling UID's default network. It does not copy DNS
+server addresses, bind a local DNS port, start a daemon, or require app-specific
+preloads. Network selection, search domains, VPN routing, Private DNS and DNS
+caching remain with Android. A configured public Private DNS provider can still
+lack private LAN records, just as for native Android apps.
+
+Chrome checks NSS configuration and uses its system resolver when it encounters
+an unsupported service such as `android`; this is how the shared module can cover
+Chrome without adding hostname mappings or browser-specific DNS flags. The
+[AOSP service implementation](https://android.googlesource.com/platform/packages/modules/DnsResolver/+/refs/heads/android11-release/DnsProxyListener.cpp)
+and [Chromium NSS compatibility check](https://chromium.googlesource.com/chromium/src/+/HEAD/net/dns/dns_config_service_linux.cc)
+are the protocol and behavior references. The module currently relies on
+Android's internal socket protocol, so testing new Android versions remains
+necessary. It exports forward IPv4/IPv6 and reverse host lookup NSS entry points;
+it does not provide arbitrary DNS record queries.
+
+Package installation migrates only the standard `hosts: files dns` configuration,
+or creates it when absent. Other NSS configuration is preserved. To enable the
+module in a custom configuration, explicitly select the `android` hosts service.
+The setup helper is `$PREFIX/libexec/bionilux/configure-dns`; package removal
+restores the standard configuration to `hosts: files dns`. Restart running glibc
+applications after installation so cached resolver results are discarded.
+
+Programs that deliberately bypass libc/NSS and query the servers in
+`$PREFIX/etc/resolv.conf` directly still need their own network DNS configuration.
+That file remains unchanged. The distinction and the problems with copying
+`getprop net.dns1` are discussed in
+[Termux issue #1174](https://github.com/termux/termux-packages/issues/1174).
+The [glibc Chrome setup](../../overlays/Browser+Chromium/browsers/install-chrome.py)
+preserves the NSS configuration installed by the shared package.
 
 Support for transparent `.local` resolution depends on the installed Android
 resolver module. See AOSP's [mDNS resolution documentation](https://source.android.com/docs/core/ota/modular-system/dns-resolver#mdns-local-resolution).

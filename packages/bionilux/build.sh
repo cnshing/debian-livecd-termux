@@ -3,7 +3,7 @@ TERMUX_PKG_DESCRIPTION="Runs glibc programs, such as Google Chrome, directly on 
 TERMUX_PKG_LICENSE="MIT"
 TERMUX_PKG_MAINTAINER="@cnshing"
 TERMUX_PKG_VERSION="0.5.0"
-TERMUX_PKG_REVISION=2
+TERMUX_PKG_REVISION=3
 TERMUX_PKG_SRCURL=https://codeload.github.com/theonuverse/bionilux/tar.gz/4152b476db31ffa8e2bb50b060292a59e15d0031
 TERMUX_PKG_SHA256=aed1a206f8c74d0c375dfc91cde5ed4e6c43659fbbda944a5eb4538114598480
 TERMUX_PKG_BUILD_IN_SRC=true
@@ -16,7 +16,7 @@ TERMUX_PKG_UNDEF_SYMBOLS_FILES="all"
 
 termux_step_configure() {
 	termux_setup_rust
-	# glibc's headers and C library, only to compile and link the two glibc preloads.
+	# glibc's headers and C library for the compatibility libraries and NSS module.
 	mkdir -p sysroot
 	local package url sha snapshot archive
 	while read -r package url sha snapshot; do
@@ -38,10 +38,28 @@ termux_step_make() {
 		-o libbionilux_preload.so
 	$CC --target=aarch64-linux-gnu --sysroot="$PWD/sysroot" -fuse-ld=lld -shared -fPIC -O2 -nostdlib \
 		-Wall -Wextra -Werror "$TERMUX_PKG_BUILDER_DIR/bionilux-fortify.c" -o libbionilux-fortify.so
+	$CC --target=aarch64-linux-gnu --sysroot="$PWD/sysroot" -fuse-ld=lld -shared -fPIC -O2 -nostdlib \
+		-Wall -Wextra -Werror "$TERMUX_PKG_BUILDER_DIR/nss-android.c" "$libraries/libc.so.6" \
+		-Wl,-soname,libnss_android.so.2 -Wl,-rpath,"$glibc/lib" -o libnss_android.so.2
 }
 
 termux_step_make_install() {
 	install -Dm755 "target/$CARGO_TARGET_NAME/release/bionilux" "$TERMUX_PREFIX/bin/bionilux"
 	# Bionilux looks for its preload in glibc's library directory.
-	install -Dm755 -t "$TERMUX_PREFIX/glibc/lib" libbionilux_preload.so libbionilux-fortify.so
+	install -Dm755 -t "$TERMUX_PREFIX/glibc/lib" libbionilux_preload.so libbionilux-fortify.so libnss_android.so.2
+	install -Dm755 "$TERMUX_PKG_BUILDER_DIR/configure-dns" "$TERMUX_PREFIX/libexec/bionilux/configure-dns"
+}
+
+termux_step_create_debscripts() {
+	cat > postinst <<-EOF
+		#!$TERMUX_PREFIX/bin/sh
+		set -e
+		$TERMUX_PREFIX/libexec/bionilux/configure-dns
+	EOF
+	cat > prerm <<-EOF
+		#!$TERMUX_PREFIX/bin/sh
+		if [ "\$1" = remove ]; then
+		    $TERMUX_PREFIX/libexec/bionilux/configure-dns --remove
+		fi
+	EOF
 }

@@ -1,0 +1,36 @@
+#!/data/data/com.termux/files/usr/bin/sh
+# Enable the shared NSS resolver only for the default configuration we own.
+set -eu
+prefix=${PREFIX:-/data/data/com.termux/files/usr}
+etc=$prefix/glibc/etc
+mode=${1:-enable}
+case $mode in enable|--remove) ;; *) exit 2 ;; esac
+if [ "$mode" = --remove ] && [ ! -e "$etc/nsswitch.conf" ]; then exit 0; fi
+mkdir -p "$etc"
+file=$etc/nsswitch.conf
+if [ ! -e "$file" ]; then
+    printf 'hosts: files android\n' > "$file"
+    exit 0
+fi
+if ! awk '
+    /^[[:space:]]*hosts[[:space:]]*:/ {
+        line = $0
+        sub(/#.*/, "", line)
+        gsub(/^[[:space:]]+|[[:space:]]+$/, "", line)
+        if (line !~ /^hosts[[:space:]]*:[[:space:]]*files[[:space:]]+(dns|android)$/) exit 1
+    }
+' "$file"; then
+    printf '%s\n' 'bionilux: keeping custom nsswitch.conf; add android to hosts to use Android DNS' >&2
+    exit 0
+fi
+replacement=$(mktemp "$etc/.nsswitch.XXXXXX")
+trap 'rm -f "$replacement"' EXIT HUP INT TERM
+service=android
+if [ "$mode" = --remove ]; then service=dns; fi
+awk -v service="$service" '
+    /^[[:space:]]*hosts[[:space:]]*:/ { print "hosts: files " service; found=1; next }
+    { print }
+    END { if (!found) print "hosts: files " service }
+' "$file" > "$replacement"
+# Write through a user-supplied symlink rather than replacing the link itself.
+cat "$replacement" > "$file"

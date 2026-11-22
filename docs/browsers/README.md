@@ -196,10 +196,11 @@ Chrome's "unsupported command-line flag: --no-sandbox" banner is accurate, and i
 
 Two smaller points:
 
-- **DNS:** Chrome uses Termux's `resolv.conf`, which by default names Google's public servers
-  (`8.8.8.8`, `8.8.4.4`), and not your network's or Android's Private DNS. Edit that file to
-  change it, though it also affects other programs that read it. Firefox and Chromium use
-  Bionic's resolver, which follows Android's network settings.
+- **DNS:** `bionilux` 0.5.0-3 adds a shared Android NSS resolver for glibc apps.
+  With the standard configuration, Chrome uses Android's DNS service, as native
+  Firefox and Chromium do. Older installations still use Termux's `resolv.conf`,
+  which defaults to public DNS and cannot resolve private LAN records. Custom NSS
+  configurations are preserved. See [resolver setup and limitations](../native/LAN-HOSTNAMES.md#configure-for-the-current-network).
 - **Google's terms:** Chrome is downloaded from Google on your phone. Don't redistribute that
   directory or the `.deb`.
 

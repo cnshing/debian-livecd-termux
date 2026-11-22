@@ -101,10 +101,12 @@ Android baseline, verified defaults and remaining gaps.
 Chrome is downloaded from Google during installation, because its license does not allow this
 project to redistribute it.
 
-The desktop's Android integrations start with it: the phone microphone, or a connected Bluetooth
-headset (pair it in Android with **Calls** enabled), EasyEffects, GSConnect, whole-device CPU and
-process readings for Mission Center, battery status, and internal storage, SD card and USB drives
-in Files. See [session integrations](docs/native/README.md#session-integrations) to switch one off.
+The desktop's Android integrations start with it: a connected Bluetooth headset microphone
+(or the phone microphone), EasyEffects, GSConnect, whole-device CPU and process readings for
+Mission Center, battery status, and internal storage, SD card and USB drives in Files.
+Bluetooth call routing activates only while an application records from the headset mic;
+idle playback uses Android's media route. See
+[session integrations](docs/native/README.md#session-integrations) to configure the startup hooks.
 
 Samsung Android 11 ARM64 devices also receive
 [`android-legacy-dex-fullscreen`](packages/android-legacy-dex-fullscreen/README.md),

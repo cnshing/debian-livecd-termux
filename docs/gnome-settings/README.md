@@ -187,10 +187,13 @@ hardware itself. The existing Microphone overlay supplies `android-pulseaudio-mi
 `android_no_microphone` is an intentional silent fallback, not the phone's microphone.
 
 The current desktop controller starts installed microphone integrations in normal
-sessions: it tries any Android-reported Bluetooth call headset, then falls back
-to the phone microphone. Both hooks can be disabled in the integration settings.
+sessions: it publishes a connected headset microphone in on-demand mode, falling
+back to the phone microphone if discovery fails. Both hooks can be disabled in
+the integration settings. The Bluetooth mic remains visible while idle; opening
+an uncorked recording stream requests SCO, and closing or corking the last stream
+releases it and restores media playback. A Sound input level meter counts as recording.
 Older manually staged desktop controllers lack this startup integration. Discovery
-runs at desktop startup or when `android-pulseaudio-bluetooth on --default` is invoked;
+runs at startup or when `android-pulseaudio-bluetooth auto --default` is invoked;
 there is no continuous headset-connect/reconnect watcher. Pair and enable Calls in
 Android. The bridge has no WI-C310-specific device filter. See
 [the microphone guide](../mic/README.md) for permission and Shizuku requirements.

@@ -109,11 +109,10 @@ class Integrations:
             self.report('microphone', 'unavailable', str(error))
 
     def bluetooth_on(self):
-        # Android can still be tearing down a previous session's call audio, which makes
-        # OpenSL refuse a new engine (error 12) for a few seconds.
+        # Allow Android's headset discovery to settle after a previous session.
         for attempt in range(3):
             try:
-                return self.command('android-pulseaudio-bluetooth', 'on', '--default', timeout=55)
+                return self.command('android-pulseaudio-bluetooth', 'auto', '--default', timeout=55)
             except RuntimeError:
                 if attempt == 2 or self.stopping.wait(5):
                     raise

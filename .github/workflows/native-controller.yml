@@ -24,6 +24,7 @@ jobs:
         python3 tests/native/test-graphics.py
         python3 tests/native/test-terminal-environment.py
         python3 tests/native/test-desktop-status.py
+        python3 tests/native/test-integrations.py
         python3 tests/packaging/test-packaging.py
         python3 tests/packaging/test-mali-acceleration.py
     - name: Read the shared builder pin

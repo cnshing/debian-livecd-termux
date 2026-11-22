@@ -132,15 +132,19 @@ through their existing commands after GNOME is ready:
 
 | Integration | Startup action |
 | --- | --- |
-| Microphone / Bluetooth | Try `android-pulseaudio-bluetooth on --default`; if unavailable, use `android-pulseaudio-mic on` |
+| Microphone / Bluetooth | `android-pulseaudio-bluetooth auto --default`; fall back to `android-pulseaudio-mic on` if no headset is available |
 | EasyEffects | `easyeffects-bridge start` against the desktop's PulseAudio socket |
 | GSConnect | `gsconnect start` on its existing private bus |
 | Whole-device resources | `android-procfs-setup` stages the existing Shizuku reader; clients activate it on demand |
 
 The packages, Android microphone permission and Shizuku authorization must already
-be installed/configured. Connect the headset in Android with **Calls** enabled
-before startup. Bluetooth is tried up to three times, five seconds apart, while Android
-releases a previous session's call audio; reconnecting later uses the existing manual commands. An already enabled microphone is preserved.
+be installed/configured. Pair and connect the headset in Android with **Calls** enabled
+before startup. Bluetooth discovery is tried up to three times, five seconds apart.
+The microphone stays enumerated while idle without opening Android capture or SCO.
+An application recording from it activates the call route and temporary voice output;
+the last recorder closing or corking releases them and restores media playback.
+A level meter counts as recording. Muting an application that keeps recording does
+not release the route. An already enabled microphone is preserved.
 GSConnect starts listening on the LAN, using its existing pairing settings.
 EasyEffects keeps its existing behavior: use `easyeffects-bridge exec -- APPLICATION`
 to send an application through the graph. Starting it does not redirect all applications.
@@ -163,6 +167,9 @@ Installed integrations start by default. To disable individual hooks, create
 ```
 
 Supported keys are `microphone`, `bluetooth`, `audio`, `gsconnect`, and `resources`.
+The `bluetooth` hook uses on-demand capture automatically, preserving the normal
+playback default while idle. Later headset connections use the manual `auto` command
+in the [microphone guide](../mic/README.md); there is no pairing/reconnect watcher.
 Disabling `microphone` also disables Bluetooth microphone startup; disabling only
 `bluetooth` leaves ordinary microphone startup enabled. The `resources` key
 controls reader staging; `ANDROID_PROCFS_COMPAT=0` still controls the existing

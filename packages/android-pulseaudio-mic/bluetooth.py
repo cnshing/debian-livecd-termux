@@ -30,6 +30,7 @@ OUTPUT = "android_bluetooth_output"
 SILENCE = "android_no_microphone"
 CONTROL = PREFIX / "tmp/android-pulseaudio-bluetooth.sock"
 PLAYER = PREFIX / "libexec/android-pulseaudio-bluetooth/sco-output"
+CAPTURE = "android_bluetooth_capture"
 
 
 class RouteError(RuntimeError):
@@ -172,7 +173,7 @@ def pulse(*arguments):
 class PulseDevices:
     """Owned PulseAudio endpoints backed by Android input and a native voice player."""
 
-    def __init__(self, name, make_default=False):
+    def __init__(self, name, make_default=False, input_name=INPUT):
         self.name = name
         self.make_default = make_default
         self.modules = []
@@ -180,6 +181,7 @@ class PulseDevices:
         self.directory = None
         self.log = tempfile.TemporaryFile()
         self.defaults = {}
+        self.input_name = input_name
 
     def __enter__(self):
         try:
@@ -197,7 +199,7 @@ class PulseDevices:
 
     def start(self):
         self.defaults = {kind: pulse(f"get-default-{kind}") for kind in ("source", "sink")}
-        for kind, name in (("sources", INPUT), ("sinks", OUTPUT)):
+        for kind, name in (("sources", self.input_name), ("sinks", OUTPUT)):
             if any(line.split("\t")[1] == name for line in pulse("list", "short", kind).splitlines()):
                 raise RouteError("Bluetooth PulseAudio devices already exist; stop their controller first.")
         modules = pulse("list", "short", "modules")
@@ -231,15 +233,15 @@ class PulseDevices:
         self.load("module-pipe-sink", f"sink_name={OUTPUT}", f"file={fifo}",
                 "format=s16le", "rate=16000", "channels=1", "channel_map=mono",
                 "sink_properties=" + properties(" Headphones"))
-        self.load("module-sles-source", f"source_name={INPUT}",
+        self.load("module-sles-source", f"source_name={self.input_name}",
                 "format=s16le", "rate=48000", "channels=1", "latency=20",
                 "source_properties=" + properties(" Microphone"))
         # Publishing endpoints must not switch unrelated applications unless requested.
-        for kind, name in (("source", INPUT), ("sink", OUTPUT)):
+        for kind, name in (("source", self.input_name), ("sink", OUTPUT)):
             pulse(f"set-default-{kind}", name if self.make_default else self.defaults[kind])
 
     def close(self):
-        for kind, name in (("source", INPUT), ("sink", OUTPUT)):
+        for kind, name in (("source", self.input_name), ("sink", OUTPUT)):
             if kind not in self.defaults:
                 continue
             try:
@@ -277,6 +279,270 @@ class PulseDevices:
         self.close()
 
 
+def pulse_objects(kind):
+    return json.loads(pulse("--format=json", "list", kind))
+
+
+class AutoInput:
+    """A stable source with no Android recorder until an uncorked client uses it."""
+
+    def __init__(self, name, make_default):
+        self.name = name
+        self.make_default = make_default
+        self.module = None
+        self.directory = None
+        self.fd = None
+        self.previous = None
+
+    def __enter__(self):
+        try:
+            self.previous = pulse("get-default-source")
+            if any(source["name"] in (INPUT, CAPTURE) for source in pulse_objects("sources")):
+                raise RouteError("Bluetooth sources already exist; stop their controller first.")
+            self.directory = tempfile.TemporaryDirectory(prefix="livecd-bt-", dir=PREFIX / "tmp")
+            self.fifo = Path(self.directory.name) / "input.pcm"
+            label = json.dumps(self.name.replace("\n", " ").replace("\r", " ") + " Microphone",
+                               ensure_ascii=False)
+            properties = "device.description=" + label + " device.icon_name=audio-headset device.class=sound"
+            self.module = pulse("load-module", "module-pipe-source", f"source_name={INPUT}",
+                    f"file={self.fifo}", "format=s16le", "rate=48000", "channels=1",
+                    "source_properties='" + properties.replace("'", "\\'") + "'")
+            # Unlike pipe-sink, pipe-source creates its FIFO and rejects an existing one.
+            os.chmod(self.fifo, 0o600)
+            self.fd = os.open(self.fifo, os.O_RDWR | os.O_NONBLOCK | os.O_CLOEXEC)
+            self.index = next(source["index"] for source in pulse_objects("sources")
+                              if source["name"] == INPUT)
+            # module-default-device-restore may have selected the new source already.
+            pulse("set-default-source", INPUT if self.make_default else self.previous)
+            return self
+        except BaseException:
+            self.close()
+            raise
+
+    def requested(self):
+        return any(str(output["source"]) == str(self.index) and not output.get("corked", False)
+                   for output in pulse_objects("source-outputs"))
+
+    def drain(self):
+        # Discard queued samples between calls, including when the last client corks.
+        while True:
+            try:
+                if not os.read(self.fd, 65536):
+                    break
+            except BlockingIOError:
+                break
+
+    def close(self):
+        with contextlib.ExitStack() as cleanup:
+            if self.directory is not None:
+                cleanup.callback(self.directory.cleanup)
+                self.directory = None
+            if self.fd is not None:
+                cleanup.callback(os.close, self.fd)
+                self.fd = None
+            if self.module is not None:
+                cleanup.callback(pulse, "unload-module", self.module)
+                self.module = None
+                if pulse("get-default-source") == INPUT:
+                    existing = {source["name"] for source in pulse_objects("sources")}
+                    target = self.previous
+                    if target not in existing or target.endswith(".monitor"):
+                        target = SILENCE
+                    if target in existing:
+                        pulse("set-default-source", target)
+
+    def __exit__(self, *ignored):
+        self.close()
+
+
+class PlaybackRoute:
+    """Use voice output during capture, then return surviving streams to media."""
+
+    def __init__(self):
+        self.previous = None
+        self.moved = {}
+
+    def __enter__(self):
+        try:
+            previous = pulse("get-default-sink")
+            sinks = {sink["name"]: sink["index"] for sink in pulse_objects("sinks")}
+            self.previous_index = sinks[previous]
+            self.voice_index = sinks[OUTPUT]
+            self.previous = previous
+            pulse("set-default-sink", OUTPUT)
+            for stream in pulse_objects("sink-inputs"):
+                if stream["sink"] == self.previous_index:
+                    try:
+                        pulse("move-sink-input", str(stream["index"]), OUTPUT)
+                        self.moved[stream["index"]] = self.previous
+                    except RouteError:
+                        # A stream may disappear between listing and moving it.
+                        pass
+            return self
+        except BaseException:
+            self.close()
+            raise
+
+    def close(self):
+        if self.previous is None:
+            return
+        sinks = {sink["name"] for sink in pulse_objects("sinks")}
+        current = pulse("get-default-sink")
+        target = self.previous if current == OUTPUT else current
+        if target in sinks and target != OUTPUT:
+            if current == OUTPUT:
+                pulse("set-default-sink", target)
+            for stream in pulse_objects("sink-inputs"):
+                if stream["sink"] == self.voice_index:
+                    try:
+                        pulse("move-sink-input", str(stream["index"]),
+                              self.moved.get(stream["index"], target))
+                    except RouteError:
+                        pass
+
+    def __exit__(self, *ignored):
+        self.close()
+
+
+def stop_process(process):
+    if process.poll() is None:
+        process.terminate()
+        try:
+            process.wait(timeout=3)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait()
+
+
+class AutoCall:
+    """Acquire the route before opening native capture; release it after capture closes."""
+
+    def __init__(self, source, device_id):
+        self.source = source
+        self.device_id = device_id
+        self.stack = contextlib.ExitStack()
+
+    def __enter__(self):
+        try:
+            self.bridge = self.stack.enter_context(Bridge())
+            self.bridge.send("enable", device_id=self.device_id)
+            self.state = self.bridge.receive()
+            if self.state["event"] != "ready":
+                raise RouteError("Android did not confirm the requested Bluetooth route.")
+            if not self.source.requested():
+                raise RouteError("Recording ended before the Bluetooth route was ready.")
+            devices = self.stack.enter_context(PulseDevices(self.source.name, input_name=CAPTURE))
+            self.player = devices.player
+            self.stack.enter_context(PlaybackRoute())
+            with self.source.fifo.open("wb", buffering=0) as fifo:
+                self.reader = subprocess.Popen(["parec", f"--device={CAPTURE}", "--raw",
+                    "--format=s16le", "--rate=48000", "--channels=1", "--latency-msec=20"],
+                    stdin=subprocess.DEVNULL, stdout=fifo, stderr=devices.log)
+            self.stack.callback(stop_process, self.reader)
+            return self
+        except BaseException:
+            self.close()
+            raise
+
+    def check(self):
+        if self.reader.poll() is not None or self.player.poll() is not None:
+            raise RouteError("Native Bluetooth audio stopped.")
+        if self.bridge.buffer or select.select([self.bridge.connection], [], [], 0)[0]:
+            self.bridge.receive()
+
+    def close(self):
+        try:
+            self.stack.close()
+        finally:
+            self.source.drain()
+
+    def __exit__(self, *ignored):
+        self.close()
+
+
+def auto_session(device_id, make_default, server):
+    if microphone("status")["microphone"] != "off":
+        raise RouteError("Run android-pulseaudio-mic off before starting a Bluetooth session.")
+    # Discovery never enables SCO, opens a recorder, or creates a voice player.
+    with Bridge() as discovery:
+        discovery.send("devices")
+        status = discovery.receive()
+    candidates = [device for device in status["bluetooth_devices"]
+                  if not device_id or device["id"] == device_id]
+    if len(candidates) != 1:
+        raise RouteError("Connect exactly one Bluetooth call headset, or select one with --device ID.")
+    selected = candidates[0]
+    with AutoInput(selected["name"], make_default) as source:
+        server.state = dict(active=True, starting=False, mode="auto", route_active=False,
+                            selected_device=selected, input=INPUT, output=None,
+                            default=make_default, controller_pid=os.getpid())
+        print(json.dumps(server.state), flush=True)
+        # Subscribe before the initial usage check so clients cannot be missed.
+        events = subprocess.Popen(["pactl", "subscribe"], stdin=subprocess.DEVNULL,
+                                  stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                                  env=dict(os.environ, LC_ALL="C"))
+        session = None
+        retry_at = 0
+        event_buffer = b""
+        try:
+            wanted = source.requested()
+            next_check = time.monotonic() + 2
+            while True:
+                if events.poll() is not None:
+                    raise RouteError("PulseAudio event subscription stopped.")
+                if time.monotonic() >= next_check:
+                    # Also cover clients created before pactl finishes subscribing.
+                    wanted = source.requested()
+                    next_check = time.monotonic() + 2
+                try:
+                    if session is not None:
+                        if wanted:
+                            session.check()
+                        else:
+                            session.close()
+                            session = None
+                            server.state.update(route_active=False, output=None)
+                    if wanted and session is None and time.monotonic() >= retry_at:
+                        wanted = source.requested()
+                        if wanted:
+                            session = AutoCall(source, device_id).__enter__()
+                            server.state.update(route_active=True, output=OUTPUT)
+                            server.state.pop("route_error", None)
+                    if not wanted:
+                        retry_at = 0
+                except (RouteError, OSError, ValueError, subprocess.SubprocessError) as error:
+                    if session is not None:
+                        session.close()
+                        session = None
+                    server.state.update(route_active=False, output=None, route_error=str(error))
+                    print(f"Bluetooth capture: {error}", file=sys.stderr, flush=True)
+                    retry_at = time.monotonic() + 5
+                watched = [server.socket, events.stdout]
+                if session is not None:
+                    watched.append(session.bridge.connection)
+                timeout = max(0, retry_at - time.monotonic()) if wanted and session is None else None
+                if session is not None:
+                    timeout = 0.25
+                timeout = min(timeout, 2) if timeout is not None else 2
+                readable = select.select(watched, [], [], timeout)[0]
+                if server.socket in readable and server.handle():
+                    return 0
+                if events.stdout in readable:
+                    event_buffer += os.read(events.stdout.fileno(), 65536)
+                    lines = event_buffer.split(b"\n")
+                    event_buffer = lines.pop()
+                    # Ignore client events from our own pactl queries.
+                    if any(b" on source-output #" in line for line in lines):
+                        wanted = source.requested()
+        finally:
+            try:
+                if session is not None:
+                    session.close()
+            finally:
+                stop_process(events)
+                events.stdout.close()
+
+
 class ControlServer:
     def __init__(self):
         self.socket = None
@@ -299,7 +565,8 @@ class ControlServer:
                 stop = request.get("command") == "off"
                 if request.get("command") == "defaults" and self.state.get("active"):
                     pulse("set-default-source", INPUT)
-                    pulse("set-default-sink", OUTPUT)
+                    if self.state.get("mode") != "auto":
+                        pulse("set-default-sink", OUTPUT)
                     self.state["default"] = True
                 connection.sendall((json.dumps(dict(self.state, stopping=stop)) + "\n").encode())
                 return stop
@@ -334,9 +601,11 @@ def control(command):
         return result
 
 
-def enable_background(device_id, make_default):
+def enable_background(device_id, make_default, automatic=False):
     state = control("status")
     if state.get("active"):
+        if (state.get("mode") == "auto") != automatic:
+            raise RouteError("A different Bluetooth mode is active; run android-pulseaudio-bluetooth off first.")
         if device_id and state.get("selected_device", {}).get("id") != device_id:
             raise RouteError("A different headset is active; run android-pulseaudio-bluetooth off first.")
         return control("defaults") if make_default else state
@@ -346,6 +615,8 @@ def enable_background(device_id, make_default):
         arguments = [sys.executable, "-I", str(Path(__file__).resolve()), "_serve", "--device", str(device_id)]
         if make_default:
             arguments.append("--default")
+        if automatic:
+            arguments.append("--auto")
         process = subprocess.Popen(arguments, stdin=subprocess.DEVNULL, stdout=log, stderr=log,
                 start_new_session=True)
     try:
@@ -388,10 +659,11 @@ def disable_background():
             fields = line.split("\t")
             if len(fields) < 3:
                 continue
-            if ((fields[1] == "module-sles-source" and f"source_name={INPUT}" in fields[2].split())
+            if ((fields[1] in ("module-sles-source", "module-pipe-source")
+                 and any(f"source_name={name}" in fields[2].split() for name in (INPUT, CAPTURE)))
                     or (fields[1] == "module-pipe-sink" and f"sink_name={OUTPUT}" in fields[2].split())):
                 modules.append(fields[0])
-                if fields[1] == "module-pipe-sink":
+                if fields[1] in ("module-pipe-sink", "module-pipe-source"):
                     for argument in fields[2].split():
                         if argument.startswith("file="):
                             path = Path(argument[5:])
@@ -431,7 +703,7 @@ def call_session(bridge, device_id, application, make_default=True, server=None)
         if message["event"] != "ready":
             raise RouteError("Android did not confirm the requested Bluetooth route.")
         with PulseDevices(message.get("selected_device", {}).get("name", "Android Bluetooth"), make_default) as devices:
-            message.update(active=True, starting=False, input=INPUT, output=OUTPUT,
+            message.update(active=True, starting=False, mode="call", route_active=True, input=INPUT, output=OUTPUT,
                     default=make_default, controller_pid=os.getpid())
             if server is not None:
                 server.state = message
@@ -473,6 +745,9 @@ def main():
     on = commands.add_parser("on", help="publish headset output and microphone for Linux applications")
     on.add_argument("--device", type=int, default=0, metavar="ID")
     on.add_argument("--default", action="store_true", help="also make the headset the desktop default")
+    automatic = commands.add_parser("auto", help="publish the microphone and use call audio only while recording")
+    automatic.add_argument("--device", type=int, default=0, metavar="ID")
+    automatic.add_argument("--default", action="store_true", help="make the microphone the default; keep media output")
     call = commands.add_parser("call", help="hold a Bluetooth route and enable the microphone until Ctrl-C")
     call.add_argument("--device", type=int, default=0, metavar="ID", help="device ID from devices")
     call.add_argument("application", nargs=argparse.REMAINDER, help="optional -- COMMAND ARGS")
@@ -480,6 +755,7 @@ def main():
         internal = argparse.ArgumentParser()
         internal.add_argument("--device", type=int, default=0)
         internal.add_argument("--default", action="store_true")
+        internal.add_argument("--auto", action="store_true")
         args = internal.parse_args(sys.argv[2:])
         args.command = "_serve"
     else:
@@ -498,21 +774,24 @@ def main():
         if args.command == "off":
             print(json.dumps(disable_background()))
             return 0
-        if args.command == "on":
-            print(json.dumps(enable_background(args.device, args.default)))
+        if args.command in ("on", "auto"):
+            print(json.dumps(enable_background(args.device, args.default, args.command == "auto")))
             return 0
         lock = session_lock() if args.command != "devices" else contextlib.nullcontext()
         server_context = ControlServer() if args.command != "devices" else contextlib.nullcontext()
-        with lock, server_context as server, Bridge() as bridge:
-            if args.command == "devices":
-                bridge.send("devices")
-                print(json.dumps(bridge.receive()))
-                return 0
-            application = args.application if args.command == "call" else []
-            if application and application[0] == "--":
-                application = application[1:]
-            make_default = args.default if args.command == "_serve" else True
-            return call_session(bridge, args.device, application, make_default, server)
+        with lock, server_context as server:
+            if args.command == "_serve" and args.auto:
+                return auto_session(args.device, args.default, server)
+            with Bridge() as bridge:
+                if args.command == "devices":
+                    bridge.send("devices")
+                    print(json.dumps(bridge.receive()))
+                    return 0
+                application = args.application if args.command == "call" else []
+                if application and application[0] == "--":
+                    application = application[1:]
+                make_default = args.default if args.command == "_serve" else True
+                return call_session(bridge, args.device, application, make_default, server)
     except KeyboardInterrupt:
         return 130
     except (RouteError, OSError, ValueError, subprocess.SubprocessError) as error:

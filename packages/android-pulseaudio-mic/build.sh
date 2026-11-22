@@ -3,7 +3,7 @@ TERMUX_PKG_DESCRIPTION="Android microphone as a native PulseAudio source"
 TERMUX_PKG_LICENSE="MIT"
 TERMUX_PKG_MAINTAINER="@cnshing"
 TERMUX_PKG_VERSION="0.1.0"
-TERMUX_PKG_REVISION=4
+TERMUX_PKG_REVISION=5
 TERMUX_PKG_SKIP_SRC_EXTRACT=true
 TERMUX_PKG_DEPENDS="pulseaudio, python"
 # Renamed from livecd-mic, which held both commands.

@@ -107,6 +107,11 @@ jobs:
       run: python3 tests/audio/test-verify-signal.py
     - name: Test Bluetooth microphone session cleanup
       run: python3 tests/mic/test-bluetooth.py
+    - name: Test on-demand Bluetooth with an isolated PulseAudio server
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y pulseaudio pulseaudio-utils
+        python3 tests/mic/test-auto-bluetooth.py
     - name: Test packaging and profile integration
       run: python3 tests/packaging/test-packaging.py
     - name: Test packaged browser extensions

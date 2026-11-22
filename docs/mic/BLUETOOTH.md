@@ -1,5 +1,62 @@
 # Android-managed Bluetooth devices for Linux applications
 
+## On-demand microphone
+
+The desktop now uses `android-pulseaudio-bluetooth auto --default`. A persistent
+`module-pipe-source` publishes `android_bluetooth_input` without an Android recorder
+or a voice player. The controller observes PulseAudio source-output events and counts
+only uncorked recording streams attached to that source. Other sources and output-only
+playback do not request SCO. A two-second reconciliation check also covers subscription
+startup races; normal recording events trigger an immediate usage check.
+
+On first use, a fresh Shizuku helper establishes the call route. Only after Android
+confirms readiness does the controller load the native recorder and voice player,
+then forward capture through `parec` into the persistent source's private FIFO.
+The temporary native source is `android_bluetooth_capture`; applications should use
+`android_bluetooth_input`. Playback streams using the current default output move to
+the voice output during capture. Closing or corking the last recorder closes capture,
+restores playback/defaults, unloads native endpoints and releases the helper's route.
+The public input stays enumerated. User changes to defaults or individual output
+routes are preserved. Failed route acquisition leaves the input available without
+opening the phone recorder, reports `route_error`, and retries at five-second intervals
+only while recording is requested. Route loss closes capture and returns to that state.
+
+The existing `on` and `call` commands retain explicit held-call behavior. `auto --default`
+changes only the default input; `on --default` selects both voice endpoints. Stop one
+mode with `off` before starting the other. Discovery still needs an Android-connected
+headset with Calls enabled; no pairing/connect watcher was added. A level meter is a
+recorder, and applications that merely mute while continuing capture retain SCO.
+
+The [upstream pipe-source implementation](https://github.com/pulseaudio/pulseaudio/blob/master/src/modules/module-pipe-source.c)
+creates its own FIFO and posts PCM only while its source runs; it does not open hardware.
+The FIFO lives inside a private Termux directory, and no PCM crosses Shizuku.
+
+Host acceptance uses a real isolated PulseAudio server and simulated Android routing:
+`python3 tests/mic/test-auto-bluetooth.py` covers idle enumeration, multiple recorders,
+cork/resume, playback stream/default restoration, failed activation, route loss and
+capture-before-route cleanup. Held-call lifecycle tests remain in `test-bluetooth.py`.
+Phone acceptance is `python tests/mic/test-bluetooth-auto-device.py` with both existing
+microphone controllers off; it requires `cork-recorder.py` alongside it and discards PCM.
+
+On 2026-11-21 the updated controller scripts passed this acceptance on the Note10+ /
+Android 11 with the WI-C310. The input remained enumerated with SCO off while idle
+and initially corked. Two uncork/cork cycles delivered 456,960 cumulative PCM bytes
+to the probe, discarded immediately; both cycles activated then released SCO.
+A surviving playback stream moved to `android_bluetooth_output` during capture
+and returned to its original media sink afterward. Two simultaneous recorders kept
+SCO active until the last recorder stopped. Explicit `off` restored both original
+defaults. These checks passed using the installed command as well as the staged
+script. Automatic mode was then left enabled, with SCO off and the media sink still
+default, without restarting the desktop. The desktop startup hook was updated for
+the next session; the test SSH key was removed. No APK, DEX or native player rebuild
+was needed. Package recipes carry the changes for subsequent builds.
+
+Five isolated-server tests, thirteen held-call lifecycle tests, seven desktop startup
+tests and fifteen packaging checks passed on the host. Android route/sink assertions
+and sample delivery were checked; no new acoustic-quality or real-call acceptance
+is claimed.
+The historical results below describe the held-call bridge.
+
 ## Result
 
 The Note10+ / Android 11 rig captured and played audio through a connected

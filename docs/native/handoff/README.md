@@ -29,6 +29,7 @@ Two phones were used:
 | Note10+ Chrome typing: last character missing or caret rewinds | reproduced; stale DRI3 present in glibc Turnip, fixed in android-vaapi-glibc 14, installed and verified | not tested | n/a | [note10-chrome-typing.md](note10-chrome-typing.md) |
 | Note10+ flickering black or see-through rectangles (Chrome, video) | user report 2026-11-18, not reproduced | not tested | n/a | [note10-gpu-rectangles.md](note10-gpu-rectangles.md) |
 | S20 PanVK presentation over raw DRI3 instead of MIT-SHM readback | n/a | not started; needs a present fence wait first | no (software path) | [s20-panvk-raw-dri3.md](s20-panvk-raw-dri3.md) |
+| mpv playback timing and temporary AAudio output | PulseAudio timing drops reproduced; direct AAudio passes H.264 and HEVC (2026-11-21) | not tested | temporary mpv default; restore PulseAudio after repair | [mpv-audio-timing.md](mpv-audio-timing.md) |
 | Native decode: mpv, FFmpeg, GStreamer | mpv passes VP9, H.264, HEVC | mpv passes on its GLES route | mpv yes; VA-API clients see decoders | [decode-native.md](decode-native.md) |
 | Native encode: FFmpeg, GStreamer, Serein | passes | passes in private tests; fresh-install blockers fixed on main, not rechecked | yes where `android-vaapi` is installed | [encode-native.md](encode-native.md) |
 | Chromium encode | WebRTC and WebCodecs H.264 pass on hardware (2026-11-16); no VP9 encoder | WebRTC and WebCodecs (H.264, VP9) pass on hardware with revision 3; rerun from CI 43676101303 on 2026-11-15 | yes, revision 3+ on both | [encode-chromium.md](encode-chromium.md) |

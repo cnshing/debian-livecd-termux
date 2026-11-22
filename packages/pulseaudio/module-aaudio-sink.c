@@ -26,6 +26,7 @@
 #include <errno.h>
 #include <unistd.h>
 #include <time.h>
+#include <string.h>
 
 #include "aaudio-latency.h"
 
@@ -112,8 +113,13 @@ static const char* const valid_modargs[] = {
 static int process_render(struct userdata *u, void *audioData, int64_t numFrames) {
     pa_assert(u->sink->thread_info.state != PA_SINK_INIT);
 
-    /* A queued callback must stop after the main thread detaches its stream. */
-    if (!u->stream || !PA_SINK_IS_LINKED(u->sink->thread_info.state))
+    /* Close owns stopping the stream. A late callback must not initiate a
+     * competing Android state transition while close is joining it. */
+    if (!u->stream) {
+        memset(audioData, 0, u->frame_size * numFrames);
+        return AAUDIO_CALLBACK_RESULT_CONTINUE;
+    }
+    if (!PA_SINK_IS_LINKED(u->sink->thread_info.state))
         return AAUDIO_CALLBACK_RESULT_STOP;
 
     u->memchunk.memblock = pa_memblock_new_fixed(u->core->mempool, audioData, u->frame_size * numFrames, false);
@@ -274,6 +280,21 @@ static int sink_process_msg(pa_msgobject *o, int code, void *data, int64_t offse
 static void close_stream_main(struct userdata *u) {
     AAudioStream *stream = NULL;
 
+    /* Stop while rendering remains available. Closing a running legacy
+     * AudioTrack stream can hang or crash on Android 11. */
+    if (u->stream) {
+        aaudio_stream_state_t state = AAudioStream_getState(u->stream);
+        aaudio_result_t result = AAudioStream_requestStop(u->stream);
+        if (result == AAUDIO_OK) {
+            for (int i = 0; i < 10; i++) {
+                state = AAudioStream_getState(u->stream);
+                if (state != AAUDIO_STREAM_STATE_STOPPING)
+                    break;
+                AAudioStream_waitForStateChange(u->stream, state, &state, 100000000);
+            }
+        }
+        pa_log_debug("AAudio closing stream: stop result=%d state=%d", result, state);
+    }
     pa_log_debug("AAudio closing stream: detach requested");
     if (u->thread && u->sink)
         pa_asyncmsgq_send(u->thread_mq.inq, PA_MSGOBJECT(u->sink),

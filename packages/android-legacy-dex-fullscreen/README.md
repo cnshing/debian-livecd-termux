@@ -65,10 +65,22 @@ Termux:X11 is absent and does not launch the app. DeX display IDs are discovered
 there is no fixed display number. Normal mouse/keyboard input still goes to the
 original app on its original display.
 
+Version 0.2.2 retries timed-out or incomplete window inspections, which can occur
+when focus changes or an Activity is recreated, instead of terminating the helper
+until the next desktop restart. Status reports `retrying-window-inspection` during
+these retries. Failed restoration callbacks retain their owned bits for the next
+attempt. Permission and unexpected framework errors still stop the helper.
+
 ## Lifecycle and diagnostics
 
 The Termux controller starts one shell helper and renews its lease every three
-seconds. If the controller dies or Shizuku transport is lost, the helper stops
+seconds. A timed-out Shizuku request puts the controller in `recovering` and is
+retried. If the outage outlasts the lease, the controller confirms the old helper's
+restoration and disconnection before starting a replacement when transport returns.
+The desktop does not need to be restarted. `check` reuses the existing controller
+while it is recovering, rather than competing for its automation connection.
+
+If the controller dies or Shizuku transport is lost, the helper stops
 and restores its owned bits after approximately 15 seconds without renewal,
 plus any in-progress lookup (bounded to several seconds). A reboot requires a
 new desktop session or manual start. Normal stop waits for the helper to request restoration and disconnect
@@ -121,6 +133,15 @@ focus away/back, a Termux:X11 process restart, and stop while fullscreen remaine
 enabled. The same shell helper discovered the replacement app process without
 attachment or app-private access. A killed-controller test also confirmed lease
 expiry and shell-helper shutdown. Termux:X11's APK hash stayed unchanged.
+
+The 0.2.2 investigation found repeated eight-second `rish` lease-renewal timeouts
+in the affected phone's controller log. Earlier controllers exited on these
+timeouts, leaving no controller to reapply fullscreen when the app regained focus.
+On-device regression checks verified three focus round trips with UI bits changing
+from `0x1002` to `0x0` and back. A deliberately delayed `rish` client then exercised
+an outage beyond the helper lease: the old helper restored and stopped, and the
+same controller recovered with a replacement fullscreen helper when transport
+returned.
 
 The recipe compiles all Java sources against Android 35 and converts them with
 D8 at minimum API 30. There are no native agents, prebuilt helper binaries, or

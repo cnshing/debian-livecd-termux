@@ -28,8 +28,10 @@ final class WindowPolicy {
     void restore() throws Exception {
         Target old = target;
         int mask = owned;
+        // Keep ownership until the callback succeeds so a transient Binder failure
+        // can be retried before activating another window.
+        if (old != null && mask != 0 && old.alive()) old.apply(0, mask);
         target = null;
         owned = 0;
-        if (old != null && mask != 0 && old.alive()) old.apply(0, mask);
     }
 }

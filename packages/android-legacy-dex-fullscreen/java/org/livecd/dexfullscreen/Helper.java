@@ -154,27 +154,34 @@ public final class Helper {
     private Window candidate() throws Exception {
         SparseArray<List<AccessibilityWindowInfo>> displays = automation.getWindowsOnAllDisplays();
         Window result = null;
-        for (int i = 0; i < displays.size(); i++) {
-            for (AccessibilityWindowInfo w : displays.valueAt(i)) {
-                if (w.getDisplayId() == 0 || !w.isFocused()
-                        || w.getType() != AccessibilityWindowInfo.TYPE_APPLICATION) continue;
-                AccessibilityNodeInfo root = w.getRoot();
-                if (root == null) continue;
-                boolean matches = APP.contentEquals(root.getPackageName() == null ? "" : root.getPackageName());
-                root.recycle();
-                if (!matches) continue;
-                Rect bounds = new Rect();
-                w.getBoundsInScreen(bounds);
-                if (!WindowState.eligible(dumpWindows(), w.getDisplayId(),
-                        bounds.left, bounds.top, bounds.right, bounds.bottom)) continue;
-                IBinder binder = (IBinder) tokenGetter.invoke(accessibility, w.getId(), 0);
-                if (binder == null || !binder.isBinderAlive()) continue;
-                // Multiple focused target windows is ambiguous; do not choose arbitrarily.
-                if (result != null) return null;
-                result = new Window(binder);
+        try {
+            for (int i = 0; i < displays.size(); i++) {
+                for (AccessibilityWindowInfo w : displays.valueAt(i)) {
+                    if (w.getDisplayId() == 0 || !w.isFocused()
+                            || w.getType() != AccessibilityWindowInfo.TYPE_APPLICATION) continue;
+                    AccessibilityNodeInfo root = w.getRoot();
+                    if (root == null) continue;
+                    boolean matches = APP.contentEquals(root.getPackageName() == null ? "" : root.getPackageName());
+                    root.recycle();
+                    if (!matches) continue;
+                    Rect bounds = new Rect();
+                    w.getBoundsInScreen(bounds);
+                    if (!WindowState.eligible(dumpWindows(), w.getDisplayId(),
+                            bounds.left, bounds.top, bounds.right, bounds.bottom)) continue;
+                    IBinder binder = (IBinder) tokenGetter.invoke(accessibility, w.getId(), 0);
+                    if (binder == null || !binder.isBinderAlive()) continue;
+                    // Multiple focused target windows is ambiguous; do not choose arbitrarily.
+                    if (result != null) return null;
+                    result = new Window(binder);
+                }
             }
+            return result;
+        } finally {
+            // UiAutomation returns pooled copies. Release even non-target windows
+            // and ambiguous results on every poll during long desktop sessions.
+            for (int i = 0; i < displays.size(); i++)
+                for (AccessibilityWindowInfo w : displays.valueAt(i)) w.recycle();
         }
-        return result;
     }
 
     private void status(String phase, String detail) throws Exception {
@@ -228,6 +235,8 @@ public final class Helper {
                 if (args.length != 1) throw new IllegalArgumentException("Expected a shell-owned session directory");
                 helper.directory = session(args[0]);
                 helper.connect();
+                final Helper running = helper;
+                WindowPoller poller = new WindowPoller(helper.policy);
                 long lastLease = Long.MIN_VALUE;
                 long renewedAt = SystemClock.elapsedRealtime();
                 while (!new File(helper.directory, "stop").exists()) {
@@ -238,14 +247,16 @@ public final class Helper {
                         renewedAt = SystemClock.elapsedRealtime();
                     }
                     if (SystemClock.elapsedRealtime() - renewedAt > LEASE_MS) break;
-                    try { helper.policy.update(helper.candidate()); }
+                    boolean inspected = true;
+                    try { inspected = poller.poll(running::candidate); }
                     catch (Exception e) {
                         Throwable cause = e;
                         while (cause.getCause() != null) cause = cause.getCause();
                         if (!(cause instanceof DeadObjectException)) throw e;
                         helper.policy.update(null); // Window died during lookup/callback; discover its replacement.
                     }
-                    helper.status("running", helper.policy.active() ? "fullscreen" : "waiting-for-dex-fullscreen");
+                    helper.status("running", !inspected ? "retrying-window-inspection"
+                        : helper.policy.active() ? "fullscreen" : "waiting-for-dex-fullscreen");
                     Thread.sleep(1000);
                 }
             }

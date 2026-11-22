@@ -8,10 +8,18 @@ public final class WindowPolicyTest {
     static final class Fake implements WindowPolicy.Target {
         int bits;
         boolean alive = true;
+        boolean failApply;
+        boolean failRead;
         Fake(int bits) { this.bits = bits; }
         public boolean alive() { return alive; }
-        public int flags() { return bits; }
-        public void apply(int value, int mask) { bits = (bits & ~mask) | (value & mask); }
+        public int flags() throws Exception {
+            if (failRead) throw new java.io.IOException("Incomplete root view dump");
+            return bits;
+        }
+        public void apply(int value, int mask) throws Exception {
+            if (failApply) throw new java.io.IOException("Window callback temporarily unavailable");
+            bits = (bits & ~mask) | (value & mask);
+        }
     }
     public static void main(String[] args) throws Exception {
         WindowPolicy policy = new WindowPolicy();
@@ -40,6 +48,41 @@ public final class WindowPolicyTest {
         policy.update(original);
         policy.restore();
         require(original.bits == 0x1002);
+
+        WindowPoller poller = new WindowPoller(policy);
+        Fake focused = new Fake(0);
+        require(poller.poll(() -> focused));
+        // A focus transition can race a root-view dump or window inspection.
+        require(!poller.poll(() -> { throw new java.io.IOException("Incomplete root dump"); }));
+        require(!policy.active() && focused.bits == 0);
+        require(!poller.poll(() -> { throw new java.util.concurrent.TimeoutException(); }));
+        require(poller.poll(() -> focused));
+        require(policy.active() && focused.bits == 0x1002);
+        // A failed restore must retain ownership and block switching targets.
+        focused.failApply = true;
+        Fake next = new Fake(0);
+        require(!poller.poll(() -> next));
+        require(policy.active() && next.bits == 0);
+        focused.failApply = false;
+        require(poller.poll(() -> next));
+        require(focused.bits == 0 && next.bits == 0x1002);
+        require(poller.poll(() -> null));
+        require(next.bits == 0 && !policy.active());
+        next.failRead = true;
+        require(!poller.poll(() -> next));
+        require(!policy.active() && next.bits == 0);
+        next.failRead = false;
+        for (int i = 0; i < 100; i++) {
+            require(poller.poll(() -> next));
+            require(next.bits == 0x1002);
+            require(poller.poll(() -> null));
+            require(next.bits == 0);
+        }
+        // Permission/framework errors still surface instead of silently looping.
+        try {
+            poller.poll(() -> { throw new SecurityException("Permission revoked"); });
+            throw new AssertionError("Permission failure was hidden");
+        } catch (SecurityException expected) { }
 
         String window = "  Window #0 Window{abcd u0 com.termux.x11/com.termux.x11.MainActivity}:\n"
             + "    mDisplayId=2 rootTaskId=806\n"

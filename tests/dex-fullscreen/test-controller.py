@@ -123,8 +123,72 @@ esac
         with self.assertRaises(RuntimeError):
             controller.record('Permission denied')
 
+    def test_transport_timeout_does_not_log_the_script_or_payload(self):
+        with mock.patch.object(controller.Path, 'is_file', return_value=True), \
+             mock.patch.object(controller.subprocess, 'run',
+                               side_effect=subprocess.TimeoutExpired(['rish', 'DEX_PAYLOAD'], 8)):
+            with self.assertRaises(controller.TransportTimeout) as error:
+                controller.shell('DEX_PAYLOAD')
+        self.assertEqual(str(error.exception), 'Shizuku transport timed out after 8 seconds')
+
 
 class Supervision(unittest.TestCase):
+    def test_transport_outages_recover_without_restarting_the_controller(self):
+        for lease_expired, lost_cleanup_reply in ((False, False), (True, False), (True, True)):
+            with self.subTest(lease_expired=lease_expired, lost_cleanup_reply=lost_cleanup_reply), \
+                 tempfile.TemporaryDirectory() as state:
+                first = controller.REMOTE_PREFIX + 'first123'
+                second = controller.REMOTE_PREFIX + 'second123'
+                running = {'pid': 11, 'phase': 'running', 'active': True}
+                events = [running, controller.TransportTimeout('transport unavailable')]
+                if lease_expired:
+                    events.append({'pid': 11, 'phase': 'stopped', 'active': False})
+                events.append(running)
+                handlers, snapshots = [], []
+                def probe(_):
+                    event = events.pop(0)
+                    if isinstance(event, Exception):
+                        raise event
+                    if not events:
+                        handlers[0]()  # Normal SIGTERM after recovery.
+                    return event
+                with mock.patch.object(controller, 'STATE', Path(state)), \
+                     mock.patch.object(controller, 'supported', return_value=True), \
+                     mock.patch.object(controller, 'stage', side_effect=[first, second]) as stage, \
+                     mock.patch.object(controller, 'launch') as launch, \
+                     mock.patch.object(controller, 'probe', side_effect=probe), \
+                     mock.patch.object(controller, 'detach', side_effect=
+                                       [controller.TransportTimeout('lost cleanup reply'), None, None]
+                                       if lost_cleanup_reply else None) as detach, \
+                     mock.patch.object(controller, 'write_state',
+                                       side_effect=lambda d: snapshots.append(json.loads(json.dumps(d)))), \
+                     mock.patch.object(controller.signal, 'signal', side_effect=lambda _, h: handlers.append(h)), \
+                     mock.patch.object(controller.time, 'sleep'), contextlib.redirect_stderr(io.StringIO()):
+                    controller.run()
+                phases = [d['phase'] for d in snapshots]
+                self.assertIn('recovering', phases)
+                self.assertNotIn('failed', phases)
+                self.assertEqual(phases[-2:], ['ready', 'stopped'])
+                recovering = next(d for d in snapshots if d['phase'] == 'recovering')
+                self.assertIsNone(recovering['helper']['active'])
+                self.assertNotIn('error', snapshots[-2])
+                self.assertEqual(stage.call_count, 2 if lease_expired else 1)
+                self.assertEqual(launch.call_args_list, [mock.call(first)] +
+                                 ([mock.call(second)] if lease_expired else []))
+                self.assertEqual(detach.call_args_list, [mock.call(first)] +
+                                 ([mock.call(first)] if lost_cleanup_reply else []) +
+                                 ([mock.call(second)] if lease_expired else []))
+
+    def test_check_during_recovery_reuses_the_controller(self):
+        current = {'phase': 'recovering', 'helper': {'phase': 'unknown', 'active': None}}
+        with mock.patch.object(controller, 'supported', return_value=True), \
+             mock.patch.object(controller, 'owner', return_value=current), \
+             mock.patch.object(controller, 'check', side_effect=AssertionError('Competing UiAutomation check')), \
+             mock.patch.object(sys, 'argv', ['controller', 'check']), \
+             contextlib.redirect_stdout(io.StringIO()) as output:
+            self.assertEqual(controller.main(), 0)
+        self.assertEqual(json.loads(output.getvalue())['helper'], current['helper'])
+
     def test_window_recreation_stays_in_the_same_shell_helper_and_cleanup_runs(self):
         directory = controller.REMOTE_PREFIX + 'test123'
         with tempfile.TemporaryDirectory() as state:
@@ -192,6 +256,7 @@ class WindowPolicy(unittest.TestCase):
             sources = PACKAGE / 'java/org/livecd/dexfullscreen'
             subprocess.run([compiler, '-source', '8', '-target', '8', '-d', classes,
                 str(sources / 'WindowPolicy.java'), str(sources / 'WindowState.java'),
+                str(sources / 'WindowPoller.java'),
                 str(Path(__file__).with_name('WindowPolicyTest.java'))], check=True)
             subprocess.run(['java', '-cp', classes, 'org.livecd.dexfullscreen.WindowPolicyTest'], check=True)
 

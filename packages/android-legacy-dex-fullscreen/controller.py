@@ -22,6 +22,10 @@ REMOTE_PREFIX = f'/data/local/tmp/{NAME}.'
 HELPER_CLASS = 'org.livecd.dexfullscreen.Helper'
 
 
+class TransportTimeout(RuntimeError):
+    """A lost rish request does not imply that the shell helper has failed."""
+
+
 def identity(pid):
     fields = Path(f'/proc/{int(pid)}/stat').read_text().rsplit(')', 1)[1].split()
     return fields[0], fields[19]
@@ -48,9 +52,13 @@ def shell(script, timeout=8):
                               str(Path.home() / '.local/lib/shizuku/rish')))
     if not rish.is_file():
         raise RuntimeError("Export Shizuku's rish into ~/.local/lib/shizuku and authorize Termux.")
-    result = subprocess.run(['/system/bin/sh', str(rish), '-c', script],
-        env={**os.environ, 'RISH_APPLICATION_ID': 'com.termux', 'RISH_PRESERVE_ENV': '0'},
-        stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=timeout)
+    try:
+        result = subprocess.run(['/system/bin/sh', str(rish), '-c', script],
+            env={**os.environ, 'RISH_APPLICATION_ID': 'com.termux', 'RISH_PRESERVE_ENV': '0'},
+            stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        # Do not copy the command (including a staged DEX payload) into state/logs.
+        raise TransportTimeout(f'Shizuku transport timed out after {timeout} seconds') from None
     output = result.stdout + '\n' + result.stderr
     if result.returncode:
         raise RuntimeError(output.strip()[-1500:] or f'Shizuku shell exited {result.returncode}')
@@ -201,13 +209,44 @@ def run():
         write_state(data)
         directory = None
         try:
-            directory = stage()
-            data['shell_dir'] = directory
-            write_state(data)
-            launch(directory)
-            deadline = time.monotonic() + 15
+            deadline = 0
+            retiring = False
             while not stopping:
-                current = probe(directory)
+                try:
+                    if retiring:
+                        # detach is idempotent even if its previous response was
+                        # lost after the remote directory had already been removed.
+                        detach(directory)
+                        directory = None
+                        retiring = False
+                        data.pop('shell_dir', None)
+                        continue
+                    if directory is None:
+                        directory = stage()
+                        data.update(shell_dir=directory, phase='starting')
+                        write_state(data)
+                        deadline = time.monotonic() + 15
+                        launch(directory)
+                    current = probe(directory)
+                    if current['phase'] == 'stopped':
+                        # A transport outage may outlast the lease. Confirm the old
+                        # helper's restoration/disconnect before creating another.
+                        retiring = True
+                        continue
+                except TransportTimeout as error:
+                    if data['phase'] != 'recovering':
+                        print(str(error) + '; retrying Shizuku transport', file=sys.stderr, flush=True)
+                    data.update(phase='recovering', error=str(error),
+                                helper={'phase': 'unknown', 'active': None,
+                                        'detail': 'lease-renewal-unconfirmed'})
+                    write_state(data)
+                    # Leave the helper's independent lease/restore path intact.
+                    # Retry even after lease expiry instead of requiring a desktop restart.
+                    for _ in range(10):
+                        if stopping:
+                            break
+                        time.sleep(0.1)
+                    continue
                 if current['phase'] == 'starting' and time.monotonic() < deadline:
                     time.sleep(0.2)
                     continue
@@ -216,6 +255,7 @@ def run():
                     detail = shell(guard() + f'tail -c 2000 {path}/helper.log\n')
                     raise RuntimeError('Window Binder helper stopped: ' + json.dumps(current) + '\n' + detail)
                 data.update(phase='ready', helper=current)
+                data.pop('error', None)
                 write_state(data)
                 # The shell helper handles focus/window changes. Renew its lease every 3 s.
                 for _ in range(30):
@@ -238,6 +278,7 @@ def run():
                     print(data['error'], file=sys.stderr)
             if data['phase'] != 'failed' and restored:
                 data.update(phase='stopped', helper={'phase': 'stopped', 'active': False})
+                data.pop('error', None)
                 write_state(data)
 
 
@@ -307,7 +348,7 @@ def main():
         if args.command == 'check':
             current = owner()
             print(json.dumps({'supported': True, 'helper': current.get('helper')
-                              if current and current['phase'] == 'ready' else check()}))
+                              if current and current['phase'] in ('ready', 'recovering', 'starting') else check()}))
         elif args.command == 'status':
             data = owner()
             if data is None:
@@ -317,7 +358,7 @@ def main():
                     previous = {}
                 if previous.get('phase') == 'failed':
                     data = previous
-                elif previous.get('phase') in ('ready', 'starting'):
+                elif previous.get('phase') in ('ready', 'starting', 'recovering'):
                     data = {'phase': 'controller-not-running', 'detail': 'Shell helper lease expires within 15 seconds'}
             print(json.dumps(data or {'phase': 'stopped'}))
         else:

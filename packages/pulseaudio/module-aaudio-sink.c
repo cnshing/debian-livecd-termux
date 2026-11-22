@@ -248,6 +248,7 @@ static int sink_process_msg(pa_msgobject *o, int code, void *data, int64_t offse
             *((pa_usec_t *) data) = get_playback_latency(u);
             return 0;
         case SINK_MESSAGE_DETACH_STREAM:
+            pa_log_debug("AAudio detaching stream in IO thread");
             *((AAudioStream **) data) = u->stream;
             u->stream = NULL;
             return 0;
@@ -273,6 +274,7 @@ static int sink_process_msg(pa_msgobject *o, int code, void *data, int64_t offse
 static void close_stream_main(struct userdata *u) {
     AAudioStream *stream = NULL;
 
+    pa_log_debug("AAudio closing stream: detach requested");
     if (u->thread && u->sink)
         pa_asyncmsgq_send(u->thread_mq.inq, PA_MSGOBJECT(u->sink),
                          SINK_MESSAGE_DETACH_STREAM, &stream, 0, NULL);
@@ -281,12 +283,14 @@ static void close_stream_main(struct userdata *u) {
         u->stream = NULL;
     }
 
+    pa_log_debug("AAudio closing stream: detach complete");
     if (stream) {
         if (u->no_close)
             AAudioStream_requestStop(stream);
         else
             AAudioStream_close(stream);
     }
+    pa_log_debug("AAudio closing stream: close complete");
 }
 
 static int state_func_main(pa_sink *s, pa_sink_state_t state, pa_suspend_cause_t suspend_cause) {

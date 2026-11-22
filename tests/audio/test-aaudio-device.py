@@ -120,6 +120,8 @@ try:
  assert len(result['concurrent_sink_inputs'].splitlines())==2 and result['second_exit']==0
  assert result['hardware_timestamp_activations']>=2
  assert result['steady_output_drops']==0
+ server.terminate();result['server_exit']=server.wait(timeout=10)
+ assert result['server_exit']==0
  result['ok']=True
 except BaseException as e:
  result['error']=repr(e);result['ok']=False

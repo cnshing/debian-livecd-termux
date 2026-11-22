@@ -175,6 +175,37 @@ bypasses it. Restoring `ao=pulse` does not require restoring OpenSL ES as the
 server's Android backend: an accurately implemented AAudio sink can preserve the
 same Linux client protocol and desktop controls.
 
+## Timestamped sink candidate built on 2026 11 22
+
+Branch [fix/pulse-aaudio-timestamps](https://github.com/cnshing/debian-livecd-termux/tree/fix/pulse-aaudio-timestamps) contains PulseAudio `17.0-100`, carrying
+Termux's pinned PulseAudio 17 build patches and Android modules. Its AAudio sink
+now advertises `PA_SINK_LATENCY` and calculates remaining output frames using
+`AAudioStream_getTimestamp(CLOCK_MONOTONIC)`, extrapolated to the query time.
+It includes the callback being rendered before Android increments its written
+frame counter. Stream reopen resets that accounting. While hardware timestamps
+are unavailable during startup, a logged consumed-frame estimate is used.
+
+The arithmetic regression covers ordinary queue delay, timestamp extrapolation,
+the pending-callback handoff, future presentation timestamps, empty or exhausted
+queues and 44.1 kHz output. It passes with undefined-behavior checks enabled.
+The existing packaging and network-discovery tests also pass.
+
+[CI run 45002726568](https://github.com/cnshing/debian-livecd-termux/actions/runs/45002726568)
+built both `pulseaudio_17.0-100_aarch64.deb` and its GLib companion successfully.
+The built module imports the timestamp, written-frame and read-frame APIs.
+The package is a separate behavior-only build job, so client applications do
+not need to rebuild against it.
+
+The candidate has not been installed or selected by the desktop. Runtime
+qualification on a private server is still required before claiming this fixes
+playback or changing the temporary mpv AAudio preference. The prepared `tests/audio/test-aaudio-device.py` test
+covers measured sink latency, hardware timestamp activation, playback stability,
+volume/mute, monitor capture, two clients, pause/resume, seeking, suspend/resume
+and repeated module unload/reload. A subsequent real-file and route test remains
+necessary. These tests must use the candidate server and its matching modules
+and libraries together: the stock package reports `17.0-dirty`, while the
+release-archive candidate reports `17.0`, and PulseAudio checks module versions.
+
 ## Repair and acceptance plan
 
 1. Prefer fixing Android sink latency reporting, using played-frame position and

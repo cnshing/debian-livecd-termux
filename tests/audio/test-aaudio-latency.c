@@ -10,6 +10,8 @@ int main(void) {
     assert(livecd_aaudio_latency_usec(4800, 4800, 2400, 1000000000, 1010000000, 48000) == 40000);
     /* The callback's 240 frames are rendered but not yet in FramesWritten. */
     assert(livecd_aaudio_latency_usec(4800, 5040, 2400, 1000000000, 1010000000, 48000) == 45000);
+    /* Publishing the just-rendered callback must not jump the clock. */
+    assert(livecd_aaudio_latency_usec(5040, 5040, 2400, 1000000000, 1010000000, 48000) == 45000);
     /* A timestamp may name a frame that will be presented in the future. */
     assert(livecd_aaudio_latency_usec(4800, 4800, 480, 1010000000, 1000000000, 48000) == 100000);
     /* Underruns and service timestamps advancing past queued data never wrap. */

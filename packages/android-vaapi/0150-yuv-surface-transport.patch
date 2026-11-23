@@ -160,6 +160,15 @@
      if (mode == (uint32_t)XFER_SHM && nlen > 0) {
          if (shm_attach(s, name) == 0)
              s->xfer = XFER_SHM;
+@@ -799,7 +803,7 @@
+ 
+     tva_c_log(s, "session established: unix=%s codec=%d %dx%d frame-delivery=%s",
+               s->ep_path, cfg->codec, cfg->width, cfg->height,
+-              s->xfer == XFER_SHM ? "SHM" : "inline");
++              s->xfer == XFER_DMABUF ? "dmabuf" : s->xfer == XFER_SHM ? "SHM" : "inline");
+     return s;
+ }
+ 
 @@ -1023,6 +1027,23 @@
      return TVA_OK;
  }
@@ -272,36 +281,39 @@
          p->copied = tva_copy_frame(c, p);
          TVA_TRACE("retire copy unit=%u result=%d", p->unit_seq, p->copied);
          if (!p->copied)
-@@ -1377,6 +1381,13 @@
+@@ -1377,6 +1381,16 @@
      return false;
  }
  
 +static bool
-+tva_surface_requested(void)
++tva_surface_requested(struct pipe_screen *screen)
 +{
 +    const char *value=getenv("TVA_ZEROCOPY");
-+    return !value || strcmp(value, "0");
++    if (value) return strcmp(value, "0");
++    /* Preserve non-Adreno defaults, including one-sided daemon upgrades. */
++    return screen && screen->get_vendor &&
++           strstr(screen->get_vendor(screen), "freedreno");
 +}
 +
  #ifndef _WIN32
  #if defined(__linux__)
  static int
-@@ -1446,10 +1457,14 @@
+@@ -1446,10 +1460,14 @@
     y_stride = align(res_templ.width0 * util_format_get_blocksize(res_templ.format),
                      64);
     y_height = res_templ.height0;
-+   if (templat->buffer_format == PIPE_FORMAT_NV12 && tva_surface_requested() &&
++   if (templat->buffer_format == PIPE_FORMAT_NV12 && tva_surface_requested(screen) &&
 +       strstr(screen->get_vendor(screen), "freedreno")) y_height = align(y_height, 32);
  
     vl_video_buffer_template(&res_templ, &bridge_templ, formats[1], 1, 1,
                              PIPE_USAGE_DEFAULT, 1, chroma);
     uv_height = res_templ.height0;
-+   if (templat->buffer_format == PIPE_FORMAT_NV12 && tva_surface_requested() &&
++   if (templat->buffer_format == PIPE_FORMAT_NV12 && tva_surface_requested(screen) &&
 +       strstr(screen->get_vendor(screen), "freedreno")) uv_height = align(uv_height, 16);
  
     if (!y_stride || !y_height || !uv_height ||
         y_height > SIZE_MAX / y_stride ||
-@@ -1879,10 +1894,76 @@
+@@ -1879,10 +1897,76 @@
      pipe->texture_unmap(pipe, transfer);
  }
  
@@ -378,7 +390,7 @@
      if (!p->staging || !p->resources[0] || !p->resources[1] ||
          !p->frame_width || !p->frame_height || p->stride <= 0 ||
          p->slice_height <= 0 || p->crop_left < 0 || p->crop_top < 0 ||
-@@ -2057,7 +2138,7 @@
+@@ -2057,7 +2141,7 @@
           * hidden references.  It is enabled by default for the validated
           * linear resources; DMD_VA_READER_COPY=0 opts out.  A failed direct
           * map falls back to the staged application-thread copy below. */
@@ -387,7 +399,7 @@
              tva_copy_frame_direct(c, p, f.data, f.size)) {
              p->copied = true;
              p->ready = true;
-@@ -2070,6 +2151,17 @@
+@@ -2070,6 +2154,17 @@
          }
  #endif
  
@@ -405,7 +417,7 @@
          p->staging = malloc(f.size ? f.size : 1);
          if (!p->staging) {
              tva_mark_broken_locked(c);
-@@ -3213,6 +3305,47 @@
+@@ -3213,6 +3308,47 @@
      }
  }
  
@@ -453,15 +465,15 @@
  static int
  tva_encoder_ensure_session(struct tva_codec *c, struct pipe_video_buffer *source)
  {
-@@ -3237,6 +3370,7 @@
+@@ -3237,6 +3373,7 @@
      cfg.fps_den = c->encode_fps_den;
      cfg.enc_color = c->encode_color;
      cfg.want_shm = 0;
-+    cfg.want_dmabuf = tva_surface_requested() && !codec_is_ten_bit(cfg.codec);
++    cfg.want_dmabuf = tva_surface_requested(c->pipe->screen) && !codec_is_ten_bit(cfg.codec);
      if (cfg.codec < 0)
          return -1;
  
-@@ -3366,6 +3500,7 @@
+@@ -3366,6 +3503,7 @@
          struct pipe_resource *dest = job->dest;
          job->data = NULL;
          job->dest = NULL;
@@ -469,7 +481,7 @@
          job->ready = false;
          c->enc_done++;
          bool target = c->enc_done == seq;
-@@ -3394,12 +3529,18 @@
+@@ -3394,12 +3532,18 @@
      struct tva_codec *c = tva_codec(codec);
      uint8_t *raw = NULL;
      size_t raw_len = 0, encoded_len = 0;
@@ -491,7 +503,7 @@
          goto fail;
      /* Rate changes arrive per picture, as WebRTC adapts to the network. */
      if (c->encode_bitrate && c->encode_bitrate != c->encode_sent_bitrate) {
-@@ -3421,20 +3562,27 @@
+@@ -3421,20 +3565,27 @@
          mtx_lock(&c->pend_mutex);
          struct tva_enc_job *job = &c->enc_jobs[c->enc_sent % TVA_ENC_DEPTH];
          pipe_resource_reference(&job->dest, destination);
@@ -523,7 +535,7 @@
          goto fail;
      if (!c->encode_packet) {
          c->encode_packet_cap = TVA_MAX_UNIT_BYTES;
-@@ -3455,9 +3603,11 @@
+@@ -3455,9 +3606,11 @@
          *feedback = (void *)(((uintptr_t)1 << (sizeof(uintptr_t) * 8 - 1)) |
                               (uintptr_t)encoded_len);
      free(raw);
@@ -535,7 +547,7 @@
      free(raw);
      tva_mark_broken(c);
  }
-@@ -5224,7 +5374,7 @@
+@@ -5224,7 +5377,7 @@
      TVA_TRACE("fence unit=%u ready=%d failed=%d copied=%d staging=%p",
                p->unit_seq, p->ready, p->failed, p->copied, (void *)p->staging);
  
@@ -544,7 +556,7 @@
          p->copied = tva_copy_frame(c, p);
          TVA_TRACE("fence copy unit=%u result=%d", p->unit_seq, p->copied);
          if (!p->copied)
-@@ -5303,7 +5453,7 @@
+@@ -5303,7 +5456,7 @@
          if (!p->ready) {
              TVA_TRACE("recycled fence timed out unit=%u", p->unit_seq);
              fail = true;
@@ -553,7 +565,7 @@
              p->copied = tva_copy_frame(c, p);
              TVA_TRACE("recycled fence copy unit=%u result=%d",
                        p->unit_seq, p->copied);
-@@ -5335,6 +5485,8 @@
+@@ -5335,6 +5488,8 @@
      for (unsigned i = 0; i < TVA_ENC_DEPTH; i++) {
          free(c->enc_jobs[i].data);
          pipe_resource_reference(&c->enc_jobs[i].dest, NULL);
@@ -562,11 +574,11 @@
      }
      mtx_lock(&c->pend_mutex);
      while (c->pend_count)
-@@ -5521,6 +5673,7 @@
+@@ -5521,6 +5676,7 @@
       * kept on purpose) */
      const char *shm = getenv("DMD_WANT_SHM");
      cfg.want_shm = !encoder && !(shm && !strcmp(shm, "0"));
-+    cfg.want_dmabuf = !encoder && tva_surface_requested() && !codec_is_ten_bit(codec_id);
++    cfg.want_dmabuf = !encoder && tva_surface_requested(context->screen) && !codec_is_ten_bit(codec_id);
      if (cfg.want_shm && pipeline_depth > SHM_SLOTS)
          pipeline_depth = SHM_SLOTS;
  

@@ -34,8 +34,9 @@ int main(int argc,char **argv)
                                     attrs,sizeof(attrs)/sizeof(attrs[0]),&config));
  VASurfaceAttrib attr={.type=VASurfaceAttribPixelFormat,.flags=VA_SURFACE_ATTRIB_SETTABLE,
                       .value={.type=VAGenericValueTypeInteger,.value.i=VA_FOURCC_NV12}};
- VASurfaceID surface;VA(vaCreateSurfaces(display,VA_RT_FORMAT_YUV420,3840,2160,&surface,1,&attr,1));
- VAContextID context;VA(vaCreateContext(display,config,3840,2160,VA_PROGRESSIVE,&surface,1,&context));
+ VASurfaceID surfaces[3];VA(vaCreateSurfaces(display,VA_RT_FORMAT_YUV420,3840,2160,surfaces,3,&attr,1));
+ VASurfaceID surface=surfaces[0];
+ VAContextID context;VA(vaCreateContext(display,config,3840,2160,VA_PROGRESSIVE,surfaces,3,&context));
  VAImageFormat image_format={.fourcc=VA_FOURCC_NV12,.byte_order=VA_LSB_FIRST,.bits_per_pixel=12};
  VAImage image;VA(vaCreateImage(display,&image_format,3840,2160,&image));
  for(unsigned frame=0;frame<4;frame++) {
@@ -67,11 +68,11 @@ int main(int argc,char **argv)
   sequence.frame_crop_right_offset=(3840-16-1920)/2;
   sequence.frame_crop_top_offset=16;sequence.frame_crop_bottom_offset=(2160-32-1080)/2;
   VAEncPictureParameterBufferH264 picture={0};
-  picture.CurrPic.picture_id=surface;picture.CurrPic.frame_idx=frame%2;
+  picture.CurrPic.picture_id=surfaces[1+frame%2];picture.CurrPic.frame_idx=frame%2;
   picture.CurrPic.flags=VA_PICTURE_H264_SHORT_TERM_REFERENCE;
   picture.CurrPic.TopFieldOrderCnt=picture.CurrPic.BottomFieldOrderCnt=frame%2*2;
   for(unsigned i=0;i<16;i++) {picture.ReferenceFrames[i].picture_id=VA_INVALID_SURFACE;picture.ReferenceFrames[i].flags=VA_PICTURE_H264_INVALID;}
-  if(frame%2)picture.ReferenceFrames[0]=picture.CurrPic;
+  if(frame%2){picture.ReferenceFrames[0]=picture.CurrPic;picture.ReferenceFrames[0].picture_id=surfaces[1];picture.ReferenceFrames[0].frame_idx=0;}
   picture.coded_buf=coded;picture.frame_num=frame%2;picture.pic_init_qp=26;
   picture.pic_fields.bits.idr_pic_flag=!(frame%2);picture.pic_fields.bits.reference_pic_flag=1;
   picture.pic_fields.bits.entropy_coding_mode_flag=1;picture.pic_fields.bits.deblocking_filter_control_present_flag=1;
@@ -97,6 +98,6 @@ int main(int argc,char **argv)
  }
  CHECK(!fclose(encoded)&&!fclose(reference));
  VA(vaDestroyImage(display,image.image_id));VA(vaDestroyContext(display,context));
- VA(vaDestroySurfaces(display,&surface,1));VA(vaDestroyConfig(display,config));VA(vaTerminate(display));close(fd);
+ VA(vaDestroySurfaces(display,surfaces,3));VA(vaDestroyConfig(display,config));VA(vaTerminate(display));close(fd);
  return 0;
 }

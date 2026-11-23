@@ -1,0 +1,360 @@
+--- a/src/gallium/frontends/va/tva_bridge.c
++++ b/src/gallium/frontends/va/tva_bridge.c
+@@ -518,6 +518,8 @@
+     uint32_t magic;
+     struct tva_codec *codec;
+     struct tva_pending *slot;
++    bool encoder;
++    uint64_t encoder_seq;
+     bool queued;            /* codec bootstrap unit not submitted yet */
+     bool failed;           /* the associated pending entry was abandoned */
+ };
+@@ -572,6 +574,12 @@
+ };
+ 
+ #define TVA_ENC_DEPTH 8
++
++struct tva_enc_feedback {
++    uint64_t seq;
++    size_t len;
++    bool ready, discard;
++};
+ 
+ struct tva_codec {
+     struct pipe_video_codec base;
+@@ -592,12 +600,14 @@
+     struct tva_enc_job {
+         struct pipe_resource *dest;
+         struct pipe_resource *source[2];
++        struct tva_enc_feedback *feedback;
+         uint8_t *data;
+         size_t len;
+         bool ready, key_wanted;
+     } enc_jobs[TVA_ENC_DEPTH];
+     uint64_t enc_sent, enc_received, enc_done;
+     bool enc_failed;
++    struct pipe_fence_handle **encode_fence_target;
+     /* The client asked for this picture to be a sync frame. */
+     bool encode_key;
+     /* Top-left of the visible picture inside the coded surface. */
+@@ -1601,7 +1611,7 @@
+ static bool
+ tva_direct_copy_plane(struct pipe_screen *screen, struct pipe_resource *res,
+                       const uint8_t *data, unsigned w, unsigned h,
+-                      unsigned src_stride)
++                      unsigned src_stride, bool strict)
+ {
+    if (!screen || !screen->resource_get_handle || !res || !data || !w || !h)
+       return false;
+@@ -1624,6 +1634,7 @@
+    const size_t dst_stride = whandle.stride;
+    const uint64_t object_size = whandle.size;
+    if (fd < 0 || dst_stride < row_bytes || !object_size ||
++       (strict && whandle.modifier != DRM_FORMAT_MOD_LINEAR) ||
+        (uint64_t)(h - 1) > (UINT64_MAX - row_bytes) / dst_stride ||
+        (uint64_t)(h - 1) * dst_stride + row_bytes > object_size) {
+       if (fd >= 0)
+@@ -1638,7 +1649,7 @@
+    const uint64_t map_offset = whandle.offset & ~page_mask;
+    const uint64_t delta = whandle.offset - map_offset;
+    const uint64_t need = (uint64_t)(h - 1) * dst_stride + row_bytes;
+-   if (delta > object_size || need > object_size - delta ||
++   if (whandle.offset > object_size || need > object_size - whandle.offset ||
+        delta + need > SIZE_MAX) {
+       close(fd);
+       return false;
+@@ -1664,8 +1675,11 @@
+               fd, errno);
+    }
+ 
++   if (strict && !synced) {
++      munmap(map, map_len); close(fd); return false;
++   }
+    uint8_t *dst = map + delta;
+-   if (dst_stride == src_stride) {
++   if (dst_stride == row_bytes && src_stride == row_bytes) {
+       memcpy(dst, data, row_bytes * h);
+    } else {
+       for (unsigned y = 0; y < h; y++)
+@@ -1673,15 +1687,39 @@
+                 data + (size_t)y * src_stride, row_bytes);
+    }
+ 
++   bool completed = true;
+    if (synced) {
+       sync.flags = DMA_BUF_SYNC_END | DMA_BUF_SYNC_WRITE;
+-      if (ioctl(fd, DMA_BUF_IOCTL_SYNC, &sync) < 0 && getenv("DMD_VA_LOG"))
+-         fprintf(stderr, "tva: direct dma-buf sync end failed fd=%d errno=%d\n",
+-                 fd, errno);
++      completed = ioctl(fd, DMA_BUF_IOCTL_SYNC, &sync) == 0;
++      if (!completed && getenv("DMD_VA_LOG"))
++         fprintf(stderr, "tva: direct dma-buf sync end failed fd=%d errno=%d\n", fd, errno);
+    }
+    munmap(map, map_len);
+    close(fd);
+-   return true;
++   return !strict || completed;
++}
++
++bool
++tva_bridge_cached_upload_active(struct pipe_screen *screen)
++{
++    const char *option=getenv("TVA_CACHED_UPLOAD");
++    return screen && screen->get_vendor && tva_surface_requested(screen) &&
++           strstr(screen->get_vendor(screen), "freedreno") &&
++           (!option || strcmp(option,"0"));
++}
++
++bool
++tva_bridge_upload_plane(struct pipe_context *pipe, struct pipe_resource *res,
++                         const void *data, unsigned w, unsigned h, unsigned stride)
++{
++#if defined(__linux__)
++    if (!pipe || !tva_bridge_cached_upload_active(pipe->screen) ||
++        !tva_direct_copy_plane(pipe->screen,res,data,w,h,stride,true)) return false;
++    if (pipe->screen->resource_changed) pipe->screen->resource_changed(pipe->screen,res);
++    return true;
++#else
++    return false;
++#endif
+ }
+ 
+ static bool
+@@ -1757,10 +1795,10 @@
+ 
+    struct pipe_screen *screen = c->pipe->screen;
+    if (!tva_direct_copy_plane(screen, p->resources[0], src + y_offset,
+-                               w, h, (unsigned)p->stride))
++                               w, h, (unsigned)p->stride, false))
+       return false;
+    if (!tva_direct_copy_plane(screen, p->resources[1], src + uv_offset,
+-                              uv_w, uv_h, (unsigned)p->stride))
++                              uv_w, uv_h, (unsigned)p->stride, false))
+       return false;
+    return true;
+ }
+@@ -3421,10 +3459,10 @@
+                        unsigned *size,
+                        struct pipe_enc_feedback_metadata *metadata)
+ {
+-    const uintptr_t sync_bit = (uintptr_t)1 << (sizeof(uintptr_t) * 8 - 1);
+-    uintptr_t v = (uintptr_t)feedback;
+-    size_t len = (v & sync_bit) ? (v & ~sync_bit)
+-                 : v ? tva_encode_complete(tva_codec(codec), v) : 0;
++    struct tva_enc_feedback *f = feedback;
++    if (f && !f->ready) tva_encode_complete(tva_codec(codec), f->seq);
++    size_t len = f ? f->len : 0;
++    free(f);
+     if (size)
+         *size = (unsigned)len;
+     if (metadata)
+@@ -3501,6 +3539,8 @@
+         uint8_t *data = job->data;
+         size_t len = job->len;
+         struct pipe_resource *dest = job->dest;
++        struct tva_enc_feedback *f = job->feedback;
++        job->feedback = NULL;
+         job->data = NULL;
+         job->dest = NULL;
+         for (int i=0; i<2; i++) pipe_resource_reference(&job->source[i], NULL);
+@@ -3509,6 +3549,10 @@
+         bool target = c->enc_done == seq;
+         mtx_unlock(&c->pend_mutex);
+         bool ok = tva_encode_write_destination(c, dest, data, len) == 0;
++        if (f) {
++            f->len = ok ? len : 0; f->ready = true;
++            if (f->discard) free(f);
++        }
+         free(data);
+         pipe_resource_reference(&dest, NULL);
+         if (!ok) {
+@@ -3534,11 +3578,14 @@
+     size_t raw_len = 0, encoded_len = 0;
+     uint32_t flags = 0, pts = 0, metadata[DMABUF_WORDS];
+     int source_fd=-1;
++    struct tva_enc_feedback *f = calloc(1,sizeof(*f));
++    bool feedback_queued = false;
+     struct pipe_resource *source_resources[4]={0};
+ 
+     if (feedback)
+         *feedback = NULL;
+-    if (tva_encoder_ensure_session(c, source) < 0) goto fail;
++    if (!f || tva_encoder_ensure_session(c, source) < 0) goto fail;
++    f->discard = !feedback;
+ #if defined(__linux__)
+     if (tva_session_xfer_mode(c->sess) == XFER_DMABUF)
+         source_fd=tva_encode_export(c, source, metadata, source_resources);
+@@ -3570,16 +3617,35 @@
+         job->key_wanted = c->encode_key;
+         job->ready = false;
+         uint64_t seq = ++c->enc_sent;
++        f->seq = seq;
++        job->feedback = f;
++        feedback_queued = true;
+         mtx_unlock(&c->pend_mutex);
+         if ((source_fd >= 0 ? tva_session_send_dmabuf(c->sess, source_fd, metadata,
+                                        c->encode_key ? ENC_UNIT_FORCE_KEY : 0) :
+              tva_session_send_raw_frame(c->sess, raw, raw_len,
+                                        c->encode_key ? ENC_UNIT_FORCE_KEY : 0)) != TVA_OK)
+             goto fail;
+-        free(raw);
+-        if (source_fd >= 0) close(source_fd);
+-        if (feedback)
+-            *feedback = (void *)(uintptr_t)seq;
++        free(raw); raw=NULL;
++        bool imported_source = source_fd >= 0;
++        if (source_fd >= 0) { close(source_fd); source_fd=-1; }
++        if (imported_source && c->encode_fence_target) {
++            struct tva_fence *consumed = calloc(1,sizeof(*consumed));
++            if (consumed) {
++                consumed->magic=TVA_FENCE_MAGIC; consumed->codec=c;
++                consumed->encoder=true; consumed->encoder_seq=seq;
++                struct tva_fence *old=(struct tva_fence *)*c->encode_fence_target;
++                if (old && old->magic==TVA_FENCE_MAGIC && old->encoder) free(old);
++                *c->encode_fence_target=(struct pipe_fence_handle *)consumed;
++            } else {
++                struct tva_fence temporary={.magic=TVA_FENCE_MAGIC,.codec=c,
++                                           .encoder=true,.encoder_seq=seq};
++                if (!tva_codec_fence_wait(codec,(struct pipe_fence_handle *)&temporary,UINT64_MAX))
++                    goto fail;
++            }
++        }
++        if (feedback) *feedback=f;
++        c->encode_fence_target=NULL;
+         return;
+     }
+     if ((source_fd >= 0 ? tva_session_send_dmabuf(c->sess, source_fd, metadata,
+@@ -3601,15 +3667,16 @@
+     if (tva_encode_write_destination(c, destination, c->encode_packet,
+                                      encoded_len) < 0)
+         goto fail;
+-    /* Synchronous mode: feedback is the length with the top bit set. */
+-    if (feedback)
+-        *feedback = (void *)(((uintptr_t)1 << (sizeof(uintptr_t) * 8 - 1)) |
+-                             (uintptr_t)encoded_len);
++    f->len=encoded_len; f->ready=true;
++    if (feedback) *feedback=f; else free(f);
++    c->encode_fence_target=NULL;
+     free(raw);
+     if (source_fd >= 0) close(source_fd);
+     return;
+ 
+ fail:
++    if (!feedback_queued) free(f);
++    c->encode_fence_target=NULL;
+     if (source_fd >= 0) close(source_fd);
+     free(raw);
+     tva_mark_broken(c);
+@@ -3652,6 +3719,7 @@
+                       struct pipe_picture_desc *picture)
+ {
+     struct tva_codec *c = tva_codec(codec);
++    if (c->encoder) c->encode_fence_target=picture ? picture->out_fence : NULL;
+ 
+     /* VAAPI passes the producer fence when an encoded frame consumes a
+      * decoded surface.  The bridge reads the NV12 resources on the CPU, so
+@@ -5203,6 +5271,21 @@
+     if (!fence)
+         return 1;
+ 
++    if (fence->encoder) {
++        bool infinite=timeout==UINT64_MAX;
++        uint64_t deadline=infinite ? UINT64_MAX : os_time_get_nano()+timeout;
++        mtx_lock(&c->pend_mutex);
++        while (c->enc_received<fence->encoder_seq && !c->enc_failed && !c->broken && !c->quitting) {
++            uint64_t now=os_time_get_nano();
++            if (!infinite && now>=deadline) break;
++            struct timespec ts;
++            timespec_from_nsec(&ts,infinite ? now+200000000ull : MIN2(deadline,now+200000000ull));
++            u_cnd_monotonic_timedwait(&c->pend_cond,&c->pend_mutex,&ts);
++        }
++        bool ready=c->enc_received>=fence->encoder_seq;
++        mtx_unlock(&c->pend_mutex);
++        return ready;
++    }
+     struct tva_pending *p;
+ 
+     /* timeout comes in ns from the frontend; VA_TIMEOUT_INFINITE arrives as
+@@ -5399,8 +5482,8 @@
+     struct tva_codec *c = tva_codec(codec);
+     struct tva_fence *fence = (struct tva_fence *)fence_handle;
+ 
+-    if (!fence)
+-        return;
++    if (!fence) return;
++    if (fence->encoder) { free(fence); return; }
+     mtx_lock(&c->pend_mutex);
+     if (fence->queued && !fence->slot) {
+         for (unsigned i = 0; i < c->hevc_bootstrap_count; i++) {
+@@ -5487,6 +5570,7 @@
+         thrd_join(c->reader, NULL);
+     for (unsigned i = 0; i < TVA_ENC_DEPTH; i++) {
+         free(c->enc_jobs[i].data);
++        free(c->enc_jobs[i].feedback);
+         pipe_resource_reference(&c->enc_jobs[i].dest, NULL);
+         for (int plane=0; plane<2; plane++)
+             pipe_resource_reference(&c->enc_jobs[i].source[plane], NULL);
+--- a/src/gallium/frontends/va/tva_bridge.h
++++ b/src/gallium/frontends/va/tva_bridge.h
+@@ -22,11 +22,19 @@
+ struct vl_screen;
+ struct pipe_context;
+ struct pipe_screen;
++struct pipe_resource;
+ struct pipe_video_codec;
+ 
+ #ifdef __cplusplus
+ extern "C" {
+ #endif
++
++/* Cached CPU uploads into proven linear Adreno dma-bufs. Callers must wait
++ * for outstanding surface consumers/producers before writing. */
++bool tva_bridge_cached_upload_active(struct pipe_screen *screen);
++bool tva_bridge_upload_plane(struct pipe_context *pipe, struct pipe_resource *res,
++                             const void *data, unsigned width, unsigned height,
++                             unsigned stride);
+ 
+ /*
+  * Whether the bridge should take over VA decoding in this process.
+--- a/src/gallium/frontends/va/image.c
++++ b/src/gallium/frontends/va/image.c
+@@ -38,6 +38,7 @@
+ #include "vl/vl_video_buffer.h"
+ 
+ #include "va_private.h"
++#include "tva_bridge.h"
+ 
+ static const VAImageFormat formats[] =
+ {
+@@ -604,6 +605,13 @@
+    uint8_t *img_data = buf->data;
+    struct pipe_transfer *transfer = NULL;
+ 
++   bool cached_upload = surf->buffer->buffer_format == PIPE_FORMAT_NV12 &&
++      !buf->derived_surface.resource && tva_bridge_cached_upload_active(drv->pipe->screen);
++   if (cached_upload) {
++      VAStatus status = vlVaSyncSurfaceObjectLocked(drv, surf, VA_TIMEOUT_INFINITE);
++      if (status != VA_STATUS_SUCCESS) return status;
++   }
++
+    surf->buffer->get_resources(surf->buffer, view_resources);
+ 
+    if (buf->derived_surface.resource) {
+@@ -634,10 +642,13 @@
+       for (unsigned j = 0; j < tex->array_size; ++j) {
+          struct pipe_box dst_box;
+          u_box_3d(0, 0, j, width, height, 1, &dst_box);
+-         drv->pipe->texture_subdata(drv->pipe, tex, 0,
+-                                    PIPE_MAP_WRITE, &dst_box,
+-                                    data[i] + pitches[i] * j,
+-                                    pitches[i] * view_resources[i]->array_size, 0);
++         bool copied = cached_upload && j == 0 && tex->array_size == 1 &&
++            tva_bridge_upload_plane(drv->pipe,tex,data[i],width,height,pitches[i]);
++         if (!copied)
++            drv->pipe->texture_subdata(drv->pipe, tex, 0,
++                                       PIPE_MAP_WRITE, &dst_box,
++                                       data[i] + pitches[i] * j,
++                                       pitches[i] * view_resources[i]->array_size, 0);
+       }
+    }
+ 

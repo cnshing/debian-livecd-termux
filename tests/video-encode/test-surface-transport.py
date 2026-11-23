@@ -14,10 +14,13 @@ from pathlib import Path
 parser=argparse.ArgumentParser(description="Private Android fd transport pixel/keyframe/throughput checks")
 parser.add_argument('--daemon',type=Path,required=True)
 parser.add_argument('--out',type=Path,required=True)
+parser.add_argument('--crop',type=int,nargs=4,metavar=('X','Y','W','H'))
 parser.add_argument('--decoder-assets',type=Path,help='h264/hevc .bin, .json packet positions and -expected.json unit-index MD5 files')
 args=parser.parse_args()
 out=args.out.resolve();out.mkdir(exist_ok=False)
 w,h=3840,2160
+cx,cy,ew,eh=args.crop if args.crop else (0,0,w,h)
+assert min(cx,cy)>=0 and min(ew,eh)>=96 and cx+ew<=w and cy+eh<=h and not (cx|cy|ew|eh)&1
 class Desc(C.Structure):_fields_=[('width',C.c_uint32),('height',C.c_uint32),('layers',C.c_uint32),('format',C.c_uint32),('usage',C.c_uint64),('stride',C.c_uint32),('rfu0',C.c_uint32),('rfu1',C.c_uint64)]
 class Plane(C.Structure):_fields_=[('data',C.c_void_p),('pixel',C.c_uint32),('row',C.c_uint32)]
 class Planes(C.Structure):_fields_=[('count',C.c_uint32),('planes',Plane*4)]
@@ -32,15 +35,18 @@ pitch=p.planes[0].row;uv=min(p.planes[1].data,p.planes[2].data)-p.planes[0].data
 assert a.AHardwareBuffer_unlock(b,None)==0
 handle=n.AHardwareBuffer_getNativeHandle(b);fd=os.dup(handle[3]);size=os.lseek(fd,0,2)
 a.AHardwareBuffer_release(b)
-meta=[0x3231564e,w,h,pitch,uv,size,0,0];print('metadata',meta,flush=True)
+meta=[0x3231564e,w,h,pitch,uv,size,cx,cy];print('metadata',meta,flush=True)
 raw=mmap.mmap(fd,size)
 # A changing luma/chroma pattern, two frames repeated to check reuse.
-yrow=[bytes(32+(x*180//w+i*18)%190 for x in range(w)) for i in range(2)]
+yrow=[bytes(32+(x//32*13+i*18)%170 for x in range(w)) for i in range(2)]
+rowcache=[[row.translate(bytes(min(235,v+delta*7) for v in range(256))) for delta in range(16)] for row in yrow]
 refs=[]
-for i in range(2):refs.append(yrow[i]*h+bytes([70+i*40,170-i*30])*(w*h//4))
+for i in range(2):
+ luma=b''.join(rowcache[i][y//32%16][cx:cx+ew] for y in range(cy,cy+eh))
+ refs.append(luma+bytes([70+i*40,170-i*30])*(ew*eh//4))
 def fill(i):
  fcntl.ioctl(fd,0x40086200,struct.pack('Q',2|1))
- for y in range(h):raw[y*pitch:y*pitch+w]=yrow[i]
+ for y in range(h):raw[y*pitch:y*pitch+w]=rowcache[i][y//32%16]
  row=bytes([70+i*40,170-i*30])*(w//2)
  for y in range(h//2):raw[uv+y*pitch:uv+y*pitch+w]=row
  fcntl.ioctl(fd,0x40086200,struct.pack('Q',2|4))
@@ -65,7 +71,7 @@ try:
   assert proc.poll() is None
   time.sleep(.1)
  for cid,ext in [(5,'h264'),(6,'hevc')]:
-  s=session(cid,w,h);packets=[];flags=[]
+  s=session(cid,ew,eh);packets=[];flags=[]
   for i in range(4):
    fill(i%2);s.sendall(struct.pack('!I',0x20000000|32|(0x80000000 if i==2 else 0)))
    assert s.sendmsg([b'F'],[(socket.SOL_SOCKET,socket.SCM_RIGHTS,array.array('i',[fd]))])==1
@@ -73,7 +79,7 @@ try:
    length,flag,pts=struct.unpack('!3I',rec(s,12));packets.append(rec(s,length));flags.append(flag)
   assert [i for i,flag in enumerate(flags) if flag&1]==[0,2],flags;print(ext,'flags',flags,flush=True);s.sendall(b'\0'*4);s.close();(out/('encode.'+ext)).write_bytes(b''.join(packets))
  for cid,ext in [(5,'h264'),(6,'hevc')]:
-  fill(0);s=session(cid,w,h);packets=[]
+  fill(0);s=session(cid,ew,eh);packets=[]
   def read_packets():
    for i in range(120):
     length,flag,pts=struct.unpack('!3I',rec(s,12));packets.append(rec(s,length))
@@ -90,7 +96,7 @@ try:
  for ext in ('h264','hevc'):
   stats=out/(ext+'.psnr')
   subprocess.run(['ffmpeg','-v','error','-r','60','-i',str(out/('encode.'+ext)),
-   '-r','60','-f','rawvideo','-pixel_format','nv12','-video_size',f'{w}x{h}',
+   '-r','60','-f','rawvideo','-pixel_format','nv12','-video_size',f'{ew}x{eh}',
    '-i',str(out/'source.nv12'),'-filter_complex',
    f'[0:v]format=yuv420p,setparams=range=limited:colorspace=bt709[a];'
    f'[1:v]format=yuv420p,setparams=range=limited:colorspace=bt709[b];'
@@ -99,6 +105,25 @@ try:
   values=[float(v) for line in lines for v in re.findall(r'psnr_[yuv]:([0-9.inf]+)',line)]
   assert min(values)>35,(ext,values)
   print('PIXELS',ext,'minimum plane PSNR',min(values),flush=True)
+  negative=out/'swapped.nv12'
+  if not negative.exists():
+   bad=[]
+   for i in range(4):
+    frame=bytearray(refs[i%2]);base=ew*eh
+    frame[base::2],frame[base+1::2]=frame[base+1::2],frame[base::2]
+    bad.append(frame)
+   negative.write_bytes(b''.join(bad))
+  stats=out/(ext+'.negative.psnr')
+  subprocess.run(['ffmpeg','-v','error','-r','60','-i',str(out/('encode.'+ext)),
+   '-r','60','-f','rawvideo','-pixel_format','nv12','-video_size',f'{ew}x{eh}',
+   '-i',str(negative),'-filter_complex',
+   f'[0:v]format=yuv420p,setparams=range=limited:colorspace=bt709[a];'
+   f'[1:v]format=yuv420p,setparams=range=limited:colorspace=bt709[b];'
+   f'[a][b]psnr=stats_file={stats}:eof_action=endall','-f','null','-'],check=True)
+  bad_lines=stats.read_text().splitlines();assert len(bad_lines)==4,bad_lines
+  assert all(min(float(v) for v in re.findall(r'psnr_[uv]:([0-9.inf]+)',line))<25 for line in bad_lines)
+  print('CONTROL',ext,'swapped chroma rejected on every frame',flush=True)
+
 
  if args.decoder_assets:
   import hashlib,json,re

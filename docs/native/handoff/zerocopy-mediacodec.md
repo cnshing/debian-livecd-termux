@@ -186,3 +186,76 @@ API references:
 [public AHardwareBuffer API](https://developer.android.com/ndk/reference/group/a-hardware-buffer),
 [Media NDK](https://developer.android.com/ndk/reference/group/media),
 [VNDK handle wrapper](https://android.googlesource.com/platform/frameworks/native/+/refs/heads/main/libs/nativewindow/include/vndk/hardware_buffer.h).
+
+## Production transport candidate (2026-11-23)
+
+Branch `work/zerocopy`, implementation `dae45d5`, adds the shared negotiated
+transport in patches 0050 (daemon) and 0150 (both Mesa builds). Reserved package
+revisions are android-vaapi 21, android-vaapi-glibc 16 and termux-va 8.
+CI **45178853855** is the candidate; **45178009861 is VOID/cancelled**.
+At this checkpoint these debs have not been installed. The normal desktop still
+uses the previously qualified copy transport.
+
+Explicit opt-in: `TVA_SURFACE=1` in the daemon environment and
+`TVA_ZEROCOPY=1` in the VA client environment. Setting either to `0` preserves
+the copy route. H.264/HEVC 8-bit encoder sessions and 8-bit decoder sessions can
+negotiate the new path; Main10 and VP8 encoding keep their existing paths.
+No Mali default is changed. Startup pixel/codec qualification and enabling this
+by default remain outstanding; symbol/configuration discovery is not that proof.
+
+Append-only protocol reservations: `XFER_DMABUF=2`, encoder length-word bit 29
+`ENC_UNIT_DMABUF`, decoder sentinel `0xFFFFFFFD`. Existing protocol versions,
+inline/SHM framing and color bits retain their values. One marker byte carries
+exactly one CLOEXEC SCM_RIGHTS fd, followed by eight big-endian words:
+NV12 fourcc, allocation width/height, pitch, UV offset, allocation size, crop x/y.
+The decoder header carries its input-unit index before the marker. Missing,
+extra and truncated rights fail without leaking received descriptors.
+
+The encoder validates native layout against a fresh gralloc allocation before
+cloning a handle. Mismatching valid linear layouts take a CPU upload fallback;
+invalid bounds fail. Source GPU fences remain mandatory. Source Gallium
+resources stay referenced until the corresponding encoded packet is completed
+on the application thread. The stock EGL/GLES libraries are loaded explicitly;
+contexts belong to session threads and the EGL display is process-wide.
+
+Decoder UBWC buffers are sampled with `GL_EXT_YUV_target` into linear gralloc
+buffers, with U/V arranged as NV12 in physical memory. AImage ownership extends
+through GPU completion. The exported pixel fd retains storage independently of
+the released gralloc wrapper. The Mesa reader transfers fd ownership to its
+pending picture; the application thread imports/copies both planes and waits
+for completion before closing the fd. Screens that cannot import use a visible
+row staging fallback. No UBWC fd is labeled linear.
+
+Private actual-daemon acceptance (not yet installed VA acceptance):
+
+- 120/120 encoded packets per codec: H.264 **63.75 fps**, HEVC **63.79 fps**.
+  The separate changing-picture test has exact keys 0/2 and minimum per-plane
+  PSNR **42.27 / 48.34 dB**. Reference and decoded metadata/timing are normalized
+  for comparison. Encoded gradient and decoded test chart PNGs were opened.
+- H.264 and HEVC decoder output: **120/120 bit-exact each**, indexed by input
+  picture rather than output order. Separate no-hash transport runs measured
+  **70.36 / 69.48 fps**; these omit the final Gallium destination copy.
+- An initial fixture sent an SPS/PPS plus IDR in one unit at the second GOP.
+  The existing protocol classifies a leading parameter set as CSD, so that
+  fixture lost a picture. Splitting parameter sets into separate units, as the
+  VA bridge does, passes both complete clips. This was a fixture error.
+- The shared fd helper's host test passes identity, CLOEXEC, missing/extra/
+  truncated rights, wrong marker, EOF and descriptor leak checks. Both changed
+  Mesa C files pass syntax checks with the Android cross compiler; the daemon
+  builds with warnings enabled.
+
+Reproduction: `tests/video-encode/prepare-surface-fixtures.py` prepares synthetic
+H.264/HEVC clips and per-input-picture references. On Android run
+`test-surface-transport.py --daemon PATH --out NEW_DIRECTORY --decoder-assets
+DIRECTORY`. It starts only its own private daemon. Compile
+`test-dmabuf-fd.c` against the patched common header for host descriptor checks.
+Evidence on the phone: `~/pl-zerocopy/transport-acceptance-r1/`; earlier focused
+runs are `protocol-surface-r2`, `protocol-surface-r3` and
+`protocol-surface-decode-r3`. Host source/build scratch is
+`/home/cs/zerocopy-src/`; `update-patches.py` regenerates candidate patches from
+`tva-base`/`mesa-base` and the corresponding modified source trees.
+
+Still required: CI → local APT → installed VA encode/decode, dynamic 4K pixel
+and crop/ordering tests, copy negative controls, browser/mpv integration checks,
+regressions and startup proof before default enablement. Private transport
+throughput must not be reported as end-to-end installed VA throughput.

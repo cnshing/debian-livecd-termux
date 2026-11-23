@@ -218,7 +218,7 @@
 + c->context = z.eglCreateContext(z.display, config, EGL_NO_CONTEXT, ca);
 + if (c->context == EGL_NO_CONTEXT) goto fail;
 + if (window) {
-+  c->surface = z.eglCreateWindowSurface(z.display, config, window, NULL);
++  c->surface = z.eglCreateWindowSurface(z.display, config, (EGLNativeWindowType)window, NULL);
 +  if (c->surface == EGL_NO_SURFACE) goto fail;
 + }
 + if (!z.eglMakeCurrent(z.display, c->surface, c->surface, c->context)) goto fail;
@@ -275,7 +275,7 @@
 +         AHARDWAREBUFFER_USAGE_CPU_READ_OFTEN | AHARDWAREBUFFER_USAGE_CPU_WRITE_OFTEN};
 + if (AHardwareBuffer_allocate(&b->desc, &b->buffer)) return -1;
 + AHardwareBuffer_describe(b->buffer, &b->desc);
-+ AHardwareBuffer_Planes p;
++ AHardwareBuffer_Planes p = {0};
 + if (AHardwareBuffer_lockPlanes(b->buffer, AHARDWAREBUFFER_USAGE_CPU_READ_OFTEN,
 +                               -1, NULL, &p)) goto fail;
 + const YuvNativeHandle *handle = z.handle(b->buffer);

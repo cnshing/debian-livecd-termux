@@ -1,0 +1,44 @@
+--- a/common/tva_protocol.h
++++ b/common/tva_protocol.h
+@@ -171,6 +171,8 @@
+ /* Packed NV12 encoder inputs need 12.4 MB at 3840x2160. The framing is
+  * unchanged; both endpoints must be updated for raw frames over 8 MiB. */
+ #define MAX_ENCODE_FRAME (16 * 1024 * 1024)
++/* Packed P010 at 4096x2304 is 28 MiB. Only Main10 sessions use this cap. */
++#define MAX_ENCODE_FRAME_10BIT (32 * 1024 * 1024)
+ 
+ /* Encoder uplink controls in the high bits of the length word, which a raw
+  * frame (at most MAX_ENCODE_FRAME) never sets.  VA-API clients choose the
+--- a/daemon/termux-va.c
++++ b/daemon/termux-va.c
+@@ -2505,7 +2505,9 @@
+ 
+ static int encoder_run(Session *s)
+ {
+-    uint8_t *input = malloc(MAX_ENCODE_FRAME);
++    const size_t input_cap = codec_is_ten_bit(s->codec_id)
++                           ? MAX_ENCODE_FRAME_10BIT : MAX_ENCODE_FRAME;
++    uint8_t *input = malloc(input_cap);
+     if (!input)
+         return -1;
+ 
+@@ -2535,7 +2537,7 @@
+         }
+         bool force_key = sz & ENC_UNIT_FORCE_KEY;
+         sz &= ~ENC_UNIT_FORCE_KEY;
+-        if (sz > MAX_ENCODE_FRAME || recv_all(s->fd, input, sz) < 0) {
++        if (sz > input_cap || recv_all(s->fd, input, sz) < 0) {
+             dlog(1, "[%d] invalid encoder input frame size: %u", s->id, sz);
+             break;
+         }
+@@ -2656,7 +2658,9 @@
+         /* The client chooses sync frames per picture (ENC_UNIT_FORCE_KEY),
+          * as VA-API drivers do.  Keep the encoder's own period long. */
+         AMediaFormat_setInt32(enc_fmt, TVA_MF_KEY_I_FRAME_INTERVAL, 3600);
+-        AMediaFormat_setInt32(enc_fmt, TVA_MF_KEY_MAX_INPUT_SIZE, MAX_ENCODE_FRAME);
++        AMediaFormat_setInt32(enc_fmt, TVA_MF_KEY_MAX_INPUT_SIZE,
++                              codec_is_ten_bit(s->codec_id)
++                              ? MAX_ENCODE_FRAME_10BIT : MAX_ENCODE_FRAME);
+         /* Qualcomm's byte-buffer encoders accept semi-planar NV12, and for HEVC Main10
+          * only Venus linear P010 together with the Main10 HDR10 profile constant (4096):
+          * profile 2 and Android's P010 are refused. The stream is Main10 (profile_idc 2). */

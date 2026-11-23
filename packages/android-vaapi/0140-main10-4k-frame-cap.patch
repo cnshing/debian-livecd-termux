@@ -1,0 +1,27 @@
+--- a/src/gallium/frontends/va/tva_protocol.h
++++ b/src/gallium/frontends/va/tva_protocol.h
+@@ -171,6 +171,8 @@
+ /* Packed NV12 encoder inputs need 12.4 MB at 3840x2160. The framing is
+  * unchanged; both endpoints must be updated for raw frames over 8 MiB. */
+ #define MAX_ENCODE_FRAME (16 * 1024 * 1024)
++/* Packed P010 at 4096x2304 is 28 MiB. Only Main10 sessions use this cap. */
++#define MAX_ENCODE_FRAME_10BIT (32 * 1024 * 1024)
+ 
+ /* Encoder uplink controls in the high bits of the length word, which a raw
+  * frame (at most MAX_ENCODE_FRAME) never sets.  VA-API clients choose the
+--- a/src/gallium/frontends/va/tva_client.c
++++ b/src/gallium/frontends/va/tva_client.c
+@@ -997,9 +997,11 @@
+         return TVA_ERR_INVAL;
+     if (!data || len == 0)
+         return sess_err(s, TVA_ERR_INVAL, "empty raw frame", 0);
+-    if (len > TVA_MAX_RAW_FRAME_BYTES)
++    const size_t cap = codec_is_ten_bit(s->codec)
++                     ? MAX_ENCODE_FRAME_10BIT : TVA_MAX_RAW_FRAME_BYTES;
++    if (len > cap)
+         return sess_err(s, TVA_ERR_TOOBIG,
+-                        "raw frame exceeds the daemon's 16MB cap", 0);
++                        "raw frame exceeds the codec session cap", 0);
+     if (s->fd < 0)
+         return sess_err(s, TVA_ERR_STATE, "session has no live connection", 0);
+     if (s->tx_broken)

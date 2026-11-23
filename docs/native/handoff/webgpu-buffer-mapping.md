@@ -1,6 +1,6 @@
 # WebGPU buffer mapping on the Note10+
 
-## Investigation, 2026-11-22 (installed qualification pending)
+## Investigation, 2026-11-22
 
 The original error reproduces in Chrome 157.0.8103.78 with the installed launcher
 configuration, android-vaapi-glibc 14 and Mesa 26.2.6-108. A syscall trace identifies
@@ -38,7 +38,7 @@ trace reproduces the same V8 partial-sandbox mapping failure. Prototype logging
 was initially absent in Bionic because its preload constructors cannot see the
 environment yet; the packaged helper therefore reads its opt-out at call time.
 
-## Proposed packaged workaround
+## Packaged workaround
 
 `android-webgpu` provides `lib/android-webgpu/libwebgpu-map.so`. It uses the
 common AArch64 C ABI, with no dependency on either libc recorded, so the same
@@ -64,22 +64,60 @@ mappings, a tail with only one free 16 MiB hole, untouched unrelated/private/fix
 mappings, late environment availability, the opt-out, the absence of libc
 dependencies, launcher ABI routing and the Mali/device gates.
 
-## Device acceptance still required
+## Installed qualification, 2026-11-23
 
-- Install CI-built android-webgpu and livecd-desktop via the phone's local apt repo,
-  under `~/.parity-install.lock`, with no downgrades.
-- Both browsers: at least 50/50 full runs through installed launcher modules.
-- `test-web-graphics.py BROWSER --map-stress --out NEW_DIRECTORY`: 32 simultaneous
-  1 MiB buffers, 32 patterned upload/copy/readback map/unmap cycles, and a 64 MiB
-  buffer. All words are checked. The visible WebGL/WebGPU canvases still undergo
-  reference comparisons and screenshot checks.
-- Reproduce a failure with `LIVECD_WEBGPU_MAP=0`; open screenshots.
-- WebGL1/2 in all three browsers, Firefox WebGPU, Chromium/Chrome hardware video,
-  and `livecd validate` must pass.
+CI-built `android-webgpu 0.1.0-1` (run 45108106965) and
+`livecd-desktop 0.2.0-48` (run 45107508926) were installed through the phone's
+local APT repository, without downgrades. The full installed-launcher-module
+harness passed **50/50 Chromium 156 and 50/50 Chrome 157** sequential fresh-profile
+runs. Each run checks WebGL1/2, WebGPU render/compute and compositor pixels, plus
+32 simultaneous 1 MiB read buffers, 32 patterned upload/copy/readback cycles and
+a 64 MiB buffer. Every word is checked. Both use hardware Turnip; no diagnostic
+preload or special WebGPU flag is injected by the test.
+
+The installed helper SHA256 is
+`2c3c85b00f90a19f530563d122e5537e14f99b9e3a3917fe62f1ee4db849d43c`;
+installed acceleration.py is
+`ad01eca167599e898b810348fe9c97f727d9d4ae06013ec50bbb035ac2a0e5da`.
+The first and last screenshots from both browsers were opened: all three
+expected gradients are present. Firefox also passes WebGL1/2 and WebGPU with
+mapping stress, without loading the helper.
+
+Desktop restart exposed a pre-existing packaging omission: desktop.py imports
+audio.py, but the package lacked its source link. The exact committed module was
+restored to recover the desktop (validate 30/30). Revision 49 adds the missing
+link; its CI artifact (45176219600) contains audio.py and the identical tested
+acceleration.py. A host packaging test now checks every packaged Python module's
+local imports.
+
+Revision 49 was then installed via local APT with no other package changes.
+Desktop stop/start and validation pass **30/30**, including AAudio. The installed
+helper/launcher hashes remain identical; a further **3/3 stress runs per browser**
+pass after that upgrade.
+
+With `LIVECD_WEBGPU_MAP=0`, Chromium fails 7/20 full runs and Chrome fails 1/6
+(stopped after the first failure). Every failing control records the original
+“Failed to allocate memory for buffer mapping” in Dawn's uncaptured errors; the
+mapAsync rejection itself says the buffer is invalid. Both opt-out screenshots
+were opened: WebGL remains visible and the WebGPU canvas is blank. The runner's
+first control loop checked only the rejection text, so it unnecessarily continued
+to 20 Chromium runs; the captured errors establish all seven original failures.
+
+Hardware-video regression through installed Chromium/Chrome commands passes
+H.264, HEVC and VP9, two fullscreen/windowed cycles per clip, with hardware GPU
+and VA-API decode required. Pinned fixture frames pass reference PSNR/SSIM and
+color checks at both browser and compositor layers; contact sheets were opened.
+An initial invocation incorrectly combined the legacy simple-color-bar checker
+with patterned v2 fixtures; the corrected runs use the manifest's frame checks.
+Final `livecd validate` is **30/30**. WebGPU stays enabled by default.
+
+Host regression results: mapping/launcher checks 10/10; package integration 16/16
+(including missing-local-import coverage); Mali acceleration 24/24; Adreno setup
+9/9. CI runs 45108106965 and 45176219600 pass. No release was modified.
 
 Evidence: `temp/parity-note10-20261116/webgpu-map/` on the host and
 `~/pl-webgpu-map/` on the Note10+. Private displays only. The shared temporary SSH
-key is needed by the zerocopy lane too; the last lane removes it.
+key remains for the active zerocopy lane; the last lane removes it.
 
 ## Original report, 2026-11-19
 
@@ -92,5 +130,5 @@ Installed launchers, mesa 26.2.6-107 / android-vaapi-glibc 13:
 
 The adapter was Turnip, not a software fallback. The original hypothesis was
 renderer transfer-buffer exhaustion after WebGL. The current trace supersedes
-that hypothesis for Chrome's reproduced allocation error. Vulkan mapping and
+that hypothesis for both browsers' reproduced allocation errors. Vulkan mapping and
 KGSL allocation limits do not account for the observed successful syscalls.

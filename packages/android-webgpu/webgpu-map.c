@@ -25,11 +25,9 @@ static uintptr_t reservation_end;
 static int enabled;
 
 __attribute__((constructor)) static void initialize(void) {
-    const char *option = getenv("LIVECD_WEBGPU_MAP");
-    enabled = option && option[0] == '1' && option[1] == '\0' &&
-              access("/dev/kgsl-3d0", F_OK) == 0 && access("/dev/mali0", F_OK) != 0;
+    enabled = access("/dev/kgsl-3d0", F_OK) == 0 && access("/dev/mali0", F_OK) != 0;
 #ifdef WEBGPU_MAP_TEST
-    enabled = option && option[0] == '1' && option[1] == '\0';
+    enabled = 1;
 #endif
 }
 
@@ -52,7 +50,11 @@ void *mmap(void *hint, size_t size, int protection, int flags, int fd, off_t off
     const uintptr_t limit = UINT64_C(1) << 39;
     uintptr_t end = __atomic_load_n(&reservation_end, __ATOMIC_RELAXED);
     uintptr_t requested = (uintptr_t)hint;
-    if (enabled && end && requested >= limit && (flags & MAP_SHARED) &&
+    // Bionic does not expose environ to preload constructors yet. Read this
+    // at call time, once the browser has entered libc initialization/main.
+    const char *option = enabled ? getenv("LIVECD_WEBGPU_MAP") : NULL;
+    int active = option && option[0] == '1' && option[1] == '\0';
+    if (active && end && requested >= limit && (flags & MAP_SHARED) &&
         !(flags & (MAP_FIXED | 0x100000 /* MAP_FIXED_NOREPLACE */)) &&
         end < limit && size < limit - end && shared_transfer_fd(fd)) {
         uintptr_t available = limit - end - size;
@@ -60,7 +62,7 @@ void *mmap(void *hint, size_t size, int protection, int flags, int fd, off_t off
         hint = (void *)(revised & ~UINT64_C(4095));
     }
     void *result = (void *)syscall(SYS_mmap, hint, size, protection, flags, fd, offset);
-    if (enabled && result != MAP_FAILED && protection == PROT_NONE &&
+    if (active && result != MAP_FAILED && protection == PROT_NONE &&
         (flags & MAP_NORESERVE) && (flags & MAP_ANONYMOUS) && (flags & MAP_PRIVATE) &&
         !(flags & (MAP_FIXED | 0x100000)) && size >= (UINT64_C(64) << 30) &&
         (uintptr_t)result < limit && size < limit - (uintptr_t)result) {

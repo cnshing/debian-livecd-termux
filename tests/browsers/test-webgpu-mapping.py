@@ -20,7 +20,7 @@ DRIVER = r'''
 #include <sys/mman.h>
 #include <unistd.h>
 int main(int argc, char **argv) {
-    (void)argc;
+    if (argc > 3) assert(setenv("LIVECD_WEBGPU_MAP", "1", 1) == 0);
     const size_t page = 4096, reservation = 128UL << 30;
     void *base = mmap((void *)(128UL << 30), reservation, PROT_NONE,
                      MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
@@ -77,6 +77,10 @@ class Mapping(unittest.TestCase):
 
     def test_opt_out_preserves_original_mapping(self):
         self.check_mapping('matching', 'shared', '0')
+
+    def test_environment_available_only_after_constructors(self):
+        subprocess.run([str(self.driver), 'matching', 'shared', 'late'], check=True,
+                       env={**os.environ, 'LD_PRELOAD': str(self.library), 'LIVECD_WEBGPU_MAP': '0'})
 
     def test_library_has_no_libc_dependency(self):
         result = subprocess.run(['readelf', '-d', str(self.library)], check=True, capture_output=True, text=True)

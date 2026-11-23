@@ -33,9 +33,10 @@ information, uncaptured errors and device-loss details when a mapping rejects.
 
 The private compatibility prototype passed 20/20 Chrome and 20/20 Chromium runs
 including mapping stress. These are debugging results, **not installed acceptance**.
-The current Bionic Chromium recipe disables pointer-compression support and did
-not exercise this V8 fallback in the traced-helper runs. Do not assume its old
-18/20 failure rate has the same cause without reproducing it independently.
+A subsequent unmodified Chromium stress control also failed, and its syscall
+trace reproduces the same V8 partial-sandbox mapping failure. Prototype logging
+was initially absent in Bionic because its preload constructors cannot see the
+environment yet; the packaged helper therefore reads its opt-out at call time.
 
 ## Proposed packaged workaround
 

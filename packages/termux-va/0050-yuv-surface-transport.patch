@@ -95,7 +95,7 @@
 +#endif
 --- /dev/null
 +++ b/daemon/tva_surface.h
-@@ -0,0 +1,290 @@
+@@ -0,0 +1,299 @@
 +/* SPDX-License-Identifier: GPL-3.0-or-later
 + * Stock Android YUV surface interop. All GL objects belong to the calling
 + * session thread. The display lives for the process, never per session. */
@@ -120,6 +120,10 @@
 + X(eglGetDisplay) X(eglInitialize) X(eglChooseConfig) X(eglCreateContext) \
 + X(eglDestroyContext) X(eglMakeCurrent) X(eglCreateWindowSurface) \
 + X(eglDestroySurface) X(eglSwapInterval) X(eglSwapBuffers) X(eglGetProcAddress)
++#define Z_ANDROID_FUNCTIONS(X) \
++ X(AHardwareBuffer_allocate) X(AHardwareBuffer_describe) \
++ X(AHardwareBuffer_lockPlanes) X(AHardwareBuffer_unlock) X(AHardwareBuffer_release) \
++ X(ANativeWindow_acquire) X(ANativeWindow_release)
 +#define Z_GL_FUNCTIONS(X) \
 + X(glGetString) X(glCreateShader) X(glShaderSource) X(glCompileShader) \
 + X(glGetShaderiv) X(glDeleteShader) X(glCreateProgram) X(glAttachShader) \
@@ -133,6 +137,7 @@
 +#define Z_DECLARE(n) __typeof__(&n) n;
 + Z_EGL_FUNCTIONS(Z_DECLARE)
 + Z_GL_FUNCTIONS(Z_DECLARE)
++ Z_ANDROID_FUNCTIONS(Z_DECLARE)
 +#undef Z_DECLARE
 + PFNEGLGETNATIVECLIENTBUFFERANDROIDPROC native;
 + PFNEGLCREATEIMAGEKHRPROC create_image;
@@ -152,13 +157,17 @@
 + void *egl = dlopen("/system/lib64/libEGL.so", RTLD_NOW | RTLD_LOCAL);
 + void *gl = dlopen("/system/lib64/libGLESv2.so", RTLD_NOW | RTLD_LOCAL);
 + void *nw = dlopen("/system/lib64/libnativewindow.so", RTLD_NOW | RTLD_LOCAL);
-+ if (!egl || !gl || !nw) return;
++ void *android = dlopen("/system/lib64/libandroid.so", RTLD_NOW | RTLD_LOCAL);
++ if (!egl || !gl || !nw || !android) return;
 +#define Z_LOAD_EGL(n) if (!(z.n = dlsym(egl, #n))) return;
 + Z_EGL_FUNCTIONS(Z_LOAD_EGL)
 +#undef Z_LOAD_EGL
 +#define Z_LOAD_GL(n) if (!(z.n = dlsym(gl, #n))) return;
 + Z_GL_FUNCTIONS(Z_LOAD_GL)
 +#undef Z_LOAD_GL
++#define Z_LOAD_ANDROID(n) if (!(z.n = dlsym(android, #n))) return;
++ Z_ANDROID_FUNCTIONS(Z_LOAD_ANDROID)
++#undef Z_LOAD_ANDROID
 + z.native = (void *)z.eglGetProcAddress("eglGetNativeClientBufferANDROID");
 + z.create_image = (void *)z.eglGetProcAddress("eglCreateImageKHR");
 + z.destroy_image = (void *)z.eglGetProcAddress("eglDestroyImageKHR");
@@ -188,7 +197,7 @@
 +  if (c->surface != EGL_NO_SURFACE) z.eglDestroySurface(z.display, c->surface);
 +  z.eglDestroyContext(z.display, c->context);
 + }
-+ if (c->window) ANativeWindow_release(c->window);
++ if (c->window) z.ANativeWindow_release(c->window);
 + memset(c, 0, sizeof(*c));
 +}
 +static GLuint yuv_shader(GLenum type, const char *text)
@@ -207,7 +216,7 @@
 + pthread_once(&z_once, z_load);
 + if (!z.ready) return -1;
 + c->window = window;
-+ if (window) ANativeWindow_acquire(window);
++ if (window) z.ANativeWindow_acquire(window);
 + EGLint attrs[] = {EGL_SURFACE_TYPE, window ? EGL_WINDOW_BIT : EGL_PBUFFER_BIT,
 +  EGL_RENDERABLE_TYPE, EGL_OPENGL_ES2_BIT, EGL_COLOR_BUFFER_TYPE,
 +  EGL_YUV_BUFFER_EXT, EGL_YUV_ORDER_EXT, EGL_YUV_ORDER_YUV_EXT,
@@ -263,7 +272,7 @@
 +} YuvBuffer;
 +static void yuv_buffer_close(YuvBuffer *b)
 +{
-+ if (b->buffer) AHardwareBuffer_release(b->buffer);
++ if (b->buffer) z.AHardwareBuffer_release(b->buffer);
 + memset(b, 0, sizeof(*b));
 +}
 +static int yuv_buffer_new(YuvBuffer *b, unsigned width, unsigned height)
@@ -274,10 +283,10 @@
 +  .format=AHARDWAREBUFFER_FORMAT_Y8Cb8Cr8_420,
 +  .usage=AHARDWAREBUFFER_USAGE_GPU_SAMPLED_IMAGE | AHARDWAREBUFFER_USAGE_GPU_FRAMEBUFFER |
 +         AHARDWAREBUFFER_USAGE_CPU_READ_OFTEN | AHARDWAREBUFFER_USAGE_CPU_WRITE_OFTEN};
-+ if (AHardwareBuffer_allocate(&b->desc, &b->buffer)) return -1;
-+ AHardwareBuffer_describe(b->buffer, &b->desc);
++ if (z.AHardwareBuffer_allocate(&b->desc, &b->buffer)) return -1;
++ z.AHardwareBuffer_describe(b->buffer, &b->desc);
 + AHardwareBuffer_Planes p = {0};
-+ if (AHardwareBuffer_lockPlanes(b->buffer, AHARDWAREBUFFER_USAGE_CPU_READ_OFTEN,
++ if (z.AHardwareBuffer_lockPlanes(b->buffer, AHARDWAREBUFFER_USAGE_CPU_READ_OFTEN,
 +                               -1, NULL, &p)) goto fail;
 + const YuvNativeHandle *handle = z.handle(b->buffer);
 + off_t size = handle && handle->numFds == 2 ? lseek(handle->data[0], 0, SEEK_END) : -1;
@@ -299,7 +308,7 @@
 +  b->uv_offset = (uint32_t)offset;
 +  b->size = (uint32_t)size;
 + }
-+ if (AHardwareBuffer_unlock(b->buffer, NULL) || !valid) goto fail;
++ if (z.AHardwareBuffer_unlock(b->buffer, NULL) || !valid) goto fail;
 + return 0;
 +fail:
 + yuv_buffer_close(b);
@@ -325,7 +334,7 @@
 + int result = z.wrap(&b->desc, copy, 3 /* CLONE */, &imported);
 + free(copy);
 + if (result || !imported) goto fail;
-+ AHardwareBuffer_release(b->buffer); b->buffer = imported;
++ z.AHardwareBuffer_release(b->buffer); b->buffer = imported;
 + return 0;
 +fail:
 + yuv_buffer_close(b);
@@ -418,7 +427,7 @@
 + int result=0;
 + if (yuv_open(&context,NULL) || yuv_buffer_new(&source,128,128)) goto out;
 + AHardwareBuffer_Planes planes={0};
-+ if (AHardwareBuffer_lockPlanes(source.buffer,AHARDWAREBUFFER_USAGE_CPU_WRITE_OFTEN,
++ if (z.AHardwareBuffer_lockPlanes(source.buffer,AHARDWAREBUFFER_USAGE_CPU_WRITE_OFTEN,
 +                               -1,NULL,&planes)) goto out;
 + unsigned char *uv=planes.planes[source.nv21 ? 2 : 1].data;
 + for (unsigned y=0;y<128;y++) for (unsigned x=0;x<128;x++)
@@ -427,7 +436,7 @@
 +  uv[y*source.stride+x*2]=70+20*(x/32);
 +  uv[y*source.stride+x*2+1]=170-20*(y/32);
 + }
-+ if (AHardwareBuffer_unlock(source.buffer,NULL)) goto out;
++ if (z.AHardwareBuffer_unlock(source.buffer,NULL)) goto out;
 + const YuvNativeHandle *handle=z.handle(source.buffer);
 + uint32_t metadata[8]={0x3231564e,128,128,source.stride,source.uv_offset,source.size,0,0};
 + if (yuv_buffer_import(&imported,handle->data[0],metadata)) goto out;
@@ -451,7 +460,7 @@
 + if (AMediaCodec_configure(encoder,format,NULL,NULL,1)!=AMEDIA_OK ||
 +     AMediaCodec_createInputSurface(encoder,&window)!=AMEDIA_OK ||
 +     AMediaCodec_start(encoder)!=AMEDIA_OK || yuv_open(&context,window)) goto out;
-+ ANativeWindow_release(window); window=NULL;
++ z.ANativeWindow_release(window); window=NULL;
 + if (yuv_draw(&context,imported.buffer,NULL,128,128,0,1,1,-1,imported.nv21 ^ !!getenv("TVA_TEST_SURFACE_BAD_IMPORT"),1000000) ||
 +     AMediaCodec_signalEndOfInputStream(encoder)!=AMEDIA_OK) goto out;
 + int eos=0;
@@ -510,17 +519,17 @@
 + if (!image || AImage_getHardwareBuffer(image,&decoded)!=AMEDIA_OK ||
 +     AImage_getCropRect(image,&crop)!=AMEDIA_OK ||
 +     crop.right-crop.left!=128 || crop.bottom-crop.top!=128) goto out;
-+ AHardwareBuffer_describe(decoded,&desc);
++ z.AHardwareBuffer_describe(decoded,&desc);
 + if (crop.left<0 || crop.top<0 || crop.right>(int)desc.width || crop.bottom>(int)desc.height ||
 +     yuv_open(&context,NULL) || yuv_buffer_new(&linear,128,128) ||
 +     yuv_draw(&context,decoded,linear.buffer,128,128,
 +       (float)crop.left/desc.width,(float)crop.top/desc.height,
 +       128.0f/desc.width,128.0f/desc.height,linear.nv21,0)) goto out;
 + memset(&planes,0,sizeof(planes));
-+ if (AHardwareBuffer_lockPlanes(linear.buffer,AHARDWAREBUFFER_USAGE_CPU_READ_OFTEN,
++ if (z.AHardwareBuffer_lockPlanes(linear.buffer,AHARDWAREBUFFER_USAGE_CPU_READ_OFTEN,
 +                               -1,NULL,&planes)) goto out;
 + if (planes.planeCount!=3 || !planes.planes[0].data || !planes.planes[1].data ||
-+     !planes.planes[2].data) { AHardwareBuffer_unlock(linear.buffer,NULL); goto out; }
++     !planes.planes[2].data) { z.AHardwareBuffer_unlock(linear.buffer,NULL); goto out; }
 + uv=planes.planes[linear.nv21 ? 2 : 1].data;
 + result=1;
 + for (unsigned y=16;y<128;y+=32) for (unsigned x=16;x<128;x+=32) {
@@ -529,7 +538,7 @@
 +  if (abs(actual-(int)qualify_y(x,y))>6 || abs(u-(70+20*(int)(x/64)))>6 ||
 +      abs(v-(170-20*(int)(y/64)))>6) result=0;
 + }
-+ if (AHardwareBuffer_unlock(linear.buffer,NULL)) result=0;
++ if (z.AHardwareBuffer_unlock(linear.buffer,NULL)) result=0;
 +out:
 + yuv_close(&context);
 + yuv_buffer_close(&source); yuv_buffer_close(&imported); yuv_buffer_close(&linear);
@@ -537,7 +546,7 @@
 + if (encoder) { AMediaCodec_stop(encoder); AMediaCodec_delete(encoder); }
 + if (decoder) { AMediaCodec_stop(decoder); AMediaCodec_delete(decoder); }
 + if (reader) AImageReader_delete(reader);
-+ if (window) ANativeWindow_release(window);
++ if (window) z.ANativeWindow_release(window);
 + if (format) AMediaFormat_delete(format);
 + return result;
 +}
@@ -698,7 +707,7 @@
 +        AImage_getCropRect(image, &crop) != AMEDIA_OK ||
 +        AImage_getTimestamp(image, &timestamp) != AMEDIA_OK ||
 +        timestamp / (1000 * PTS_UNIT_SCALE) != pts) goto out;
-+    AHardwareBuffer_describe(source, &desc);
++    z.AHardwareBuffer_describe(source, &desc);
 +    int width=crop.right-crop.left, height=crop.bottom-crop.top;
 +    if (width < 96 || height < 96 || crop.left < 0 || crop.top < 0 ||
 +        crop.right > (int)desc.width || crop.bottom > (int)desc.height ||
@@ -824,7 +833,7 @@
 +        if (size != (uint64_t)s->w * s->h * 3 / 2 ||
 +            yuv_buffer_new(&b, s->w, s->h)) return -1;
 +        AHardwareBuffer_Planes p;
-+        if (AHardwareBuffer_lockPlanes(b.buffer, AHARDWAREBUFFER_USAGE_CPU_WRITE_OFTEN,
++        if (z.AHardwareBuffer_lockPlanes(b.buffer, AHARDWAREBUFFER_USAGE_CPU_WRITE_OFTEN,
 +                                      -1, NULL, &p)) goto out;
 +        for (int row=0; row<s->h; row++)
 +            memcpy((uint8_t *)p.planes[0].data + row*p.planes[0].rowStride,
@@ -834,7 +843,7 @@
 +            ((uint8_t *)p.planes[1].data)[row*p.planes[1].rowStride+col*2] = uv[row*s->w+col*2];
 +            ((uint8_t *)p.planes[2].data)[row*p.planes[2].rowStride+col*2] = uv[row*s->w+col*2+1];
 +        }
-+        if (AHardwareBuffer_unlock(b.buffer, NULL)) goto out;
++        if (z.AHardwareBuffer_unlock(b.buffer, NULL)) goto out;
 +    }
 +    result = yuv_draw(&s->yuv, b.buffer, NULL, s->w, s->h,
 +                      x, y, rw, rh, swap, pts_us * 1000);
@@ -962,11 +971,11 @@
 +            if (getenv("TVA_TEST_SURFACE_SETUP_FAIL")) goto encoder_copy_retry;
 +            ANativeWindow *window = NULL;
 +            if (AMediaCodec_createInputSurface(s->codec, &window) != AMEDIA_OK) {
-+                if (window) ANativeWindow_release(window);
++                if (window) z.ANativeWindow_release(window);
 +                goto encoder_copy_retry;
 +            }
 +            int result = yuv_open(&s->yuv, window);
-+            ANativeWindow_release(window);
++            z.ANativeWindow_release(window);
 +            if (result) goto encoder_copy_retry;
 +        }
          st = AMediaCodec_start(s->codec);

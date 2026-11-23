@@ -1,0 +1,759 @@
+--- a/common/tva_protocol.h
++++ b/common/tva_protocol.h
+@@ -157,7 +157,8 @@
+  */
+ typedef enum {
+     XFER_INLINE = 0,
+-    XFER_SHM    = 1
++    XFER_SHM    = 1,
++    XFER_DMABUF = 2 /* negotiated YUV surface transport; inline remains valid */
+ } XferMode;
+ 
+ /* Handshake status codes (response word 1):
+@@ -183,6 +184,11 @@
+  *                frame, and no packet is returned for it. */
+ #define ENC_UNIT_FORCE_KEY   0x80000000u
+ #define ENC_UNIT_SET_BITRATE 0x40000000u
++#define ENC_UNIT_DMABUF      0x20000000u
++/* DMABUF payload: marker+SCM_RIGHTS, then 8 big-endian u32 words:
++ * [NV12 fourcc][allocation width][height][pitch][UV offset][size][crop x][y]. */
++#define DMABUF_WORDS 8
++#define DMABUFFRAME_SENTINEL 0xFFFFFFFDu
+ 
+ /* Encoder colour aspects (debian-livecd-termux).  Encoder sessions are always
+  * inline, and daemons before this ignore the handshake's transport word for
+--- /dev/null
++++ b/common/tva_fd.h
+@@ -0,0 +1,68 @@
++/* SPDX-License-Identifier: GPL-3.0-or-later
++ * One SCM_RIGHTS fd is attached to exactly one marker byte. Metadata follows
++ * separately, so short stream reads cannot lose or duplicate ancillary data. */
++#ifndef TVA_FD_H
++#define TVA_FD_H
++#include <errno.h>
++#include <fcntl.h>
++#include <poll.h>
++#include <stdint.h>
++#include <string.h>
++#include <sys/socket.h>
++#include <time.h>
++#include <unistd.h>
++static int tva_fd_wait(int socket, short events, int64_t deadline)
++{
++ for (;;) {
++  struct timespec ts;
++  clock_gettime(CLOCK_MONOTONIC, &ts);
++  int64_t remaining = deadline - ((int64_t)ts.tv_sec * 1000 + ts.tv_nsec / 1000000);
++  if (remaining <= 0) return -1;
++  struct pollfd p = {.fd=socket, .events=events};
++  int r = poll(&p, 1, (int)remaining);
++  if (r < 0 && errno == EINTR) continue;
++  return r > 0 && (p.revents & events) ? 0 : -1;
++ }
++}
++static int tva_transfer_fd(int socket, int sending, int *fd)
++{
++ struct timespec ts;
++ clock_gettime(CLOCK_MONOTONIC, &ts);
++ int64_t deadline = (int64_t)ts.tv_sec * 1000 + ts.tv_nsec / 1000000 + 5000;
++ for (;;) {
++  if (tva_fd_wait(socket, sending ? POLLOUT : POLLIN, deadline)) return -1;
++  unsigned char marker = sending ? 0x46 : 0;
++  struct iovec io = {.iov_base=&marker, .iov_len=1};
++  union { struct cmsghdr align; unsigned char data[CMSG_SPACE(16 * sizeof(int))]; } control;
++  memset(&control, 0, sizeof(control));
++  struct msghdr msg = {.msg_iov=&io, .msg_iovlen=1,
++   .msg_control=control.data, .msg_controllen=sizeof(control.data)};
++  if (sending) {
++   msg.msg_controllen = CMSG_SPACE(sizeof(int));
++   struct cmsghdr *c = CMSG_FIRSTHDR(&msg);
++   c->cmsg_level=SOL_SOCKET; c->cmsg_type=SCM_RIGHTS;
++   c->cmsg_len=CMSG_LEN(sizeof(int)); memcpy(CMSG_DATA(c), fd, sizeof(int));
++  }
++  ssize_t n = sending ? sendmsg(socket, &msg, MSG_NOSIGNAL | MSG_DONTWAIT)
++                       : recvmsg(socket, &msg, MSG_CMSG_CLOEXEC | MSG_DONTWAIT);
++  if (n < 0 && (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK)) continue;
++  if (sending) return n == 1 ? 0 : -1;
++  int received=-1, count=0, bad=(n != 1 || marker != 0x46 ||
++                                     (msg.msg_flags & (MSG_CTRUNC | MSG_TRUNC)));
++  if (n < 0) return -1;
++  for (struct cmsghdr *c=CMSG_FIRSTHDR(&msg); c; c=CMSG_NXTHDR(&msg,c)) {
++   if (c->cmsg_level != SOL_SOCKET || c->cmsg_type != SCM_RIGHTS ||
++       c->cmsg_len < CMSG_LEN(0)) { bad=1; continue; }
++   size_t bytes=c->cmsg_len-CMSG_LEN(0);
++   if (bytes % sizeof(int)) bad=1;
++   for (size_t i=0; i<bytes/sizeof(int); i++) {
++    int value; memcpy(&value, (char *)CMSG_DATA(c)+i*sizeof(int), sizeof(int));
++    if (!count++) received=value; else close(value);
++   }
++  }
++  if (bad || count != 1) { if (received >= 0) close(received); return -1; }
++  *fd=received;
++  return 0;
++ }
++}
++#endif
+--- /dev/null
++++ b/daemon/tva_surface.h
+@@ -0,0 +1,289 @@
++/* SPDX-License-Identifier: GPL-3.0-or-later
++ * Stock Android YUV surface interop. All GL objects belong to the calling
++ * session thread. The display lives for the process, never per session. */
++#include <android/hardware_buffer.h>
++#include <android/native_window.h>
++#include <media/NdkImageReader.h>
++#include <media/NdkImage.h>
++#include <EGL/egl.h>
++#include <EGL/eglext.h>
++#include <GLES2/gl2.h>
++#include <GLES2/gl2ext.h>
++#include <dlfcn.h>
++#include <sys/stat.h>
++#include <pthread.h>
++#include <stdlib.h>
++#include <string.h>
++#include <unistd.h>
++#include "tva_protocol.h"
++typedef struct { int version, numFds, numInts; int data[]; } YuvNativeHandle;
++
++#define Z_EGL_FUNCTIONS(X) \
++ X(eglGetDisplay) X(eglInitialize) X(eglChooseConfig) X(eglCreateContext) \
++ X(eglDestroyContext) X(eglMakeCurrent) X(eglCreateWindowSurface) \
++ X(eglDestroySurface) X(eglSwapInterval) X(eglSwapBuffers) X(eglGetProcAddress)
++#define Z_GL_FUNCTIONS(X) \
++ X(glGetString) X(glCreateShader) X(glShaderSource) X(glCompileShader) \
++ X(glGetShaderiv) X(glDeleteShader) X(glCreateProgram) X(glAttachShader) \
++ X(glBindAttribLocation) X(glLinkProgram) X(glGetProgramiv) X(glDeleteProgram) \
++ X(glUseProgram) X(glGetUniformLocation) X(glUniform4f) X(glGenTextures) \
++ X(glDeleteTextures) X(glBindTexture) X(glTexParameteri) X(glGenFramebuffers) \
++ X(glDeleteFramebuffers) X(glBindFramebuffer) X(glFramebufferTexture2D) \
++ X(glCheckFramebufferStatus) X(glVertexAttribPointer) X(glEnableVertexAttribArray) \
++ X(glViewport) X(glDrawArrays) X(glGetError) X(glFinish)
++static struct {
++#define Z_DECLARE(n) __typeof__(&n) n;
++ Z_EGL_FUNCTIONS(Z_DECLARE)
++ Z_GL_FUNCTIONS(Z_DECLARE)
++#undef Z_DECLARE
++ PFNEGLGETNATIVECLIENTBUFFERANDROIDPROC native;
++ PFNEGLCREATEIMAGEKHRPROC create_image;
++ PFNEGLDESTROYIMAGEKHRPROC destroy_image;
++ PFNGLEGLIMAGETARGETTEXTURE2DOESPROC bind_image;
++ PFNEGLPRESENTATIONTIMEANDROIDPROC presentation_time;
++ const YuvNativeHandle *(*handle)(const AHardwareBuffer *);
++ int (*wrap)(const AHardwareBuffer_Desc *, const YuvNativeHandle *, int,
++             AHardwareBuffer **);
++ EGLDisplay display;
++ int ready;
++} z;
++static pthread_once_t z_once = PTHREAD_ONCE_INIT;
++static void z_load(void)
++{
++ /* Absolute paths prevent the desktop Mesa override from intercepting GL. */
++ void *egl = dlopen("/system/lib64/libEGL.so", RTLD_NOW | RTLD_LOCAL);
++ void *gl = dlopen("/system/lib64/libGLESv2.so", RTLD_NOW | RTLD_LOCAL);
++ void *nw = dlopen("/system/lib64/libnativewindow.so", RTLD_NOW | RTLD_LOCAL);
++ if (!egl || !gl || !nw) return;
++#define Z_LOAD_EGL(n) if (!(z.n = dlsym(egl, #n))) return;
++ Z_EGL_FUNCTIONS(Z_LOAD_EGL)
++#undef Z_LOAD_EGL
++#define Z_LOAD_GL(n) if (!(z.n = dlsym(gl, #n))) return;
++ Z_GL_FUNCTIONS(Z_LOAD_GL)
++#undef Z_LOAD_GL
++ z.native = (void *)z.eglGetProcAddress("eglGetNativeClientBufferANDROID");
++ z.create_image = (void *)z.eglGetProcAddress("eglCreateImageKHR");
++ z.destroy_image = (void *)z.eglGetProcAddress("eglDestroyImageKHR");
++ z.bind_image = (void *)z.eglGetProcAddress("glEGLImageTargetTexture2DOES");
++ z.presentation_time = (void *)z.eglGetProcAddress("eglPresentationTimeANDROID");
++ z.handle = dlsym(nw, "AHardwareBuffer_getNativeHandle");
++ z.wrap = dlsym(nw, "AHardwareBuffer_createFromHandle");
++ if (!z.native || !z.create_image || !z.destroy_image || !z.bind_image ||
++     !z.presentation_time || !z.handle || !z.wrap) return;
++ z.display = z.eglGetDisplay(EGL_DEFAULT_DISPLAY);
++ if (z.display == EGL_NO_DISPLAY || !z.eglInitialize(z.display, NULL, NULL)) return;
++ z.ready = 1;
++}
++
++typedef struct {
++ EGLContext context;
++ EGLSurface surface;
++ GLuint program;
++ ANativeWindow *window;
++} YuvContext;
++static void yuv_close(YuvContext *c)
++{
++ if (c->context != EGL_NO_CONTEXT) {
++  if (c->program) z.glDeleteProgram(c->program);
++  z.eglMakeCurrent(z.display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
++  if (c->surface != EGL_NO_SURFACE) z.eglDestroySurface(z.display, c->surface);
++  z.eglDestroyContext(z.display, c->context);
++ }
++ if (c->window) ANativeWindow_release(c->window);
++ memset(c, 0, sizeof(*c));
++}
++static GLuint yuv_shader(GLenum type, const char *text)
++{
++ GLuint shader = z.glCreateShader(type);
++ if (!shader) return 0;
++ z.glShaderSource(shader, 1, &text, NULL);
++ z.glCompileShader(shader);
++ GLint ok = 0;
++ z.glGetShaderiv(shader, GL_COMPILE_STATUS, &ok);
++ if (!ok) { z.glDeleteShader(shader); return 0; }
++ return shader;
++}
++static int yuv_open(YuvContext *c, ANativeWindow *window)
++{
++ pthread_once(&z_once, z_load);
++ if (!z.ready) return -1;
++ c->window = window;
++ if (window) ANativeWindow_acquire(window);
++ EGLint attrs[] = {EGL_SURFACE_TYPE, window ? EGL_WINDOW_BIT : EGL_PBUFFER_BIT,
++  EGL_RENDERABLE_TYPE, EGL_OPENGL_ES2_BIT, EGL_COLOR_BUFFER_TYPE,
++  EGL_YUV_BUFFER_EXT, EGL_YUV_ORDER_EXT, EGL_YUV_ORDER_YUV_EXT,
++  EGL_YUV_SUBSAMPLE_EXT, EGL_YUV_SUBSAMPLE_4_2_0_EXT,
++  EGL_YUV_PLANE_BPP_EXT, EGL_YUV_PLANE_BPP_8_EXT, EGL_NONE};
++ EGLConfig config;
++ EGLint count = 0, ca[] = {EGL_CONTEXT_CLIENT_VERSION, 3, EGL_NONE};
++ if (!z.eglChooseConfig(z.display, attrs, &config, 1, &count) || !count) goto fail;
++ c->context = z.eglCreateContext(z.display, config, EGL_NO_CONTEXT, ca);
++ if (c->context == EGL_NO_CONTEXT) goto fail;
++ if (window) {
++  c->surface = z.eglCreateWindowSurface(z.display, config, window, NULL);
++  if (c->surface == EGL_NO_SURFACE) goto fail;
++ }
++ if (!z.eglMakeCurrent(z.display, c->surface, c->surface, c->context)) goto fail;
++ const char *renderer = (const char *)z.glGetString(GL_RENDERER);
++ const char *extensions = (const char *)z.glGetString(GL_EXTENSIONS);
++ /* Native handle cloning is qualified only on the Adreno layout. */
++ if (!renderer || !strstr(renderer, "Adreno") || !extensions ||
++     !strstr(extensions, "GL_EXT_YUV_target")) goto fail;
++ if (window && !z.eglSwapInterval(z.display, 1)) goto fail;
++ const char *vs = "#version 300 es\nin vec2 pos;out vec2 uv;uniform vec4 rect;"
++  "void main(){uv=rect.xy+(pos+1.0)*0.5*rect.zw;gl_Position=vec4(pos,0,1);}";
++ const char *fs = "#version 300 es\n#extension GL_EXT_YUV_target : require\n"
++  "precision highp float;in vec2 uv;uniform __samplerExternal2DY2YEXT tex;"
++  "uniform vec4 order;layout(yuv) out vec4 color;"
++  "void main(){vec3 v=texture(tex,uv).rgb;"
++  "color=vec4(v.r,mix(v.g,v.b,order.x),mix(v.b,v.g,order.x),1.0);}";
++ GLuint vert = yuv_shader(GL_VERTEX_SHADER, vs), frag = yuv_shader(GL_FRAGMENT_SHADER, fs);
++ if (!vert || !frag) {
++  if (vert) z.glDeleteShader(vert);
++  if (frag) z.glDeleteShader(frag);
++  goto fail;
++ }
++ c->program = z.glCreateProgram();
++ z.glAttachShader(c->program, vert); z.glAttachShader(c->program, frag);
++ z.glDeleteShader(vert); z.glDeleteShader(frag);
++ z.glBindAttribLocation(c->program, 0, "pos"); z.glLinkProgram(c->program);
++ GLint ok = 0; z.glGetProgramiv(c->program, GL_LINK_STATUS, &ok);
++ if (!ok) goto fail;
++ return 0;
++fail:
++ yuv_close(c);
++ return -1;
++}
++
++/* Geometry is derived from a real gralloc allocation, never vendor ints. */
++typedef struct {
++ AHardwareBuffer *buffer;
++ AHardwareBuffer_Desc desc;
++ uint32_t stride, uv_offset, size;
++ int nv21;
++} YuvBuffer;
++static void yuv_buffer_close(YuvBuffer *b)
++{
++ if (b->buffer) AHardwareBuffer_release(b->buffer);
++ memset(b, 0, sizeof(*b));
++}
++static int yuv_buffer_new(YuvBuffer *b, unsigned width, unsigned height)
++{
++ pthread_once(&z_once, z_load);
++ if (!z.ready || !width || !height || (width | height) & 1) return -1;
++ b->desc = (AHardwareBuffer_Desc){.width=width, .height=height, .layers=1,
++  .format=AHARDWAREBUFFER_FORMAT_Y8Cb8Cr8_420,
++  .usage=AHARDWAREBUFFER_USAGE_GPU_SAMPLED_IMAGE | AHARDWAREBUFFER_USAGE_GPU_FRAMEBUFFER |
++         AHARDWAREBUFFER_USAGE_CPU_READ_OFTEN | AHARDWAREBUFFER_USAGE_CPU_WRITE_OFTEN};
++ if (AHardwareBuffer_allocate(&b->desc, &b->buffer)) return -1;
++ AHardwareBuffer_describe(b->buffer, &b->desc);
++ AHardwareBuffer_Planes p;
++ if (AHardwareBuffer_lockPlanes(b->buffer, AHARDWAREBUFFER_USAGE_CPU_READ_OFTEN,
++                               -1, NULL, &p)) goto fail;
++ const YuvNativeHandle *handle = z.handle(b->buffer);
++ off_t size = handle && handle->numFds == 2 ? lseek(handle->data[0], 0, SEEK_END) : -1;
++ uintptr_t y = (uintptr_t)p.planes[0].data, u = (uintptr_t)p.planes[1].data,
++           v = (uintptr_t)p.planes[2].data;
++ int valid = p.planeCount == 3 && y && u && v &&
++  p.planes[0].pixelStride == 1 && p.planes[1].pixelStride == 2 &&
++  p.planes[2].pixelStride == 2 && p.planes[0].rowStride >= width &&
++  p.planes[1].rowStride == p.planes[0].rowStride &&
++  p.planes[2].rowStride == p.planes[0].rowStride &&
++  (u == v + 1 || v == u + 1) && u > y && v > y &&
++  size > 0 && size <= MAX_ENCODE_FRAME;
++ if (valid) {
++  b->stride = p.planes[0].rowStride;
++  b->nv21 = u == v + 1;
++  uintptr_t offset = (u < v ? u : v) - y;
++  valid = offset <= UINT32_MAX && offset >= (uint64_t)b->stride * height &&
++   offset + (uint64_t)b->stride * (height / 2) <= (uint64_t)size;
++  b->uv_offset = (uint32_t)offset;
++  b->size = (uint32_t)size;
++ }
++ if (AHardwareBuffer_unlock(b->buffer, NULL) || !valid) goto fail;
++ return 0;
++fail:
++ yuv_buffer_close(b);
++ return -1;
++}
++
++/* fd refers to linear NV12. Non-matching gralloc geometry is rejected, not
++ * reinterpreted. The caller can upload an inline frame to a fresh buffer. */
++static int yuv_buffer_import(YuvBuffer *b, int fd, const uint32_t m[8])
++{
++ if (m[0] != 0x3231564e || m[1] > 8192 || m[2] > 4320 ||
++     yuv_buffer_new(b, m[1], m[2])) return -1;
++ off_t actual = lseek(fd, 0, SEEK_END);
++ if (m[3] != b->stride || m[4] != b->uv_offset || m[5] < b->size ||
++     actual < 0 || (uint64_t)actual < m[5] || m[5] > MAX_ENCODE_FRAME) goto fail;
++ const YuvNativeHandle *h = z.handle(b->buffer);
++ if (!h || h->numFds != 2 || h->numInts <= 0 || h->numInts > 128) goto fail;
++ size_t bytes = sizeof(*h) + sizeof(int) * (h->numFds + h->numInts);
++ YuvNativeHandle *copy = malloc(bytes);
++ if (!copy) goto fail;
++ memcpy(copy, h, bytes); copy->data[0] = fd;
++ AHardwareBuffer *imported = NULL;
++ int result = z.wrap(&b->desc, copy, 3 /* CLONE */, &imported);
++ free(copy);
++ if (result || !imported) goto fail;
++ AHardwareBuffer_release(b->buffer); b->buffer = imported;
++ return 0;
++fail:
++ yuv_buffer_close(b);
++ return -1;
++}
++
++/* Source/destination remain alive through glFinish. Decoder buffers are
++ * exported only after it completes, and encoder source ownership is retained
++ * until the corresponding encoded packet reaches the client. */
++static int yuv_draw(YuvContext *c, AHardwareBuffer *source,
++                    AHardwareBuffer *destination, unsigned w, unsigned h,
++                    float x, float y, float rw, float rh, int swap_uv,
++                    int64_t pts_ns)
++{
++ EGLint attrs[] = {EGL_IMAGE_PRESERVED_KHR, EGL_TRUE, EGL_NONE};
++ EGLImageKHR images[2] = {EGL_NO_IMAGE_KHR, EGL_NO_IMAGE_KHR};
++ GLuint textures[2] = {0}, fb = 0;
++ int result = -1;
++ while (z.glGetError() != GL_NO_ERROR) {}
++ images[0] = z.create_image(z.display, EGL_NO_CONTEXT, EGL_NATIVE_BUFFER_ANDROID,
++                           z.native(source), attrs);
++ if (images[0] == EGL_NO_IMAGE_KHR) goto out;
++ z.glGenTextures(2, textures);
++ z.glBindTexture(GL_TEXTURE_EXTERNAL_OES, textures[0]);
++ z.bind_image(GL_TEXTURE_EXTERNAL_OES, images[0]);
++ z.glTexParameteri(GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
++ z.glTexParameteri(GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
++ z.glTexParameteri(GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
++ z.glTexParameteri(GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
++ if (destination) {
++  images[1] = z.create_image(z.display, EGL_NO_CONTEXT, EGL_NATIVE_BUFFER_ANDROID,
++                            z.native(destination), attrs);
++  if (images[1] == EGL_NO_IMAGE_KHR) goto out;
++  z.glBindTexture(GL_TEXTURE_2D, textures[1]); z.bind_image(GL_TEXTURE_2D, images[1]);
++  z.glGenFramebuffers(1, &fb); z.glBindFramebuffer(GL_FRAMEBUFFER, fb);
++  z.glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, textures[1], 0);
++  if (z.glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) goto out;
++ } else z.glBindFramebuffer(GL_FRAMEBUFFER, 0);
++ z.glUseProgram(c->program);
++ z.glUniform4f(z.glGetUniformLocation(c->program, "rect"), x, y, rw, rh);
++ z.glUniform4f(z.glGetUniformLocation(c->program, "order"), swap_uv, 0, 0, 0);
++ const GLfloat vertices[] = {-1,-1,1,-1,-1,1,1,1};
++ z.glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, vertices);
++ z.glEnableVertexAttribArray(0); z.glViewport(0, 0, w, h);
++ z.glBindTexture(GL_TEXTURE_EXTERNAL_OES, textures[0]);
++ z.glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
++ if (z.glGetError() != GL_NO_ERROR) goto out;
++ if (!destination && (!z.presentation_time(z.display, c->surface, pts_ns) ||
++                      !z.eglSwapBuffers(z.display, c->surface))) goto out;
++ z.glFinish();
++ if (z.glGetError() == GL_NO_ERROR) result = 0;
++out:
++ /* Also finish failed submissions before releasing imported memory. */
++ z.glFinish();
++ if (fb) z.glDeleteFramebuffers(1, &fb);
++ z.glDeleteTextures(2, textures);
++ for (int i=0; i<2; i++) if (images[i] != EGL_NO_IMAGE_KHR)
++  z.destroy_image(z.display, images[i]);
++ return result;
++}
+--- a/daemon/termux-va.c
++++ b/daemon/termux-va.c
+@@ -97,6 +97,10 @@
+ #include <android/api-level.h>
+ #include <media/NdkMediaCodec.h>
+ #include <media/NdkMediaFormat.h>
++#include "tva_surface.h"
++#include "tva_fd.h"
++#include <linux/dma-buf.h>
++#include <sys/ioctl.h>
+ 
+ /* MediaFormat keys are string literals in Android's MediaFormat API. Use
+  * them directly instead of importing AMEDIAFORMAT_KEY_* data symbols from
+@@ -518,6 +522,8 @@
+     size_t           convert_cap;
+ 
+     /* shared-memory transport */
++    YuvContext       yuv;
++    AImageReader    *image_reader;
+     XferMode         xfer;
+     int              shm_fd;           /* memfd, -1 = not established */
+     int              shm_listen;       /* abstract socket listen fd, -1 = none */
+@@ -789,6 +795,17 @@
+      * carries the abstract socket name.  The daemon picks the name - the
+      * client cannot know it is connection #N, and guessing would collide. */
+     XferMode want = XFER_INLINE;
++    /* Opt-in until the installed pixel/performance qualification completes. */
++    const char *surface = getenv("TVA_SURFACE");
++    if (xfer == XFER_DMABUF && surface && !strcmp(surface, "1") &&
++        !codec_is_ten_bit(s->codec_id)) {
++        YuvContext probe = {0};
++        YuvBuffer allocation = {0};
++        if (!yuv_open(&probe, NULL) && !yuv_buffer_new(&allocation, w, h))
++            want = XFER_DMABUF;
++        yuv_buffer_close(&allocation);
++        yuv_close(&probe);
++    }
+     if (xfer == XFER_SHM && !s->encoder) {
+         if (shm_prepare(s, (int)w, (int)h) == 0) {
+             want = XFER_SHM;
+@@ -841,7 +858,7 @@
+             dlog(1, "[%d] SHM handoff failed, falling back to inline", s->id);
+         }
+     } else {
+-        s->xfer = XFER_INLINE;
++        s->xfer = want;
+     }
+ 
+     /* Frame return has exactly two modes: SHM (memfd zero-copy) or inline
+@@ -1340,6 +1357,7 @@
+  */
+ static int send_format_desc(Session *s)
+ {
++    if (s->xfer == XFER_DMABUF) return 0;
+     /* Fallback for missing values: use what we know if FORMAT_CHANGED has
+      * not arrived yet */
+     if (s->stride <= 0)       s->stride = s->w;
+@@ -1570,10 +1588,61 @@
+  * socket.  Fully decoupled from the input thread - sending a large frame
+  * never blocks unit reception or decoder feeding.
+  */
++/* AImage remains acquired until GPU completion. The fd transferred to the
++ * client owns the linear pixel storage independently of the gralloc wrapper. */
++static int decoder_surface_frame(Session *s, uint32_t pts)
++{
++    AImage *image = NULL;
++    YuvBuffer output = {0};
++    int result = -1;
++    for (int i=0; i<500 && running && !s->stop; i++) {
++        media_status_t status = AImageReader_acquireNextImage(s->image_reader, &image);
++        if (status == AMEDIA_OK) break;
++        if (status != AMEDIA_IMGREADER_NO_BUFFER_AVAILABLE) goto out;
++        usleep(1000);
++    }
++    if (!image) goto out;
++    AHardwareBuffer *source = NULL;
++    AImageCropRect crop;
++    AHardwareBuffer_Desc desc;
++    int64_t timestamp = 0;
++    if (AImage_getHardwareBuffer(image, &source) != AMEDIA_OK ||
++        AImage_getCropRect(image, &crop) != AMEDIA_OK ||
++        AImage_getTimestamp(image, &timestamp) != AMEDIA_OK ||
++        timestamp / (1000 * PTS_UNIT_SCALE) != pts) goto out;
++    AHardwareBuffer_describe(source, &desc);
++    int width=crop.right-crop.left, height=crop.bottom-crop.top;
++    if (width < 96 || height < 96 || crop.left < 0 || crop.top < 0 ||
++        crop.right > (int)desc.width || crop.bottom > (int)desc.height ||
++        yuv_buffer_new(&output, width, height)) goto out;
++    if (yuv_draw(&s->yuv, source, output.buffer, width, height,
++                 (float)crop.left/desc.width, (float)crop.top/desc.height,
++                 (float)width/desc.width, (float)height/desc.height,
++                 output.nv21, 0)) goto out;
++    uint32_t header[4] = {htonl(width), htonl(height), htonl(DMABUFFRAME_SENTINEL), htonl(pts)};
++    uint32_t metadata[8] = {0x3231564e, width, height, output.stride,
++                            output.uv_offset, output.size, 0, 0};
++    for (int i=0; i<8; i++) metadata[i]=htonl(metadata[i]);
++    const YuvNativeHandle *handle = z.handle(output.buffer);
++    int fd = handle->data[0];
++    if (send_all(s->fd, header, sizeof(header)) < 0 ||
++        tva_transfer_fd(s->fd, 1, &fd) ||
++        send_all(s->fd, metadata, sizeof(metadata)) < 0) goto out;
++    result = 0;
++out:
++    yuv_buffer_close(&output);
++    if (image) AImage_delete(image);
++    return result;
++}
++
+ static void *output_thread(void *arg)
+ {
+     Session *s = arg;
+     int idle_after_eof = 0;
++    if (s->xfer == XFER_DMABUF && yuv_open(&s->yuv, NULL)) {
++        session_abort(s);
++        return NULL;
++    }
+ 
+     while (running && !s->stop) {
+         AMediaCodecBufferInfo info;
+@@ -1582,6 +1651,25 @@
+         if (oi >= 0) {
+             idle_after_eof = 0;
+             int eos = (info.flags & FLAG_END_OF_STREAM) != 0;
++
++            if (s->xfer == XFER_DMABUF) {
++                media_status_t released = AMediaCodec_releaseOutputBuffer(s->codec, oi, info.size > 0);
++                __atomic_add_fetch(&s->output_progress, 1u, __ATOMIC_RELEASE);
++                if (released != AMEDIA_OK || (info.size > 0 &&
++                    decoder_surface_frame(s, (uint32_t)(info.presentationTimeUs / PTS_UNIT_SCALE)))) {
++                    session_abort(s);
++                    break;
++                }
++                if (info.size > 0) s->frames_out++;
++                if (eos) {
++                    /* Surface EOS cannot flush while acquired images are outstanding. */
++                    if (s->drain_req != s->drain_done) {
++                        if (AMediaCodec_flush(s->codec) != AMEDIA_OK) { session_abort(s); break; }
++                        s->drain_done = s->drain_req;
++                    } else break;
++                }
++                continue;
++            }
+ 
+             /* Handshaked clients must receive the format descriptor before
+              * any frame.  Normally FORMAT_CHANGED arrives first, but do not
+@@ -1820,6 +1908,7 @@
+     /* Also covers unexpected MediaCodec errors and failed EOS delivery.
+      * The input worker may otherwise stay blocked in recv_all forever. */
+     session_abort(s);
++    if (s->xfer == XFER_DMABUF) yuv_close(&s->yuv);
+     return NULL;
+ }
+ 
+@@ -2503,6 +2592,74 @@
+     return NULL;
+ }
+ 
++static int encoder_surface_frame(Session *s, const uint8_t *raw, uint32_t size,
++                                  int fd, const uint32_t metadata[8], int64_t pts_us)
++{
++    YuvBuffer b = {0};
++    int result = -1, swap = 0;
++    float x = 0, y = 1, rw = 1, rh = -1;
++    if (fd >= 0) {
++        if (yuv_buffer_import(&b, fd, metadata)) {
++            /* Layout-compatible import is an optimization. A surface session
++             * can still consume a valid linear input through a CPU upload. */
++            const uint32_t *m=metadata;
++            if (m[0] != 0x3231564e || !m[1] || !m[2] || (m[1]|m[2]|m[6]|m[7])&1 ||
++                m[1]>8192 || m[2]>4320 || m[3]<m[1] || m[3]>16384 ||
++                m[4] < (uint64_t)m[3]*m[2] ||
++                m[4]+(uint64_t)m[3]*(m[2]/2)>m[5] || m[5]>MAX_ENCODE_FRAME ||
++                m[6]>m[1] || m[7]>m[2] ||
++                (unsigned)s->w>m[1]-m[6] || (unsigned)s->h>m[2]-m[7] ||
++                lseek(fd,0,SEEK_END)<(off_t)m[5]) return -1;
++            uint8_t *map=mmap(NULL,m[5],PROT_READ,MAP_SHARED,fd,0);
++            if (map==MAP_FAILED) return -1;
++            struct dma_buf_sync sync={.flags=DMA_BUF_SYNC_START|DMA_BUF_SYNC_READ};
++            size_t packed_size=(size_t)s->w*s->h*3/2;
++            uint8_t *packed=malloc(packed_size);
++            int synced=ioctl(fd,DMA_BUF_IOCTL_SYNC,&sync)==0;
++            if (!packed || !synced) { free(packed); munmap(map,m[5]); return -1; }
++            for (int row=0;row<s->h;row++)
++                memcpy(packed+row*s->w,map+(m[7]+row)*m[3]+m[6],s->w);
++            for (int row=0;row<s->h/2;row++)
++                memcpy(packed+s->w*s->h+row*s->w,
++                       map+m[4]+(m[7]/2+row)*m[3]+m[6],s->w);
++            sync.flags=DMA_BUF_SYNC_END|DMA_BUF_SYNC_READ;
++            int end=ioctl(fd,DMA_BUF_IOCTL_SYNC,&sync);
++            munmap(map,m[5]);
++            int result=end ? -1 : encoder_surface_frame(s,packed,packed_size,-1,NULL,pts_us);
++            free(packed);
++            return result;
++        }
++        if ((metadata[6] | metadata[7]) & 1 ||
++            metadata[6] > metadata[1] || metadata[7] > metadata[2] ||
++            (unsigned)s->w > metadata[1] - metadata[6] ||
++            (unsigned)s->h > metadata[2] - metadata[7]) goto out;
++        x = (float)metadata[6] / metadata[1];
++        y = (float)(metadata[7] + s->h) / metadata[2];
++        rw = (float)s->w / metadata[1]; rh = -(float)s->h / metadata[2];
++        swap = b.nv21;
++    } else {
++        if (size != (uint64_t)s->w * s->h * 3 / 2 ||
++            yuv_buffer_new(&b, s->w, s->h)) return -1;
++        AHardwareBuffer_Planes p;
++        if (AHardwareBuffer_lockPlanes(b.buffer, AHARDWAREBUFFER_USAGE_CPU_WRITE_OFTEN,
++                                      -1, NULL, &p)) goto out;
++        for (int row=0; row<s->h; row++)
++            memcpy((uint8_t *)p.planes[0].data + row*p.planes[0].rowStride,
++                   raw + row*s->w, s->w);
++        const uint8_t *uv = raw + s->w*s->h;
++        for (int row=0; row<s->h/2; row++) for (int col=0; col<s->w/2; col++) {
++            ((uint8_t *)p.planes[1].data)[row*p.planes[1].rowStride+col*2] = uv[row*s->w+col*2];
++            ((uint8_t *)p.planes[2].data)[row*p.planes[2].rowStride+col*2] = uv[row*s->w+col*2+1];
++        }
++        if (AHardwareBuffer_unlock(b.buffer, NULL)) goto out;
++    }
++    result = yuv_draw(&s->yuv, b.buffer, NULL, s->w, s->h,
++                      x, y, rw, rh, swap, pts_us * 1000);
++out:
++    yuv_buffer_close(&b);
++    return result;
++}
++
+ static int encoder_run(Session *s)
+ {
+     const size_t input_cap = codec_is_ten_bit(s->codec_id)
+@@ -2537,31 +2694,37 @@
+         }
+         bool force_key = sz & ENC_UNIT_FORCE_KEY;
+         sz &= ~ENC_UNIT_FORCE_KEY;
+-        if (sz > input_cap || recv_all(s->fd, input, sz) < 0) {
++        int frame_fd = -1;
++        uint32_t metadata[DMABUF_WORDS] = {0};
++        int is_dmabuf = !!(sz & ENC_UNIT_DMABUF);
++        sz &= ~ENC_UNIT_DMABUF;
++        if (is_dmabuf) {
++            if (s->xfer != XFER_DMABUF || sz != sizeof(metadata) ||
++                tva_transfer_fd(s->fd, 0, &frame_fd) ||
++                recv_all(s->fd, metadata, sizeof(metadata)) < 0) {
++                if (frame_fd >= 0) close(frame_fd);
++                break;
++            }
++            for (int i=0; i<DMABUF_WORDS; i++) metadata[i] = ntohl(metadata[i]);
++        } else if (sz > input_cap || recv_all(s->fd, input, sz) < 0) {
+             dlog(1, "[%d] invalid encoder input frame size: %u", s->id, sz);
+             break;
+         }
+         s->units_in++;
+-
+-        ssize_t bi;
+-        int tries = 0;
+-        do {
+-            bi = AMediaCodec_dequeueInputBuffer(s->codec, INPUT_TIMEOUT_US);
+-            if (bi == AMEDIACODEC_INFO_TRY_AGAIN_LATER && ++tries < 12)
+-                continue;
+-            break;
+-        } while (running && !s->stop);
+-        if (bi < 0)
+-            break;
+-        size_t cap = 0;
+-        uint8_t *ib = AMediaCodec_getInputBuffer(s->codec, bi, &cap);
+-        if (!ib || cap < sz) {
+-            dlog(1, "[%d] encoder input buffer too small: %u > %zu", s->id, sz, cap);
+-            break;
+-        }
++        ssize_t bi = -1;
+         size_t queued_size = 0;
+-        if (encoder_copy_input(s, ib, cap, input, sz, &queued_size) < 0)
+-            break;
++        if (s->xfer != XFER_DMABUF) {
++            int tries = 0;
++            do {
++                bi = AMediaCodec_dequeueInputBuffer(s->codec, INPUT_TIMEOUT_US);
++                if (bi == AMEDIACODEC_INFO_TRY_AGAIN_LATER && ++tries < 12) continue;
++                break;
++            } while (running && !s->stop);
++            if (bi < 0) break;
++            size_t cap = 0;
++            uint8_t *ib = AMediaCodec_getInputBuffer(s->codec, bi, &cap);
++            if (!ib || encoder_copy_input(s, ib, cap, input, sz, &queued_size) < 0) break;
++        }
+         uint32_t pts = ++frame_no;
+         /* Encoder input timestamps are only used by MediaCodec's rate
+          * controller.  A unit index scaled by 1 ms (the decoder pairing
+@@ -2583,17 +2746,22 @@
+                 usleep(1000);
+             encoder_request_sync(s);
+         }
+-        if (AMediaCodec_queueInputBuffer(s->codec, bi, 0, queued_size,
+-                                         pts_us, 0) != AMEDIA_OK)
+-            break;
++        if (s->xfer == XFER_DMABUF) {
++            int result = encoder_surface_frame(s, input, sz, frame_fd, metadata, pts_us);
++            if (frame_fd >= 0) close(frame_fd);
++            if (result) break;
++        } else if (AMediaCodec_queueInputBuffer(s->codec, bi, 0, queued_size,
++                                               pts_us, 0) != AMEDIA_OK) break;
+     }
+ 
+     /* Send every delayed packet, then end the output thread. */
+     if (s->codec && !s->stop && !out.failed) {
+-        ssize_t bi = AMediaCodec_dequeueInputBuffer(s->codec, INPUT_TIMEOUT_US);
+-        if (bi >= 0)
+-            AMediaCodec_queueInputBuffer(s->codec, bi, 0, 0, 0,
+-                                         FLAG_END_OF_STREAM);
++        if (s->xfer == XFER_DMABUF) AMediaCodec_signalEndOfInputStream(s->codec);
++        else {
++            ssize_t bi = AMediaCodec_dequeueInputBuffer(s->codec, INPUT_TIMEOUT_US);
++            if (bi >= 0) AMediaCodec_queueInputBuffer(s->codec, bi, 0, 0, 0,
++                                                     FLAG_END_OF_STREAM);
++        }
+     }
+     out.input_done = 1;
+     pthread_join(output_thread, NULL);
+@@ -2665,7 +2833,8 @@
+          * only Venus linear P010 together with the Main10 HDR10 profile constant (4096):
+          * profile 2 and Android's P010 are refused. The stream is Main10 (profile_idc 2). */
+         AMediaFormat_setInt32(enc_fmt, "color-format", codec_is_ten_bit(s->codec_id)
+-                              ? COLOR_QCOM_YUV420_P010_VENUS : COLOR_FORMAT_YUV420_SEMIPLANAR);
++                              ? COLOR_QCOM_YUV420_P010_VENUS :
++                              s->xfer == XFER_DMABUF ? 0x7f000789 : COLOR_FORMAT_YUV420_SEMIPLANAR);
+         if (codec_is_ten_bit(s->codec_id))
+             AMediaFormat_setInt32(enc_fmt, "profile", 4096);
+         /* CBR makes Qualcomm's encoder honor low VA-API targets instead of
+@@ -2688,6 +2857,13 @@
+         }
+         if (st != AMEDIA_OK)
+             goto out_started;
++        if (s->xfer == XFER_DMABUF) {
++            ANativeWindow *window = NULL;
++            if (AMediaCodec_createInputSurface(s->codec, &window) != AMEDIA_OK) goto out_started;
++            int result = yuv_open(&s->yuv, window);
++            ANativeWindow_release(window);
++            if (result) goto out_started;
++        }
+         st = AMediaCodec_start(s->codec);
+         if (st != AMEDIA_OK) {
+             dlog(0, "[%d] encoder start failed: %d", s->id, st);
+@@ -2794,7 +2970,14 @@
+     s->codec = AMediaCodec_createDecoderByType(s->mime);
+     if (!s->codec) { dlog(0, "[%d] no available decoder: %s", s->id, s->mime); goto out_fmt; }
+ 
+-    media_status_t st = AMediaCodec_configure(s->codec, fmt, NULL, NULL, 0);
++    ANativeWindow *decoder_window = NULL;
++    if (s->xfer == XFER_DMABUF) {
++        if (AImageReader_newWithUsage(s->w, s->h, AIMAGE_FORMAT_YUV_420_888,
++             AHARDWAREBUFFER_USAGE_GPU_SAMPLED_IMAGE, 4, &s->image_reader) != AMEDIA_OK ||
++            AImageReader_getWindow(s->image_reader, &decoder_window) != AMEDIA_OK)
++            goto out_started;
++    }
++    media_status_t st = AMediaCodec_configure(s->codec, fmt, decoder_window, NULL, 0);
+     if (st != AMEDIA_OK) { dlog(0, "[%d] configure failed: %d", s->id, st); goto out_started; }
+ 
+     st = AMediaCodec_start(s->codec);
+@@ -2822,6 +3005,7 @@
+              s->id, s->units_in, s->frames_out);
+ 
+ out_started:
++    yuv_close(&s->yuv);
+     /* configure / start failures must STILL stop the codec before deleting.
+      *
+      * This used to jump straight to delete on failure and the whole daemon
+@@ -2850,6 +3034,7 @@
+ out_fmt:
+     AMediaFormat_delete(fmt);
+ out_fd:
++    if (s->image_reader) AImageReader_delete(s->image_reader);
+     shm_teardown(s);
+     free(s->convert_buf);
+     close(s->fd);

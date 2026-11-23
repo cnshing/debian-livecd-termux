@@ -1,0 +1,537 @@
+--- a/src/gallium/frontends/va/tva_protocol.h
++++ b/src/gallium/frontends/va/tva_protocol.h
+@@ -157,7 +157,8 @@
+  */
+ typedef enum {
+     XFER_INLINE = 0,
+-    XFER_SHM    = 1
++    XFER_SHM    = 1,
++    XFER_DMABUF = 2 /* negotiated YUV surface transport; inline remains valid */
+ } XferMode;
+ 
+ /* Handshake status codes (response word 1):
+@@ -183,6 +184,11 @@
+  *                frame, and no packet is returned for it. */
+ #define ENC_UNIT_FORCE_KEY   0x80000000u
+ #define ENC_UNIT_SET_BITRATE 0x40000000u
++#define ENC_UNIT_DMABUF      0x20000000u
++/* DMABUF payload: marker+SCM_RIGHTS, then 8 big-endian u32 words:
++ * [NV12 fourcc][allocation width][height][pitch][UV offset][size][crop x][y]. */
++#define DMABUF_WORDS 8
++#define DMABUFFRAME_SENTINEL 0xFFFFFFFDu
+ 
+ /* Encoder colour aspects (debian-livecd-termux).  Encoder sessions are always
+  * inline, and daemons before this ignore the handshake's transport word for
+--- /dev/null
++++ b/src/gallium/frontends/va/tva_fd.h
+@@ -0,0 +1,68 @@
++/* SPDX-License-Identifier: GPL-3.0-or-later
++ * One SCM_RIGHTS fd is attached to exactly one marker byte. Metadata follows
++ * separately, so short stream reads cannot lose or duplicate ancillary data. */
++#ifndef TVA_FD_H
++#define TVA_FD_H
++#include <errno.h>
++#include <fcntl.h>
++#include <poll.h>
++#include <stdint.h>
++#include <string.h>
++#include <sys/socket.h>
++#include <time.h>
++#include <unistd.h>
++static int tva_fd_wait(int socket, short events, int64_t deadline)
++{
++ for (;;) {
++  struct timespec ts;
++  clock_gettime(CLOCK_MONOTONIC, &ts);
++  int64_t remaining = deadline - ((int64_t)ts.tv_sec * 1000 + ts.tv_nsec / 1000000);
++  if (remaining <= 0) return -1;
++  struct pollfd p = {.fd=socket, .events=events};
++  int r = poll(&p, 1, (int)remaining);
++  if (r < 0 && errno == EINTR) continue;
++  return r > 0 && (p.revents & events) ? 0 : -1;
++ }
++}
++static int tva_transfer_fd(int socket, int sending, int *fd)
++{
++ struct timespec ts;
++ clock_gettime(CLOCK_MONOTONIC, &ts);
++ int64_t deadline = (int64_t)ts.tv_sec * 1000 + ts.tv_nsec / 1000000 + 5000;
++ for (;;) {
++  if (tva_fd_wait(socket, sending ? POLLOUT : POLLIN, deadline)) return -1;
++  unsigned char marker = sending ? 0x46 : 0;
++  struct iovec io = {.iov_base=&marker, .iov_len=1};
++  union { struct cmsghdr align; unsigned char data[CMSG_SPACE(16 * sizeof(int))]; } control;
++  memset(&control, 0, sizeof(control));
++  struct msghdr msg = {.msg_iov=&io, .msg_iovlen=1,
++   .msg_control=control.data, .msg_controllen=sizeof(control.data)};
++  if (sending) {
++   msg.msg_controllen = CMSG_SPACE(sizeof(int));
++   struct cmsghdr *c = CMSG_FIRSTHDR(&msg);
++   c->cmsg_level=SOL_SOCKET; c->cmsg_type=SCM_RIGHTS;
++   c->cmsg_len=CMSG_LEN(sizeof(int)); memcpy(CMSG_DATA(c), fd, sizeof(int));
++  }
++  ssize_t n = sending ? sendmsg(socket, &msg, MSG_NOSIGNAL | MSG_DONTWAIT)
++                       : recvmsg(socket, &msg, MSG_CMSG_CLOEXEC | MSG_DONTWAIT);
++  if (n < 0 && (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK)) continue;
++  if (sending) return n == 1 ? 0 : -1;
++  int received=-1, count=0, bad=(n != 1 || marker != 0x46 ||
++                                     (msg.msg_flags & (MSG_CTRUNC | MSG_TRUNC)));
++  if (n < 0) return -1;
++  for (struct cmsghdr *c=CMSG_FIRSTHDR(&msg); c; c=CMSG_NXTHDR(&msg,c)) {
++   if (c->cmsg_level != SOL_SOCKET || c->cmsg_type != SCM_RIGHTS ||
++       c->cmsg_len < CMSG_LEN(0)) { bad=1; continue; }
++   size_t bytes=c->cmsg_len-CMSG_LEN(0);
++   if (bytes % sizeof(int)) bad=1;
++   for (size_t i=0; i<bytes/sizeof(int); i++) {
++    int value; memcpy(&value, (char *)CMSG_DATA(c)+i*sizeof(int), sizeof(int));
++    if (!count++) received=value; else close(value);
++   }
++  }
++  if (bad || count != 1) { if (received >= 0) close(received); return -1; }
++  *fd=received;
++  return 0;
++ }
++}
++#endif
+--- a/src/gallium/frontends/va/tva_client.h
++++ b/src/gallium/frontends/va/tva_client.h
+@@ -107,6 +107,7 @@
+     uint32_t fps_num;            /* encoder input frame rate; 0 = 30/1 */
+     uint32_t fps_den;
+     uint32_t enc_color;         /* encoder: ENC_XFER_COLOR bits, 0 = encoder default */
++    int      want_dmabuf;       /* negotiated surface transport; old peers downgrade */
+     int      want_shm;          /* non-0 = request SHM (daemon may downgrade) */
+     int      connect_timeout_ms;/* <=0 = TVA_DEF_CONNECT_MS */
+     int      io_timeout_ms;     /* <=0 = TVA_DEF_IO_MS */
+@@ -174,6 +175,8 @@
+  * daemon judge the client stuck (~15s slot timeout) - release is mandatory.
+  */
+ struct tva_frame {
++    int dmabuf_plus_one;        /* owned fd + 1; zero for copy transports */
++    uint32_t dmabuf[DMABUF_WORDS];
+     uint8_t *data;
+     size_t   size;
+ 
+@@ -282,6 +285,9 @@
+  * now, session still usable) or an error.  Format blocks are consumed
+  * internally and update tva_session_format().
+  */
++int tva_session_send_dmabuf(struct tva_session *s, int fd,
++                             const uint32_t metadata[DMABUF_WORDS], uint32_t flags);
++
+ int tva_session_next_frame(struct tva_session *s, struct tva_frame *out,
+                            int timeout_ms);
+ 
+--- a/src/gallium/frontends/va/tva_client.c
++++ b/src/gallium/frontends/va/tva_client.c
+@@ -50,6 +50,7 @@
+ #define _GNU_SOURCE     /* MSG_CMSG_CLOEXEC / SOCK_CLOEXEC */
+ #endif
+ #include "tva_client.h"
++#include "tva_fd.h"
+ 
+ #include <errno.h>
+ #include <poll.h>
+@@ -513,12 +514,12 @@
+     hello[2] = htonl((uint32_t)cfg->codec);
+     hello[3] = htonl((uint32_t)cfg->width);
+     hello[4] = htonl((uint32_t)cfg->height);
+-    hello[5] = htonl(cfg->want_shm ? (uint32_t)XFER_SHM
+-                                   : (uint32_t)XFER_INLINE);
++    uint32_t requested = cfg->want_dmabuf ? XFER_DMABUF : cfg->want_shm ? XFER_SHM : XFER_INLINE;
++    hello[5] = htonl(requested);
+     /* Encoders announce the colour of their samples in the transport word,
+      * which daemons without colour support ignore for encoder sessions. */
+     if (codec_is_encoder(cfg->codec) && (cfg->enc_color & ENC_XFER_COLOR))
+-        hello[5] = htonl(cfg->enc_color | (uint32_t)XFER_INLINE);
++        hello[5] = htonl(cfg->enc_color | requested);
+     hello[6] = htonl(cfg->bitrate);
+     hello[7] = htonl(cfg->fps_num);
+     hello[8] = htonl(cfg->fps_den);
+@@ -646,7 +647,10 @@
+     /* mode==SHM is only the daemon's intent: the response precedes the memfd
+      * handoff, and a failed handoff downgrades silently.  A failed pickup is
+      * therefore never fatal - continue with inline framing. */
+-    s->xfer = XFER_INLINE;
++    if (mode != XFER_INLINE && mode != XFER_SHM &&
++        !(mode == XFER_DMABUF && cfg->want_dmabuf))
++        return sess_err(s, TVA_ERR_PROTOCOL, "unexpected negotiated transport", 0);
++    s->xfer = mode == XFER_DMABUF ? XFER_DMABUF : XFER_INLINE;
+     if (mode == (uint32_t)XFER_SHM && nlen > 0) {
+         if (shm_attach(s, name) == 0)
+             s->xfer = XFER_SHM;
+@@ -1023,6 +1027,23 @@
+     return TVA_OK;
+ }
+ 
++int tva_session_send_dmabuf(struct tva_session *s, int fd,
++                             const uint32_t metadata[DMABUF_WORDS], uint32_t flags)
++{
++    if (!s || fd < 0 || !metadata || s->xfer != XFER_DMABUF || s->tx_broken)
++        return TVA_ERR_STATE;
++    uint32_t length=htonl(ENC_UNIT_DMABUF | (flags & ENC_UNIT_FORCE_KEY) |
++                          (DMABUF_WORDS * sizeof(uint32_t)));
++    uint32_t wire[DMABUF_WORDS];
++    for (int i=0; i<DMABUF_WORDS; i++) wire[i]=htonl(metadata[i]);
++    int r=send_exact(s, &length, sizeof(length), s->io_timeout_ms);
++    if (r == TVA_OK && tva_transfer_fd(s->fd, 1, &fd)) r=TVA_ERR_IO;
++    if (r == TVA_OK) r=send_exact(s, wire, sizeof(wire), s->io_timeout_ms);
++    if (r != TVA_OK) { s->tx_broken=1; return r; }
++    s->units_sent++;
++    return TVA_OK;
++}
++
+ static int ensure_rbuf(struct tva_session *s, size_t need)
+ {
+     if (s->rbuf_size >= need)
+@@ -1126,6 +1147,36 @@
+         memcpy(&h_be, hdr + 4, 4);
+         memcpy(&sz_be, hdr + 8, 4);
+         uint32_t w = ntohl(w_be), h = ntohl(h_be), sz = ntohl(sz_be);
++
++        if (sz == DMABUFFRAME_SENTINEL) {
++            uint32_t pts, m[DMABUF_WORDS];
++            int fd=-1;
++            if (s->xfer != XFER_DMABUF ||
++                recv_exact(s, &pts, sizeof(pts), rest_to, rest_to) != TVA_OK ||
++                tva_transfer_fd(s->fd, 0, &fd) ||
++                recv_exact(s, m, sizeof(m), rest_to, rest_to) != TVA_OK) {
++                if (fd >= 0) close(fd);
++                return sess_err(s, TVA_ERR_PROTOCOL, "truncated dma-buf frame", 0);
++            }
++            for (int i=0; i<DMABUF_WORDS; i++) m[i]=ntohl(m[i]);
++            struct stat st;
++            if (m[0] != 0x3231564e || m[1] != w || m[2] != h ||
++                w < 96 || h < 96 || w > 8192 || h > 4320 || (w|h)&1 ||
++                m[3] < w || m[3] > 16384 || m[4] < (uint64_t)m[3]*h ||
++                m[4] + (uint64_t)m[3]*(h/2) > m[5] ||
++                m[5] > TVA_MAX_FRAME_BYTES || m[6] || m[7] ||
++                fstat(fd, &st) || st.st_size < m[5]) {
++                close(fd);
++                return sess_err(s, TVA_ERR_PROTOCOL, "invalid dma-buf frame layout", 0);
++            }
++            memset(out, 0, sizeof(*out));
++            out->dmabuf_plus_one=fd+1;
++            memcpy(out->dmabuf, m, sizeof(m));
++            out->width=w; out->height=h; out->stride=m[3];
++            out->slice_height=h; out->crop_right=w-1; out->crop_bottom=h-1;
++            out->shm_slot=-1; out->unit_seq=ntohl(pts); out->seq=s->frames_recv++;
++            return TVA_OK;
++        }
+ 
+         if (sz == FMTDESC_SENTINEL) {
+             /* word 2 is the capability flags (0 on legacy daemons) */
+@@ -1277,6 +1328,10 @@
+     if (!f || !f->data)
+         return TVA_OK;              /* unconditional release is safe */
+ 
++    if (f->dmabuf_plus_one) {
++        close(f->dmabuf_plus_one - 1);
++        f->dmabuf_plus_one=0;
++    }
+     if (f->shm_slot >= 0) {
+         if (!s->shm_base || f->shm_slot >= s->shm_slots)
+             return sess_err(s, TVA_ERR_INVAL, "invalid slot in release", 0);
+--- a/src/gallium/frontends/va/tva_bridge.c
++++ b/src/gallium/frontends/va/tva_bridge.c
+@@ -499,6 +499,8 @@
+     bool drop_on_fence_destroy;   /* target was reused before this output */
+     unsigned waiters;              /* fence_wait callers holding this entry */
+     struct pipe_resource *resources[2]; /* owned until the entry is reaped */
++    int dmabuf_plus_one;
++    uint32_t dmabuf[DMABUF_WORDS];
+     uint8_t *staging;
+     size_t staging_size;
+     uint32_t frame_width;
+@@ -589,6 +591,7 @@
+      * application thread.  Sequence numbers start at 1; feedback carries one. */
+     struct tva_enc_job {
+         struct pipe_resource *dest;
++        struct pipe_resource *source[2];
+         uint8_t *data;
+         size_t len;
+         bool ready, key_wanted;
+@@ -808,6 +811,7 @@
+     }
+     for (unsigned i = 0; i < ARRAY_SIZE(p->resources); i++)
+         pipe_resource_reference(&p->resources[i], NULL);
++    if (p->dmabuf_plus_one) close(p->dmabuf_plus_one - 1);
+     free(p->staging);
+     memset(p, 0, sizeof(*p));
+     c->pend_head = (c->pend_head + 1) % DMD_PIPELINE_DEPTH_MAX;
+@@ -920,7 +924,7 @@
+     if (!p || p->waiters || !p->ready)
+         return 0;
+ 
+-   if (!p->failed && !p->copied && p->staging) {
++   if (!p->failed && !p->copied && (p->staging || p->dmabuf_plus_one)) {
+         p->copied = tva_copy_frame(c, p);
+         TVA_TRACE("retire copy unit=%u result=%d", p->unit_seq, p->copied);
+         if (!p->copied)
+@@ -1446,10 +1450,14 @@
+    y_stride = align(res_templ.width0 * util_format_get_blocksize(res_templ.format),
+                     64);
+    y_height = res_templ.height0;
++   if (templat->buffer_format == PIPE_FORMAT_NV12 && getenv("TVA_ZEROCOPY") &&
++       !strcmp(getenv("TVA_ZEROCOPY"), "1")) y_height = align(y_height, 32);
+ 
+    vl_video_buffer_template(&res_templ, &bridge_templ, formats[1], 1, 1,
+                             PIPE_USAGE_DEFAULT, 1, chroma);
+    uv_height = res_templ.height0;
++   if (templat->buffer_format == PIPE_FORMAT_NV12 && getenv("TVA_ZEROCOPY") &&
++       !strcmp(getenv("TVA_ZEROCOPY"), "1")) uv_height = align(uv_height, 16);
+ 
+    if (!y_stride || !y_height || !uv_height ||
+        y_height > SIZE_MAX / y_stride ||
+@@ -1879,10 +1887,52 @@
+     pipe->texture_unmap(pipe, transfer);
+ }
+ 
++#if defined(__linux__)
++static bool
++tva_copy_dmabuf_frame(struct tva_codec *c, struct tva_pending *p)
++{
++    struct pipe_screen *screen = c->pipe->screen;
++    struct pipe_resource *imported[2] = {0};
++    bool result = false;
++    if (!screen->resource_from_handle || !p->resources[0] || !p->resources[1]) return false;
++    for (unsigned plane=0; plane<2; plane++) {
++        unsigned w=p->dmabuf[1] >> plane, h=p->dmabuf[2] >> plane;
++        if (p->resources[plane]->width0 < w || p->resources[plane]->height0 < h) goto out;
++        struct pipe_resource templ = {0};
++        templ.target=PIPE_TEXTURE_2D; templ.format=p->resources[plane]->format;
++        templ.width0=w; templ.height0=h; templ.depth0=1; templ.array_size=1;
++        templ.bind=PIPE_BIND_SAMPLER_VIEW | PIPE_BIND_LINEAR;
++        struct winsys_handle handle = {.type=WINSYS_HANDLE_TYPE_FD,
++            .handle=p->dmabuf_plus_one-1, .stride=p->dmabuf[3],
++            .offset=plane ? p->dmabuf[4] : 0, .size=p->dmabuf[5],
++            .format=templ.format, .modifier=DRM_FORMAT_MOD_LINEAR};
++        imported[plane]=screen->resource_from_handle(screen, &templ, &handle, 0);
++        if (!imported[plane]) goto out;
++    }
++    for (unsigned plane=0; plane<2; plane++) {
++        struct pipe_box box = {.width=p->dmabuf[1] >> plane,
++                              .height=p->dmabuf[2] >> plane, .depth=1};
++        c->pipe->resource_copy_region(c->pipe, p->resources[plane], 0, 0, 0, 0,
++                                      imported[plane], 0, &box);
++    }
++    struct pipe_fence_handle *done=NULL;
++    c->pipe->flush(c->pipe, &done, 0);
++    result=done && screen->fence_finish(screen, c->pipe, done, OS_TIMEOUT_INFINITE);
++    screen->fence_reference(screen, &done, NULL);
++out:
++    for (int i=0; i<2; i++) pipe_resource_reference(&imported[i], NULL);
++    if (result) { close(p->dmabuf_plus_one-1); p->dmabuf_plus_one=0; }
++    return result;
++}
++#endif
++
+ static bool
+ tva_copy_frame(struct tva_codec *c, struct tva_pending *p)
+ {
+     const uint64_t copy_start_ns = os_time_get_nano();
++#if defined(__linux__)
++    if (p->dmabuf_plus_one) return tva_copy_dmabuf_frame(c, p);
++#endif
+     if (!p->staging || !p->resources[0] || !p->resources[1] ||
+         !p->frame_width || !p->frame_height || p->stride <= 0 ||
+         p->slice_height <= 0 || p->crop_left < 0 || p->crop_top < 0 ||
+@@ -2057,7 +2107,7 @@
+          * hidden references.  It is enabled by default for the validated
+          * linear resources; DMD_VA_READER_COPY=0 opts out.  A failed direct
+          * map falls back to the staged application-thread copy below. */
+-        if (tva_reader_copy_enabled() && tva_cpu_copy_enabled() &&
++        if (f.data && tva_reader_copy_enabled() && tva_cpu_copy_enabled() &&
+             tva_copy_frame_direct(c, p, f.data, f.size)) {
+             p->copied = true;
+             p->ready = true;
+@@ -2070,6 +2120,17 @@
+         }
+ #endif
+ 
++        if (f.dmabuf_plus_one) {
++            p->dmabuf_plus_one=f.dmabuf_plus_one;
++            f.dmabuf_plus_one=0;
++            memcpy(p->dmabuf, f.dmabuf, sizeof(p->dmabuf));
++            p->ready=true;
++            c->frames_done++;
++            u_cnd_monotonic_broadcast(&c->pend_cond);
++            mtx_unlock(&c->pend_mutex);
++            tva_session_release_frame(c->sess, &f);
++            continue;
++        }
+         p->staging = malloc(f.size ? f.size : 1);
+         if (!p->staging) {
+             tva_mark_broken_locked(c);
+@@ -3213,6 +3274,54 @@
+     }
+ }
+ 
++static bool
++tva_surface_requested(void)
++{
++    const char *value=getenv("TVA_ZEROCOPY");
++    return value && !strcmp(value, "1");
++}
++
++#if defined(__linux__)
++static int
++tva_encode_export(struct tva_codec *c, struct pipe_video_buffer *source,
++                  uint32_t metadata[DMABUF_WORDS], struct pipe_resource *resources[4])
++{
++    if (source->buffer_format != PIPE_FORMAT_NV12 || !c->pipe->screen->resource_get_handle)
++        return -1;
++    source->get_resources(source, resources);
++    if (!resources[0] || !resources[1]) return -1;
++    struct pipe_fence_handle *done=NULL;
++    c->pipe->flush(c->pipe, &done, 0);
++    bool ready=!done || c->pipe->screen->fence_finish(c->pipe->screen, c->pipe,
++                                                     done, OS_TIMEOUT_INFINITE);
++    c->pipe->screen->fence_reference(c->pipe->screen, &done, NULL);
++    if (!ready) return -1;
++    struct winsys_handle h[2]={{.type=WINSYS_HANDLE_TYPE_FD}, {.type=WINSYS_HANDLE_TYPE_FD}};
++    h[0].handle=h[1].handle=-1;
++    int fd=-1;
++    for (int i=0; i<2; i++)
++        if (!c->pipe->screen->resource_get_handle(c->pipe->screen, c->pipe,
++                                                  resources[i], &h[i], 0)) goto out;
++    struct stat a,b;
++    if (h[0].handle < 0 || h[1].handle < 0 ||
++        fstat(h[0].handle,&a) || fstat(h[1].handle,&b) ||
++        a.st_dev != b.st_dev || a.st_ino != b.st_ino ||
++        h[0].modifier != DRM_FORMAT_MOD_LINEAR || h[1].modifier != DRM_FORMAT_MOD_LINEAR ||
++        h[0].offset || !h[0].stride || h[0].stride != h[1].stride ||
++        !h[0].size || h[0].size > MAX_ENCODE_FRAME ||
++        h[1].offset < (uint64_t)h[0].stride*source->height ||
++        h[1].offset+(uint64_t)h[0].stride*((source->height+1)/2) > h[0].size)
++        goto out;
++    uint32_t m[DMABUF_WORDS]={0x3231564e, source->width, source->height,
++        h[0].stride, h[1].offset, h[0].size, c->encode_x, c->encode_y};
++    memcpy(metadata,m,sizeof(m));
++    fd=h[0].handle; h[0].handle=-1;
++out:
++    for (int i=0; i<2; i++) if (h[i].handle >= 0) close(h[i].handle);
++    return fd;
++}
++#endif
++
+ static int
+ tva_encoder_ensure_session(struct tva_codec *c, struct pipe_video_buffer *source)
+ {
+@@ -3237,6 +3346,7 @@
+     cfg.fps_den = c->encode_fps_den;
+     cfg.enc_color = c->encode_color;
+     cfg.want_shm = 0;
++    cfg.want_dmabuf = tva_surface_requested() && !codec_is_ten_bit(cfg.codec);
+     if (cfg.codec < 0)
+         return -1;
+ 
+@@ -3366,6 +3476,7 @@
+         struct pipe_resource *dest = job->dest;
+         job->data = NULL;
+         job->dest = NULL;
++        for (int i=0; i<2; i++) pipe_resource_reference(&job->source[i], NULL);
+         job->ready = false;
+         c->enc_done++;
+         bool target = c->enc_done == seq;
+@@ -3394,12 +3505,18 @@
+     struct tva_codec *c = tva_codec(codec);
+     uint8_t *raw = NULL;
+     size_t raw_len = 0, encoded_len = 0;
+-    uint32_t flags = 0, pts = 0;
++    uint32_t flags = 0, pts = 0, metadata[DMABUF_WORDS];
++    int source_fd=-1;
++    struct pipe_resource *source_resources[4]={0};
+ 
+     if (feedback)
+         *feedback = NULL;
+-    if (tva_encoder_ensure_session(c, source) < 0 ||
+-        tva_encode_copy_source(c, source, &raw, &raw_len) < 0)
++    if (tva_encoder_ensure_session(c, source) < 0) goto fail;
++#if defined(__linux__)
++    if (tva_session_xfer_mode(c->sess) == XFER_DMABUF)
++        source_fd=tva_encode_export(c, source, metadata, source_resources);
++#endif
++    if (source_fd < 0 && tva_encode_copy_source(c, source, &raw, &raw_len) < 0)
+         goto fail;
+     /* Rate changes arrive per picture, as WebRTC adapts to the network. */
+     if (c->encode_bitrate && c->encode_bitrate != c->encode_sent_bitrate) {
+@@ -3421,20 +3538,27 @@
+         mtx_lock(&c->pend_mutex);
+         struct tva_enc_job *job = &c->enc_jobs[c->enc_sent % TVA_ENC_DEPTH];
+         pipe_resource_reference(&job->dest, destination);
++        if (source_fd >= 0) for (int i=0; i<2; i++)
++            pipe_resource_reference(&job->source[i], source_resources[i]);
+         job->key_wanted = c->encode_key;
+         job->ready = false;
+         uint64_t seq = ++c->enc_sent;
+         mtx_unlock(&c->pend_mutex);
+-        if (tva_session_send_raw_frame(c->sess, raw, raw_len,
+-                                       c->encode_key ? ENC_UNIT_FORCE_KEY : 0) != TVA_OK)
++        if ((source_fd >= 0 ? tva_session_send_dmabuf(c->sess, source_fd, metadata,
++                                       c->encode_key ? ENC_UNIT_FORCE_KEY : 0) :
++             tva_session_send_raw_frame(c->sess, raw, raw_len,
++                                       c->encode_key ? ENC_UNIT_FORCE_KEY : 0)) != TVA_OK)
+             goto fail;
+         free(raw);
++        if (source_fd >= 0) close(source_fd);
+         if (feedback)
+             *feedback = (void *)(uintptr_t)seq;
+         return;
+     }
+-    if (tva_session_send_raw_frame(c->sess, raw, raw_len,
+-                                   c->encode_key ? ENC_UNIT_FORCE_KEY : 0) != TVA_OK)
++    if ((source_fd >= 0 ? tva_session_send_dmabuf(c->sess, source_fd, metadata,
++                                   c->encode_key ? ENC_UNIT_FORCE_KEY : 0) :
++         tva_session_send_raw_frame(c->sess, raw, raw_len,
++                                   c->encode_key ? ENC_UNIT_FORCE_KEY : 0)) != TVA_OK)
+         goto fail;
+     if (!c->encode_packet) {
+         c->encode_packet_cap = TVA_MAX_UNIT_BYTES;
+@@ -3455,9 +3579,11 @@
+         *feedback = (void *)(((uintptr_t)1 << (sizeof(uintptr_t) * 8 - 1)) |
+                              (uintptr_t)encoded_len);
+     free(raw);
++    if (source_fd >= 0) close(source_fd);
+     return;
+ 
+ fail:
++    if (source_fd >= 0) close(source_fd);
+     free(raw);
+     tva_mark_broken(c);
+ }
+@@ -5224,7 +5350,7 @@
+     TVA_TRACE("fence unit=%u ready=%d failed=%d copied=%d staging=%p",
+               p->unit_seq, p->ready, p->failed, p->copied, (void *)p->staging);
+ 
+-    if (p->ready && !p->failed && !p->copied && p->staging) {
++    if (p->ready && !p->failed && !p->copied && (p->staging || p->dmabuf_plus_one)) {
+         p->copied = tva_copy_frame(c, p);
+         TVA_TRACE("fence copy unit=%u result=%d", p->unit_seq, p->copied);
+         if (!p->copied)
+@@ -5303,7 +5429,7 @@
+         if (!p->ready) {
+             TVA_TRACE("recycled fence timed out unit=%u", p->unit_seq);
+             fail = true;
+-        } else if (!p->failed && !p->copied && p->staging) {
++        } else if (!p->failed && !p->copied && (p->staging || p->dmabuf_plus_one)) {
+             p->copied = tva_copy_frame(c, p);
+             TVA_TRACE("recycled fence copy unit=%u result=%d",
+                       p->unit_seq, p->copied);
+@@ -5335,6 +5461,8 @@
+     for (unsigned i = 0; i < TVA_ENC_DEPTH; i++) {
+         free(c->enc_jobs[i].data);
+         pipe_resource_reference(&c->enc_jobs[i].dest, NULL);
++        for (int plane=0; plane<2; plane++)
++            pipe_resource_reference(&c->enc_jobs[i].source[plane], NULL);
+     }
+     mtx_lock(&c->pend_mutex);
+     while (c->pend_count)
+@@ -5521,6 +5649,7 @@
+      * kept on purpose) */
+     const char *shm = getenv("DMD_WANT_SHM");
+     cfg.want_shm = !encoder && !(shm && !strcmp(shm, "0"));
++    cfg.want_dmabuf = !encoder && tva_surface_requested() && !codec_is_ten_bit(codec_id);
+     if (cfg.want_shm && pipeline_depth > SHM_SLOTS)
+         pipeline_depth = SHM_SLOTS;
+ 

@@ -247,3 +247,11 @@ way and fixed:
 - FFmpeg's raw output repeated a frame on timestamp jitter, shifting the
   comparison by one. A decoded frame matched its neighbor at 45.6 dB.
 - `-t` placed after `-i` stopped only one of two outputs.
+
+## Zero-copy continuation (2026-11-22)
+
+The standalone Note10+ GPU-to-MediaCodec YUV prototype reaches 4K60 without
+CPU frame copies, but is not connected to the VA bridge or enabled by default.
+A separate Main10-only frame-cap fix permits 4K P010 in private daemon tests;
+installed-session validation is pending. See the
+[handoff](handoff/zerocopy-mediacodec.md) before resuming implementation.

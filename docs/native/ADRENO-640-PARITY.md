@@ -108,6 +108,19 @@ The [Qualcomm product brief](https://www.qualcomm.com/content/dam/qcomm-martech/
 describes broader platform HDR capabilities; it does not establish that the
 desktop pipeline exposes them on this firmware.
 
+## Zero-copy continuation (2026-11-22, in progress)
+
+A private ION → Android hardware buffer → stock EGL YUV → MediaCodec surface
+prototype returns 120/120 H.264 pictures at 64.91 fps at 3840x2160. Its first
+decoded picture matches the synthetic NV12 source byte for byte. This is not
+an installed VA-API result: the bridge/daemon fd transport, lifetime, crop and
+fallback handling remain unimplemented. No zero-copy default has changed.
+The Main10-only 32 MiB input-cap fix separately passes private 3840x2160 and
+4096x2304 tests (four changing pictures, exact keyframes, >54 dB PSNR); CI and
+default-session qualification are pending.
+See the [implementation handoff](handoff/zerocopy-mediacodec.md) for the tested
+route, rejected alternatives and remaining acceptance checks.
+
 ## Decode routes
 
 “VA” below means the installed bridge used by FFmpeg VA-API, GStreamer's `va`

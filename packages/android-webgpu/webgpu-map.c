@@ -29,6 +29,16 @@ __attribute__((constructor)) static void initialize(void) {
     int page = getpagesize();
     if (page >= 4096 && page <= 65536 && !(page & (page - 1))) page_size = (size_t)page;
     enabled = access("/dev/kgsl-3d0", F_OK) == 0 && access("/dev/mali0", F_OK) != 0;
+    if (enabled) {
+        // Newer Adreno kernels may expose more virtual address bits. Keep
+        // their normal mapping behavior: probe with an advisory, temporary
+        // page instead of inferring the address limit from the GPU alone.
+        const uintptr_t limit = UINT64_C(1) << 39;
+        void *probe = (void *)syscall(SYS_mmap, (void *)limit, page_size, PROT_NONE,
+                                     MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
+        enabled = probe != MAP_FAILED && (uintptr_t)probe < limit;
+        if (probe != MAP_FAILED) syscall(SYS_munmap, probe, page_size);
+    }
 #ifdef WEBGPU_MAP_TEST
     enabled = 1;
 #endif

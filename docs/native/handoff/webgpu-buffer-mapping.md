@@ -55,7 +55,8 @@ a free gap, using another advisory mapping. Finding that gap is necessary for
 Chromium's more fragmented address space; folding alone remained intermittent. It never uses a
 fixed mapping, overwrites existing memory or skips V8's range checks. Other fds,
 private mappings, fixed mappings, Firefox, software rendering and Mali are unchanged.
-The library also checks the device gate itself. `LIVECD_WEBGPU_MAP=0` disables it
+The library also checks the device gate itself and probes whether the process can
+map above the 39-bit boundary, leaving newer kernels with wider address spaces alone. `LIVECD_WEBGPU_MAP=0` disables it
 for a negative control. No Chrome binary is modified; no Chromium rebuild is needed.
 
 Host checks: `python3 tests/browsers/test-webgpu-mapping.py` exercises real memfd

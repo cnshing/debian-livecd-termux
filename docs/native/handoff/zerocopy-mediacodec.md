@@ -259,3 +259,41 @@ Still required: CI → local APT → installed VA encode/decode, dynamic 4K pixe
 and crop/ordering tests, copy negative controls, browser/mpv integration checks,
 regressions and startup proof before default enablement. Private transport
 throughput must not be reported as end-to-end installed VA throughput.
+
+
+### Startup qualification and final candidate
+
+The follow-on implementation replaces opt-in discovery with a startup pixel
+round trip: a separate fd is cloned into a real gralloc handle, sampled through
+raw YUV into each encoder's input surface, decoded into an ImageReader surface,
+then GPU-converted into linear NV12. Sixteen spatial Y/U/V sample triplets must
+match the known pattern within six codes. A deliberate U/V import error fails
+both qualifications and selects copy transport. No extension-only result can
+enable it. `TVA_SURFACE=0` disables this probe/path; `TVA_ZEROCOPY=0` requests the
+client copy transport. Main10/VP8 encoding and Mali retain their copy paths.
+
+Surface handshake responses are deferred until codec/window/EGL setup succeeds.
+An injected setup failure negotiates inline encoding or SHM decoding before any
+input is submitted. The decoder's context is released by the configuring thread
+and acquired by its output thread. A legacy inline client remains byte-compatible.
+The default client requests fd transport, but the daemon grants it only after
+startup qualification and successful session preflight. Only freedreno's NV12
+allocations gain the matching padding; Mali allocation defaults are unchanged.
+
+Private final-candidate transport: H.264/HEVC encode 120/120 at 66.27/67.92 fps,
+minimum changing-picture plane PSNR42.11/44.38dB; swapped-chroma controls reject
+every frame. H.264/HEVC decode120/120 bit-exact, separately timed without hashing
+71.10/94.80fps after session initialization. These are still transport-only rates.
+Production transport cropping1920x1080 from3840x2160 at(16,32), using a picture
+varying in both axes, passes with plane minima66.31/60.29dB and exact keys0/2.
+
+`test-surface-fallback.py` passes qualified modes[2,2], opt-out[0,1], deliberately
+bad import[0,1], session setup failure[0,1] and legacy-client[0,0], in encoder/
+decoder order. It checks the startup proof log as well as negotiated modes.
+
+CI45178853855 failed before compilation because the Termux builder strips EGL
+headers. The recipe now declares libglvnd as a **build-only** header dependency;
+runtime graphics are explicitly loaded from stock Android, with no EGL/GLES
+link dependency. CI45179828877 predates the startup qualification and is VOID
+for final installation. A replacement build follows the qualification commit.
+No candidate deb has yet been installed at this checkpoint.

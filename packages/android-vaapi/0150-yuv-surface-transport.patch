@@ -272,22 +272,36 @@
          p->copied = tva_copy_frame(c, p);
          TVA_TRACE("retire copy unit=%u result=%d", p->unit_seq, p->copied);
          if (!p->copied)
-@@ -1446,10 +1450,14 @@
+@@ -1377,6 +1381,13 @@
+     return false;
+ }
+ 
++static bool
++tva_surface_requested(void)
++{
++    const char *value=getenv("TVA_ZEROCOPY");
++    return !value || strcmp(value, "0");
++}
++
+ #ifndef _WIN32
+ #if defined(__linux__)
+ static int
+@@ -1446,10 +1457,14 @@
     y_stride = align(res_templ.width0 * util_format_get_blocksize(res_templ.format),
                      64);
     y_height = res_templ.height0;
-+   if (templat->buffer_format == PIPE_FORMAT_NV12 && getenv("TVA_ZEROCOPY") &&
-+       !strcmp(getenv("TVA_ZEROCOPY"), "1")) y_height = align(y_height, 32);
++   if (templat->buffer_format == PIPE_FORMAT_NV12 && tva_surface_requested() &&
++       strstr(screen->get_vendor(screen), "freedreno")) y_height = align(y_height, 32);
  
     vl_video_buffer_template(&res_templ, &bridge_templ, formats[1], 1, 1,
                              PIPE_USAGE_DEFAULT, 1, chroma);
     uv_height = res_templ.height0;
-+   if (templat->buffer_format == PIPE_FORMAT_NV12 && getenv("TVA_ZEROCOPY") &&
-+       !strcmp(getenv("TVA_ZEROCOPY"), "1")) uv_height = align(uv_height, 16);
++   if (templat->buffer_format == PIPE_FORMAT_NV12 && tva_surface_requested() &&
++       strstr(screen->get_vendor(screen), "freedreno")) uv_height = align(uv_height, 16);
  
     if (!y_stride || !y_height || !uv_height ||
         y_height > SIZE_MAX / y_stride ||
-@@ -1879,10 +1887,76 @@
+@@ -1879,10 +1894,76 @@
      pipe->texture_unmap(pipe, transfer);
  }
  
@@ -364,7 +378,7 @@
      if (!p->staging || !p->resources[0] || !p->resources[1] ||
          !p->frame_width || !p->frame_height || p->stride <= 0 ||
          p->slice_height <= 0 || p->crop_left < 0 || p->crop_top < 0 ||
-@@ -2057,7 +2131,7 @@
+@@ -2057,7 +2138,7 @@
           * hidden references.  It is enabled by default for the validated
           * linear resources; DMD_VA_READER_COPY=0 opts out.  A failed direct
           * map falls back to the staged application-thread copy below. */
@@ -373,7 +387,7 @@
              tva_copy_frame_direct(c, p, f.data, f.size)) {
              p->copied = true;
              p->ready = true;
-@@ -2070,6 +2144,17 @@
+@@ -2070,6 +2151,17 @@
          }
  #endif
  
@@ -391,17 +405,10 @@
          p->staging = malloc(f.size ? f.size : 1);
          if (!p->staging) {
              tva_mark_broken_locked(c);
-@@ -3213,6 +3298,54 @@
+@@ -3213,6 +3305,47 @@
      }
  }
  
-+static bool
-+tva_surface_requested(void)
-+{
-+    const char *value=getenv("TVA_ZEROCOPY");
-+    return value && !strcmp(value, "1");
-+}
-+
 +#if defined(__linux__)
 +static int
 +tva_encode_export(struct tva_codec *c, struct pipe_video_buffer *source,

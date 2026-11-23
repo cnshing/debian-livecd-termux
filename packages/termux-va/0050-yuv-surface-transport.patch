@@ -95,7 +95,7 @@
 +#endif
 --- /dev/null
 +++ b/daemon/tva_surface.h
-@@ -0,0 +1,289 @@
+@@ -0,0 +1,290 @@
 +/* SPDX-License-Identifier: GPL-3.0-or-later
 + * Stock Android YUV surface interop. All GL objects belong to the calling
 + * session thread. The display lives for the process, never per session. */
@@ -182,6 +182,7 @@
 +static void yuv_close(YuvContext *c)
 +{
 + if (c->context != EGL_NO_CONTEXT) {
++  z.eglMakeCurrent(z.display,c->surface,c->surface,c->context);
 +  if (c->program) z.glDeleteProgram(c->program);
 +  z.eglMakeCurrent(z.display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
 +  if (c->surface != EGL_NO_SURFACE) z.eglDestroySurface(z.display, c->surface);
@@ -385,20 +386,194 @@
 +  z.destroy_image(z.display, images[i]);
 + return result;
 +}
+--- /dev/null
++++ b/daemon/tva_qualify.h
+@@ -0,0 +1,152 @@
++/* SPDX-License-Identifier: GPL-3.0-or-later
++ * A startup capability is earned by pixels traversing the actual native-fd
++ * import, surface encoder, surface decoder and linear raw-YUV export path. */
++static int surface_hardware_codec(AMediaCodec *codec)
++{
++ char *name=NULL;
++ int result=AMediaCodec_getName(codec,&name)==AMEDIA_OK && name &&
++            (!strncmp(name,"OMX.qcom.",9) || !strncmp(name,"c2.qti.",7));
++ if (name) AMediaCodec_releaseName(codec,name);
++ return result;
++}
++static unsigned qualify_y(unsigned x, unsigned y)
++{
++ return 40 + 48*(x/64) + 80*(y/64);
++}
++static int surface_codec_probe(const char *mime)
++{
++ AMediaCodec *encoder=NULL, *decoder=NULL;
++ AMediaFormat *format=NULL;
++ ANativeWindow *window=NULL;
++ AImageReader *reader=NULL;
++ AImage *image=NULL;
++ YuvContext context={0};
++ YuvBuffer source={0}, imported={0}, linear={0};
++ unsigned char packet[128*1024];
++ size_t packet_size=0;
++ int result=0;
++ if (yuv_open(&context,NULL) || yuv_buffer_new(&source,128,128)) goto out;
++ AHardwareBuffer_Planes planes={0};
++ if (AHardwareBuffer_lockPlanes(source.buffer,AHARDWAREBUFFER_USAGE_CPU_WRITE_OFTEN,
++                               -1,NULL,&planes)) goto out;
++ unsigned char *uv=planes.planes[source.nv21 ? 2 : 1].data;
++ for (unsigned y=0;y<128;y++) for (unsigned x=0;x<128;x++)
++  ((unsigned char *)planes.planes[0].data)[y*source.stride+x]=qualify_y(x,y);
++ for (unsigned y=0;y<64;y++) for (unsigned x=0;x<64;x++) {
++  uv[y*source.stride+x*2]=70+20*(x/32);
++  uv[y*source.stride+x*2+1]=170-20*(y/32);
++ }
++ if (AHardwareBuffer_unlock(source.buffer,NULL)) goto out;
++ const YuvNativeHandle *handle=z.handle(source.buffer);
++ uint32_t metadata[8]={0x3231564e,128,128,source.stride,source.uv_offset,source.size,0,0};
++ if (yuv_buffer_import(&imported,handle->data[0],metadata)) goto out;
++ /* The template and original source may disappear before sampling. */
++ yuv_buffer_close(&source);
++ yuv_close(&context);
++ encoder=AMediaCodec_createEncoderByType(mime);
++ if (!encoder || !surface_hardware_codec(encoder)) goto out;
++ format=AMediaFormat_new();
++ if (!format) goto out;
++ AMediaFormat_setString(format,"mime",mime);
++ AMediaFormat_setInt32(format,"width",128); AMediaFormat_setInt32(format,"height",128);
++ AMediaFormat_setInt32(format,"color-format",0x7f000789);
++ AMediaFormat_setInt32(format,"bitrate",1000000);
++ AMediaFormat_setInt32(format,"frame-rate",30);
++ AMediaFormat_setInt32(format,"i-frame-interval",3600);
++ AMediaFormat_setInt32(format,"max-bframes",0);
++ AMediaFormat_setInt32(format,"color-standard",1);
++ AMediaFormat_setInt32(format,"color-range",2);
++ AMediaFormat_setInt32(format,"color-transfer",3);
++ if (AMediaCodec_configure(encoder,format,NULL,NULL,1)!=AMEDIA_OK ||
++     AMediaCodec_createInputSurface(encoder,&window)!=AMEDIA_OK ||
++     AMediaCodec_start(encoder)!=AMEDIA_OK || yuv_open(&context,window)) goto out;
++ ANativeWindow_release(window); window=NULL;
++ if (yuv_draw(&context,imported.buffer,NULL,128,128,0,1,1,-1,imported.nv21 ^ !!getenv("TVA_TEST_SURFACE_BAD_IMPORT"),1000000) ||
++     AMediaCodec_signalEndOfInputStream(encoder)!=AMEDIA_OK) goto out;
++ int eos=0;
++ for (int attempt=0;attempt<300 && !eos;attempt++) {
++  AMediaCodecBufferInfo info;
++  ssize_t index=AMediaCodec_dequeueOutputBuffer(encoder,&info,10000);
++  if (index<0) continue;
++  size_t capacity=0;
++  unsigned char *data=AMediaCodec_getOutputBuffer(encoder,index,&capacity);
++  if (info.size<0 || (info.size && (!data || (size_t)info.size>capacity ||
++                                   (size_t)info.size>sizeof(packet)-packet_size))) {
++   AMediaCodec_releaseOutputBuffer(encoder,index,0); goto out;
++  }
++  /* The NDK pointer already incorporates info.offset. */
++  if (info.size) { memcpy(packet+packet_size,data,info.size); packet_size+=info.size; }
++  eos=!!(info.flags&AMEDIACODEC_BUFFER_FLAG_END_OF_STREAM);
++  AMediaCodec_releaseOutputBuffer(encoder,index,0);
++ }
++ if (!eos || !packet_size) goto out;
++ yuv_close(&context); yuv_buffer_close(&imported);
++ AMediaCodec_stop(encoder); AMediaCodec_delete(encoder); encoder=NULL;
++ AMediaFormat_delete(format); format=NULL;
++ if (AImageReader_newWithUsage(128,128,AIMAGE_FORMAT_YUV_420_888,
++      AHARDWAREBUFFER_USAGE_GPU_SAMPLED_IMAGE,4,&reader)!=AMEDIA_OK ||
++     AImageReader_getWindow(reader,&window)!=AMEDIA_OK) { window=NULL; goto out; }
++ /* Reader owns this window; do not release that reference. */
++ ANativeWindow *decoder_window=window; window=NULL;
++ decoder=AMediaCodec_createDecoderByType(mime);
++ if (!decoder || !surface_hardware_codec(decoder)) goto out;
++ format=AMediaFormat_new();
++ if (!format) goto out;
++ AMediaFormat_setString(format,"mime",mime);
++ AMediaFormat_setInt32(format,"width",128); AMediaFormat_setInt32(format,"height",128);
++ AMediaFormat_setInt32(format,"vendor.qti-ext-dec-picture-order.enable",1);
++ if (AMediaCodec_configure(decoder,format,decoder_window,NULL,0)!=AMEDIA_OK ||
++     AMediaCodec_start(decoder)!=AMEDIA_OK) goto out;
++ ssize_t index=AMediaCodec_dequeueInputBuffer(decoder,1000000);
++ size_t capacity=0;
++ unsigned char *data=index>=0 ? AMediaCodec_getInputBuffer(decoder,index,&capacity) : NULL;
++ if (!data || capacity<packet_size) goto out;
++ memcpy(data,packet,packet_size);
++ if (AMediaCodec_queueInputBuffer(decoder,index,0,packet_size,1000,0)!=AMEDIA_OK) goto out;
++ index=AMediaCodec_dequeueInputBuffer(decoder,1000000);
++ if (index<0 || AMediaCodec_queueInputBuffer(decoder,index,0,0,2000,
++                              AMEDIACODEC_BUFFER_FLAG_END_OF_STREAM)!=AMEDIA_OK) goto out;
++ for (int attempt=0;attempt<300 && !image;attempt++) {
++  AMediaCodecBufferInfo info;
++  index=AMediaCodec_dequeueOutputBuffer(decoder,&info,10000);
++  if (index>=0 && AMediaCodec_releaseOutputBuffer(decoder,index,info.size>0)!=AMEDIA_OK) goto out;
++  media_status_t status=AImageReader_acquireNextImage(reader,&image);
++  if (status!=AMEDIA_OK && status!=AMEDIA_IMGREADER_NO_BUFFER_AVAILABLE) goto out;
++ }
++ AHardwareBuffer *decoded=NULL;
++ AImageCropRect crop;
++ AHardwareBuffer_Desc desc;
++ if (!image || AImage_getHardwareBuffer(image,&decoded)!=AMEDIA_OK ||
++     AImage_getCropRect(image,&crop)!=AMEDIA_OK ||
++     crop.right-crop.left!=128 || crop.bottom-crop.top!=128) goto out;
++ AHardwareBuffer_describe(decoded,&desc);
++ if (crop.left<0 || crop.top<0 || crop.right>(int)desc.width || crop.bottom>(int)desc.height ||
++     yuv_open(&context,NULL) || yuv_buffer_new(&linear,128,128) ||
++     yuv_draw(&context,decoded,linear.buffer,128,128,
++       (float)crop.left/desc.width,(float)crop.top/desc.height,
++       128.0f/desc.width,128.0f/desc.height,linear.nv21,0)) goto out;
++ memset(&planes,0,sizeof(planes));
++ if (AHardwareBuffer_lockPlanes(linear.buffer,AHARDWAREBUFFER_USAGE_CPU_READ_OFTEN,
++                               -1,NULL,&planes)) goto out;
++ if (planes.planeCount!=3 || !planes.planes[0].data || !planes.planes[1].data ||
++     !planes.planes[2].data) { AHardwareBuffer_unlock(linear.buffer,NULL); goto out; }
++ uv=planes.planes[linear.nv21 ? 2 : 1].data;
++ result=1;
++ for (unsigned y=16;y<128;y+=32) for (unsigned x=16;x<128;x+=32) {
++  int actual=((unsigned char *)planes.planes[0].data)[y*linear.stride+x];
++  int u=uv[(y/2)*linear.stride+x], v=uv[(y/2)*linear.stride+x+1];
++  if (abs(actual-(int)qualify_y(x,y))>6 || abs(u-(70+20*(int)(x/64)))>6 ||
++      abs(v-(170-20*(int)(y/64)))>6) result=0;
++ }
++ if (AHardwareBuffer_unlock(linear.buffer,NULL)) result=0;
++out:
++ yuv_close(&context);
++ yuv_buffer_close(&source); yuv_buffer_close(&imported); yuv_buffer_close(&linear);
++ if (image) AImage_delete(image);
++ if (encoder) { AMediaCodec_stop(encoder); AMediaCodec_delete(encoder); }
++ if (decoder) { AMediaCodec_stop(decoder); AMediaCodec_delete(decoder); }
++ if (reader) AImageReader_delete(reader);
++ if (window) ANativeWindow_release(window);
++ if (format) AMediaFormat_delete(format);
++ return result;
++}
 --- a/daemon/termux-va.c
 +++ b/daemon/termux-va.c
-@@ -97,6 +97,10 @@
+@@ -97,6 +97,12 @@
  #include <android/api-level.h>
  #include <media/NdkMediaCodec.h>
  #include <media/NdkMediaFormat.h>
 +#include "tva_surface.h"
++#include "tva_qualify.h"
++static int surface_avc, surface_hevc;
 +#include "tva_fd.h"
 +#include <linux/dma-buf.h>
 +#include <sys/ioctl.h>
  
  /* MediaFormat keys are string literals in Android's MediaFormat API. Use
   * them directly instead of importing AMEDIAFORMAT_KEY_* data symbols from
-@@ -518,6 +522,8 @@
+@@ -481,6 +487,7 @@
+     unsigned int     output_progress; /* atomic count of returned codec buffers */
+     int              stall_timeout_ms;
+     int              w, h;             /* written by the output thread only */
++    long             surface_imports, surface_copies;
+     long             units_in;
+     long             frames_out;
+     /* Pipeline tail frames that could not be delivered after the client
+@@ -504,6 +511,8 @@
+     int              avc_profile_verified; /* explicit profile matched an output SPS */
+     uint32_t         enc_color;        /* ENC_XFER_COLOR bits from the handshake, or 0 */
+     int              csd_used;         /* saved parameter sets went out with a packet */
++    int              handshake_pending;
++    uint32_t         handshake_version;
+     int              negotiated;       /* 1 = client completed the handshake */
+ 
+     /* output format details (written by the output thread only) */
+@@ -518,6 +527,8 @@
      size_t           convert_cap;
  
      /* shared-memory transport */
@@ -407,13 +582,24 @@
      XferMode         xfer;
      int              shm_fd;           /* memfd, -1 = not established */
      int              shm_listen;       /* abstract socket listen fd, -1 = none */
-@@ -789,6 +795,19 @@
+@@ -676,6 +687,8 @@
+  * Response format and version negotiation: see the comments inside the
+  * function and at HELLO_VERSION in common/tva_protocol.h.
+  */
++static int complete_handshake(Session *s, XferMode want, uint32_t ver);
++
+ static int do_handshake(Session *s)
+ {
+     uint32_t first;
+@@ -789,7 +802,21 @@
       * carries the abstract socket name.  The daemon picks the name - the
       * client cannot know it is connection #N, and guessing would collide. */
      XferMode want = XFER_INLINE;
-+    /* Opt-in until the installed pixel/performance qualification completes. */
-+    const char *surface = getenv("TVA_SURFACE");
-+    if (xfer == XFER_DMABUF && surface && !strcmp(surface, "1") &&
+-    if (xfer == XFER_SHM && !s->encoder) {
++    int qualified = s->encoder ?
++        (codec_base_id(s->codec_id) == CODEC_H264 ? surface_avc : surface_hevc) :
++        (surface_avc && surface_hevc);
++    if (xfer == XFER_DMABUF && qualified &&
 +        !codec_is_ten_bit(s->codec_id) &&
 +        (!s->encoder || codec_base_id(s->codec_id) == CODEC_H264 ||
 +         codec_base_id(s->codec_id) == CODEC_HEVC)) {
@@ -424,19 +610,47 @@
 +        yuv_buffer_close(&allocation);
 +        yuv_close(&probe);
 +    }
-     if (xfer == XFER_SHM && !s->encoder) {
++    if ((xfer == XFER_SHM || (xfer == XFER_DMABUF && want != XFER_DMABUF)) && !s->encoder) {
          if (shm_prepare(s, (int)w, (int)h) == 0) {
              want = XFER_SHM;
-@@ -841,7 +860,7 @@
+         } else {
+@@ -797,6 +824,22 @@
+         }
+     }
+ 
++    s->handshake_version=ver;
++    if (want == XFER_DMABUF) {
++        /* Do not promise a surface until this session's codec, window and
++         * EGL context have all initialized. Setup failures can still reply
++         * with the ordinary copy transport. */
++        s->handshake_pending=1;
++        s->xfer=want;
++        return 0;
++    }
++    return complete_handshake(s,want,ver);
++}
++
++static int complete_handshake(Session *s, XferMode want, uint32_t ver)
++{
++    const char *mime=s->mime;
++    unsigned w=s->w, h=s->h;
+     /*
+      * Response: [4B status][4B actual mode][4B name length][name...]
+      * Inline mode has name length 0 and no following bytes.
+@@ -841,8 +884,10 @@
              dlog(1, "[%d] SHM handoff failed, falling back to inline", s->id);
          }
      } else {
 -        s->xfer = XFER_INLINE;
+-    }
 +        s->xfer = want;
-     }
++    }
++
++    s->handshake_pending=0;
  
      /* Frame return has exactly two modes: SHM (memfd zero-copy) or inline
-@@ -855,11 +874,11 @@
+      * on the control connection.
+@@ -855,11 +900,11 @@
       * transport is always the Unix socket printed by "listening on ...". */
      if (s->encoder)
          dlog(1, "[%d] handshake ok: encoder %s %ux%u transport=%s bitrate=%u fps=%u/%u%s",
@@ -450,7 +664,7 @@
      return 0;
  
  reply_fail:
-@@ -1340,6 +1359,7 @@
+@@ -1340,6 +1385,7 @@
   */
  static int send_format_desc(Session *s)
  {
@@ -458,7 +672,7 @@
      /* Fallback for missing values: use what we know if FORMAT_CHANGED has
       * not arrived yet */
      if (s->stride <= 0)       s->stride = s->w;
-@@ -1570,10 +1590,61 @@
+@@ -1570,10 +1616,62 @@
   * socket.  Fully decoupled from the input thread - sending a large frame
   * never blocks unit reception or decoder feeding.
   */
@@ -513,14 +727,15 @@
  {
      Session *s = arg;
      int idle_after_eof = 0;
-+    if (s->xfer == XFER_DMABUF && yuv_open(&s->yuv, NULL)) {
++    if (s->xfer == XFER_DMABUF &&
++        !z.eglMakeCurrent(z.display,EGL_NO_SURFACE,EGL_NO_SURFACE,s->yuv.context)) {
 +        session_abort(s);
 +        return NULL;
 +    }
  
      while (running && !s->stop) {
          AMediaCodecBufferInfo info;
-@@ -1582,6 +1653,25 @@
+@@ -1582,6 +1680,25 @@
          if (oi >= 0) {
              idle_after_eof = 0;
              int eos = (info.flags & FLAG_END_OF_STREAM) != 0;
@@ -546,7 +761,7 @@
  
              /* Handshaked clients must receive the format descriptor before
               * any frame.  Normally FORMAT_CHANGED arrives first, but do not
-@@ -1820,6 +1910,7 @@
+@@ -1820,6 +1937,7 @@
      /* Also covers unexpected MediaCodec errors and failed EOS delivery.
       * The input worker may otherwise stay blocked in recv_all forever. */
      session_abort(s);
@@ -554,7 +769,7 @@
      return NULL;
  }
  
-@@ -2503,6 +2594,74 @@
+@@ -2503,6 +2621,76 @@
      return NULL;
  }
  
@@ -603,7 +818,9 @@
 +        y = (float)(metadata[7] + s->h) / metadata[2];
 +        rw = (float)s->w / metadata[1]; rh = -(float)s->h / metadata[2];
 +        swap = b.nv21;
++        s->surface_imports++;
 +    } else {
++        s->surface_copies++;
 +        if (size != (uint64_t)s->w * s->h * 3 / 2 ||
 +            yuv_buffer_new(&b, s->w, s->h)) return -1;
 +        AHardwareBuffer_Planes p;
@@ -629,7 +846,7 @@
  static int encoder_run(Session *s)
  {
      const size_t input_cap = codec_is_ten_bit(s->codec_id)
-@@ -2537,31 +2696,37 @@
+@@ -2537,31 +2725,37 @@
          }
          bool force_key = sz & ENC_UNIT_FORCE_KEY;
          sz &= ~ENC_UNIT_FORCE_KEY;
@@ -687,7 +904,7 @@
          uint32_t pts = ++frame_no;
          /* Encoder input timestamps are only used by MediaCodec's rate
           * controller.  A unit index scaled by 1 ms (the decoder pairing
-@@ -2583,17 +2748,22 @@
+@@ -2583,17 +2777,22 @@
                  usleep(1000);
              encoder_request_sync(s);
          }
@@ -717,7 +934,15 @@
      }
      out.input_done = 1;
      pthread_join(output_thread, NULL);
-@@ -2665,7 +2835,8 @@
+@@ -2615,6 +2814,7 @@
+     if (do_handshake(s) < 0) goto out_fd;
+ 
+     if (s->encoder) {
++encoder_retry:
+         s->codec = AMediaCodec_createEncoderByType(s->mime);
+         if (!s->codec) {
+             dlog(0, "[%d] no available encoder: %s", s->id, s->mime);
+@@ -2665,7 +2865,8 @@
           * only Venus linear P010 together with the Main10 HDR10 profile constant (4096):
           * profile 2 and Android's P010 are refused. The stream is Main10 (profile_idc 2). */
          AMediaFormat_setInt32(enc_fmt, "color-format", codec_is_ten_bit(s->codec_id)
@@ -727,45 +952,100 @@
          if (codec_is_ten_bit(s->codec_id))
              AMediaFormat_setInt32(enc_fmt, "profile", 4096);
          /* CBR makes Qualcomm's encoder honor low VA-API targets instead of
-@@ -2688,6 +2859,13 @@
+@@ -2687,16 +2888,39 @@
+                  low_latency ? " with low-latency" : "", st);
          }
          if (st != AMEDIA_OK)
-             goto out_started;
+-            goto out_started;
++            goto encoder_copy_retry;
 +        if (s->xfer == XFER_DMABUF) {
++            if (getenv("TVA_TEST_SURFACE_SETUP_FAIL")) goto encoder_copy_retry;
 +            ANativeWindow *window = NULL;
-+            if (AMediaCodec_createInputSurface(s->codec, &window) != AMEDIA_OK) goto out_started;
++            if (AMediaCodec_createInputSurface(s->codec, &window) != AMEDIA_OK) {
++                if (window) ANativeWindow_release(window);
++                goto encoder_copy_retry;
++            }
 +            int result = yuv_open(&s->yuv, window);
 +            ANativeWindow_release(window);
-+            if (result) goto out_started;
++            if (result) goto encoder_copy_retry;
 +        }
          st = AMediaCodec_start(s->codec);
          if (st != AMEDIA_OK) {
              dlog(0, "[%d] encoder start failed: %d", s->id, st);
-@@ -2794,7 +2972,14 @@
++            goto encoder_copy_retry;
++        }
++        if (s->handshake_pending && complete_handshake(s,s->xfer,s->handshake_version))
+             goto out_started;
+-        }
+         encoder_run(s);
++        if (s->xfer == XFER_DMABUF)
++            dlog(1,"[%d] encoder transport: fd-import=%ld upload-copy=%ld",s->id,
++                 s->surface_imports,s->surface_copies);
+         dlog(1, "[%d] encoder session end: %ld units in, %ld packets out",
+              s->id, s->units_in, s->frames_out);
+         goto out_started;
++encoder_copy_retry:
++        if (s->xfer != XFER_DMABUF) goto out_started;
++        dlog(1,"[%d] surface encoder setup failed, negotiating inline copy",s->id);
++        yuv_close(&s->yuv);
++        AMediaCodec_stop(s->codec); AMediaCodec_delete(s->codec); s->codec=NULL;
++        s->xfer=XFER_INLINE;
++        goto encoder_retry;
+     }
+ 
+     s->stall_timeout_ms = decoder_stall_timeout(s);
+@@ -2791,14 +3015,27 @@
+     if (codec_is_ten_bit(s->codec_id))
+         AMediaFormat_setInt32(fmt, TVA_MF_KEY_COLOR_FORMAT, COLOR_FORMAT_YUV420_FLEXIBLE);
+ 
++decoder_retry:
      s->codec = AMediaCodec_createDecoderByType(s->mime);
      if (!s->codec) { dlog(0, "[%d] no available decoder: %s", s->id, s->mime); goto out_fmt; }
  
 -    media_status_t st = AMediaCodec_configure(s->codec, fmt, NULL, NULL, 0);
+-    if (st != AMEDIA_OK) { dlog(0, "[%d] configure failed: %d", s->id, st); goto out_started; }
 +    ANativeWindow *decoder_window = NULL;
 +    if (s->xfer == XFER_DMABUF) {
++        if (getenv("TVA_TEST_SURFACE_SETUP_FAIL")) goto decoder_copy_retry;
 +        if (AImageReader_newWithUsage(s->w, s->h, AIMAGE_FORMAT_YUV_420_888,
 +             AHARDWAREBUFFER_USAGE_GPU_SAMPLED_IMAGE, 4, &s->image_reader) != AMEDIA_OK ||
-+            AImageReader_getWindow(s->image_reader, &decoder_window) != AMEDIA_OK)
-+            goto out_started;
++            AImageReader_getWindow(s->image_reader, &decoder_window) != AMEDIA_OK ||
++            yuv_open(&s->yuv,NULL)) goto decoder_copy_retry;
++        if (!z.eglMakeCurrent(z.display,EGL_NO_SURFACE,EGL_NO_SURFACE,EGL_NO_CONTEXT))
++            goto decoder_copy_retry;
 +    }
 +    media_status_t st = AMediaCodec_configure(s->codec, fmt, decoder_window, NULL, 0);
-     if (st != AMEDIA_OK) { dlog(0, "[%d] configure failed: %d", s->id, st); goto out_started; }
++    if (st != AMEDIA_OK) { dlog(0, "[%d] configure failed: %d", s->id, st); goto decoder_copy_retry; }
  
      st = AMediaCodec_start(s->codec);
-@@ -2822,6 +3007,7 @@
+-    if (st != AMEDIA_OK) { dlog(0, "[%d] start failed: %d", s->id, st); goto out_started; }
++    if (st != AMEDIA_OK) { dlog(0, "[%d] start failed: %d", s->id, st); goto decoder_copy_retry; }
++    if (s->handshake_pending && complete_handshake(s,s->xfer,s->handshake_version))
++        goto out_started;
+ 
+     pthread_t tin, tout;
+     int have_in = (pthread_create(&tin, NULL, input_thread, s) == 0);
+@@ -2821,7 +3058,19 @@
+         dlog(1, "[%d] session end: %ld units in, %ld frames out",
               s->id, s->units_in, s->frames_out);
  
++    goto out_started;
++decoder_copy_retry:
++    if (s->xfer != XFER_DMABUF) goto out_started;
++    dlog(1,"[%d] surface decoder setup failed, negotiating copy transport",s->id);
++    yuv_close(&s->yuv);
++    AMediaCodec_stop(s->codec); AMediaCodec_delete(s->codec); s->codec=NULL;
++    if (s->image_reader) AImageReader_delete(s->image_reader);
++    s->image_reader=NULL;
++    s->xfer=shm_prepare(s,s->w,s->h)==0 ? XFER_SHM : XFER_INLINE;
++    goto decoder_retry;
++
  out_started:
 +    yuv_close(&s->yuv);
      /* configure / start failures must STILL stop the codec before deleting.
       *
       * This used to jump straight to delete on failure and the whole daemon
-@@ -2850,6 +3036,7 @@
+@@ -2850,6 +3099,7 @@
  out_fmt:
      AMediaFormat_delete(fmt);
  out_fd:
@@ -773,3 +1053,17 @@
      shm_teardown(s);
      free(s->convert_buf);
      close(s->fd);
+@@ -3008,6 +3258,13 @@
+     signal(SIGPIPE, SIG_IGN);
+ 
+     android_binder_threadpool_init();
++    const char *surface_option=getenv("TVA_SURFACE");
++    if (!surface_option || strcmp(surface_option,"0")) {
++        surface_avc=surface_codec_probe("video/avc");
++        surface_hevc=surface_codec_probe("video/hevc");
++    }
++    dlog(1,"surface startup pixel qualification: AVC=%s HEVC=%s (fd import -> encode -> decode -> linear YUV)",
++         surface_avc ? "pass" : "copy",surface_hevc ? "pass" : "copy");
+ 
+     if (pipe(wakefd) < 0) {
+         int pipe_errno = errno;

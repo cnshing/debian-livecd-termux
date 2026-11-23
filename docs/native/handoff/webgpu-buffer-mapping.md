@@ -48,15 +48,20 @@ when `/dev/kgsl-3d0` exists and `/dev/mali0` does not.
 
 The library records the end of a successful large anonymous no-access reservation.
 For a shared `shared-memory-region` memfd with an advisory hint beyond 39 bits, it
-folds the hint into the accessible tail after that reservation. It never uses a
+folds the hint into the accessible tail after that reservation. If the tail is
+fragmented and the kernel still returns an address below the reservation, the
+helper reads its own `/proc/self/maps` without allocating memory and retries in
+a free gap, using another advisory mapping. Finding that gap is necessary for
+Chromium's more fragmented address space; folding alone remained intermittent. It never uses a
 fixed mapping, overwrites existing memory or skips V8's range checks. Other fds,
 private mappings, fixed mappings, Firefox, software rendering and Mali are unchanged.
 The library also checks the device gate itself. `LIVECD_WEBGPU_MAP=0` disables it
 for a negative control. No Chrome binary is modified; no Chromium rebuild is needed.
 
 Host checks: `python3 tests/browsers/test-webgpu-mapping.py` exercises real memfd
-mappings, untouched unrelated/private/fixed mappings, the opt-out, the absence of
-libc dependencies, launcher ABI routing and the Mali/device gates.
+mappings, a tail with only one free 16 MiB hole, untouched unrelated/private/fixed
+mappings, late environment availability, the opt-out, the absence of libc
+dependencies, launcher ABI routing and the Mali/device gates.
 
 ## Device acceptance still required
 

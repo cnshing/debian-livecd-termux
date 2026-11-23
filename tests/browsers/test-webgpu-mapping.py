@@ -21,12 +21,19 @@ DRIVER = r'''
 #include <unistd.h>
 int main(int argc, char **argv) {
     if (argc > 3) assert(setenv("LIVECD_WEBGPU_MAP", "1", 1) == 0);
-    const size_t page = 4096, reservation = 128UL << 30;
+    const size_t page = 4096, reservation = (((argc > 5 ? 8UL : 128UL) + 4) << 30) - page;
     void *base = mmap((void *)(128UL << 30), reservation, PROT_NONE,
                      MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
     assert(base == (void *)(128UL << 30));
     uintptr_t end = (uintptr_t)base + reservation;
     uintptr_t hint = 640UL << 30;
+    int fragmented = argc > 4;
+    if (fragmented) {
+        const size_t tail = (1UL << 39) - end;
+        void *occupied = mmap((void *)end, tail, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+        assert(occupied == (void *)end);
+        assert(munmap((void *)(end + (64UL << 20)), 16UL << 20) == 0);
+    }
     int matching = argv[1][0] == 'm', shared = argv[2][0] == 's';
     int fd = memfd_create(matching ? "shared-memory-region" : "unrelated", MFD_CLOEXEC);
     assert(fd >= 0 && ftruncate(fd, page) == 0);
@@ -35,6 +42,8 @@ int main(int argc, char **argv) {
     assert(mapped != MAP_FAILED);
     if (matching && shared && getenv("LIVECD_WEBGPU_MAP")[0] == '1') {
         assert((uintptr_t)mapped >= end && (uintptr_t)mapped + page < (1UL << 39));
+        if (fragmented) assert((uintptr_t)mapped >= end + (64UL << 20) &&
+                               (uintptr_t)mapped + page <= end + (80UL << 20));
     } else {
         assert((uintptr_t)mapped == hint);
     }
@@ -43,6 +52,7 @@ int main(int argc, char **argv) {
     void *fixed = mmap(mapped, page, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_FIXED, fd, 0);
     assert(fixed == mapped);
     assert(munmap(mapped, page) == 0 && munmap(base, reservation) == 0);
+    if (fragmented) assert(munmap((void *)end, (1UL << 39) - end) == 0);
     close(fd);
     return 0;
 }
@@ -81,6 +91,14 @@ class Mapping(unittest.TestCase):
     def test_environment_available_only_after_constructors(self):
         subprocess.run([str(self.driver), 'matching', 'shared', 'late'], check=True,
                        env={**os.environ, 'LD_PRELOAD': str(self.library), 'LIVECD_WEBGPU_MAP': '0'})
+
+    def test_fragmented_tail_uses_a_real_free_gap(self):
+        subprocess.run([str(self.driver), 'matching', 'shared', 'late', 'fragmented'], check=True,
+                       env={**os.environ, 'LD_PRELOAD': str(self.library), 'LIVECD_WEBGPU_MAP': '1'})
+
+    def test_small_partial_reservation_with_fragmented_tail(self):
+        subprocess.run([str(self.driver), 'matching', 'shared', 'late', 'fragmented', 'small'], check=True,
+                       env={**os.environ, 'LD_PRELOAD': str(self.library), 'LIVECD_WEBGPU_MAP': '1'})
 
     def test_library_has_no_libc_dependency(self):
         result = subprocess.run(['readelf', '-d', str(self.library)], check=True, capture_output=True, text=True)

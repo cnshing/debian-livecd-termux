@@ -22,9 +22,12 @@
 #include <unistd.h>
 
 static uintptr_t reservation_end;
+static size_t page_size = 4096;
 static int enabled;
 
 __attribute__((constructor)) static void initialize(void) {
+    int page = getpagesize();
+    if (page >= 4096 && page <= 65536 && !(page & (page - 1))) page_size = (size_t)page;
     enabled = access("/dev/kgsl-3d0", F_OK) == 0 && access("/dev/mali0", F_OK) != 0;
 #ifdef WEBGPU_MAP_TEST
     enabled = 1;
@@ -46,6 +49,45 @@ static int shared_transfer_fd(int fd) {
     return 1;
 }
 
+// The accessible tail can be fragmented by the loader, WebGL and other heaps.
+// If a hint lands in an occupied area, the kernel may ignore it and return an
+// address below the sandbox. Find a real hole before retrying, without malloc,
+// stdio, or fixed mappings inside this allocation hook.
+static uintptr_t gap_hint(uintptr_t start, uintptr_t end, size_t size, uintptr_t entropy) {
+    if (end <= start || size > end - start) return 0;
+    uintptr_t slots = (end - start - size) / page_size + 1;
+    return start + (entropy % slots) * page_size;
+}
+
+static uintptr_t free_hint(uintptr_t minimum, uintptr_t limit, size_t size, uintptr_t entropy) {
+    int fd = (int)syscall(SYS_openat, AT_FDCWD, "/proc/self/maps", O_RDONLY | O_CLOEXEC, 0);
+    if (fd < 0) return 0;
+    char buffer[4096];
+    uintptr_t cursor = minimum, start = 0, end = 0, found = 0;
+    int field = 0;
+    long count;
+    while (!found && (count = syscall(SYS_read, fd, buffer, sizeof(buffer))) > 0) {
+        for (long i = 0; i < count && !found; i++) {
+            unsigned char c = (unsigned char)buffer[i];
+            if (c == '\n') {
+                if (start >= limit) { found = gap_hint(cursor, limit, size, entropy); break; }
+                if (start > cursor) found = gap_hint(cursor, start, size, entropy);
+                if (end > cursor) cursor = end;
+                start = end = 0; field = 0;
+            } else if (field < 2) {
+                int digit = c >= '0' && c <= '9' ? c - '0' : c >= 'a' && c <= 'f' ? c - 'a' + 10 : -1;
+                if (digit >= 0) {
+                    if (!field) start = (start << 4) | (unsigned)digit;
+                    else end = (end << 4) | (unsigned)digit;
+                } else if (c == '-' && !field) field = 1;
+                else field = 2;
+            }
+        }
+    }
+    syscall(SYS_close, fd);
+    return found ? found : gap_hint(cursor, limit, size, entropy);
+}
+
 void *mmap(void *hint, size_t size, int protection, int flags, int fd, off_t offset) {
     const uintptr_t limit = UINT64_C(1) << 39;
     uintptr_t end = __atomic_load_n(&reservation_end, __ATOMIC_RELAXED);
@@ -54,19 +96,35 @@ void *mmap(void *hint, size_t size, int protection, int flags, int fd, off_t off
     // at call time, once the browser has entered libc initialization/main.
     const char *option = enabled ? getenv("LIVECD_WEBGPU_MAP") : NULL;
     int active = option && option[0] == '1' && option[1] == '\0';
-    if (active && end && requested >= limit && (flags & MAP_SHARED) &&
+    int adapt = active && end && requested >= end && (flags & MAP_SHARED) &&
         !(flags & (MAP_FIXED | 0x100000 /* MAP_FIXED_NOREPLACE */)) &&
-        end < limit && size < limit - end && shared_transfer_fd(fd)) {
+        end < limit && size < limit - end && shared_transfer_fd(fd);
+    if (adapt && requested >= limit) {
         uintptr_t available = limit - end - size;
         uintptr_t revised = end + ((requested - end) % available);
-        hint = (void *)(revised & ~UINT64_C(4095));
+        hint = (void *)(revised & ~(uintptr_t)(page_size - 1));
     }
     void *result = (void *)syscall(SYS_mmap, hint, size, protection, flags, fd, offset);
-    if (active && result != MAP_FAILED && protection == PROT_NONE &&
+    if (adapt) {
+        for (int attempt = 0; attempt < 3 && result != MAP_FAILED &&
+             ((uintptr_t)result < end || (uintptr_t)result > limit - size); attempt++) {
+            uintptr_t next = free_hint(end, limit, size, requested >> 12);
+            if (!next) break;
+            // This is our just-created mapping, not a pre-existing reservation.
+            syscall(SYS_munmap, result, size);
+            result = (void *)syscall(SYS_mmap, (void *)next, size, protection, flags, fd, offset);
+        }
+    }
+    if (enabled && result != MAP_FAILED && protection == PROT_NONE &&
         (flags & MAP_NORESERVE) && (flags & MAP_ANONYMOUS) && (flags & MAP_PRIVATE) &&
-        !(flags & (MAP_FIXED | 0x100000)) && size >= (UINT64_C(64) << 30) &&
+        !(flags & (MAP_FIXED | 0x100000)) && fd == -1 && offset == 0 &&
+        size >= (UINT64_C(12) << 30) - page_size &&
         (uintptr_t)result < limit && size < limit - (uintptr_t)result) {
-        __atomic_store_n(&reservation_end, (uintptr_t)result + size, __ATOMIC_RELAXED);
+        // V8 requests a power-of-two prefix (8 GiB minimum), plus the space
+        // needed to align it to 4 GiB. Avoid mistaking other large heaps for it.
+        uintptr_t prefix = size + page_size - (UINT64_C(4) << 30);
+        if (!(prefix & (prefix - 1)))
+            __atomic_store_n(&reservation_end, (uintptr_t)result + size, __ATOMIC_RELAXED);
     }
     return result;
 }

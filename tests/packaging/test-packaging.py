@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Host checks for package ownership, build ordering and profile migration."""
+import ast
 import contextlib
 import hashlib
 import importlib.util
@@ -30,6 +31,19 @@ desktop = module('packaged_desktop', 'src/native/desktop.py')
 
 
 class Packaging(unittest.TestCase):
+    def test_native_package_includes_local_imports(self):
+        source = REPO / 'src/native'
+        packaged = REPO / 'packages/livecd-desktop/native'
+        local = {path.stem for path in source.glob('*.py')}
+        for path in packaged.glob('*.py'):
+            for node in ast.walk(ast.parse(path.read_text())):
+                names = ([node.module] if isinstance(node, ast.ImportFrom) else
+                         [item.name for item in node.names] if isinstance(node, ast.Import) else [])
+                for name in names:
+                    if name and name.split('.')[0] in local:
+                        dependency = packaged / (name.split('.')[0] + '.py')
+                        self.assertTrue(dependency.is_file(), f'{path.name} requires {dependency.name}')
+
     def test_runtime_dependencies_are_built_before_consumers(self):
         order = recipes.build_order(['livecd-desktop'])
         for dependency, consumer in [('gnome-48-mozjs', 'gnome-48-gjs'),

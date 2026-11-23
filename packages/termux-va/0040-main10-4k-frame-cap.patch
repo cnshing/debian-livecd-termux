@@ -4,7 +4,7 @@
  /* Packed NV12 encoder inputs need 12.4 MB at 3840x2160. The framing is
   * unchanged; both endpoints must be updated for raw frames over 8 MiB. */
  #define MAX_ENCODE_FRAME (16 * 1024 * 1024)
-+/* Packed P010 at 4096x2304 is 28 MiB. Only Main10 sessions use this cap. */
++/* Packed P010 at 4096x2304 is 27 MiB. Only Main10 sessions use this cap. */
 +#define MAX_ENCODE_FRAME_10BIT (32 * 1024 * 1024)
  
  /* Encoder uplink controls in the high bits of the length word, which a raw

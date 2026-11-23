@@ -4,7 +4,7 @@
  /* Packed NV12 encoder inputs need 12.4 MB at 3840x2160. The framing is
   * unchanged; both endpoints must be updated for raw frames over 8 MiB. */
  #define MAX_ENCODE_FRAME (16 * 1024 * 1024)
-+/* Packed P010 at 4096x2304 is 28 MiB. Only Main10 sessions use this cap. */
++/* Packed P010 at 4096x2304 is 27 MiB. Only Main10 sessions use this cap. */
 +#define MAX_ENCODE_FRAME_10BIT (32 * 1024 * 1024)
  
  /* Encoder uplink controls in the high bits of the length word, which a raw
@@ -25,3 +25,16 @@
      if (s->fd < 0)
          return sess_err(s, TVA_ERR_STATE, "session has no live connection", 0);
      if (s->tx_broken)
+--- a/src/gallium/frontends/va/tva_bridge.c
++++ b/src/gallium/frontends/va/tva_bridge.c
+@@ -3072,8 +3072,8 @@
+                                       OS_TIMEOUT_INFINITE);
+         c->pipe->screen->fence_reference(c->pipe->screen, &gpu_done, NULL);
+     }
+-    if (tva_direct_read_plane(c->pipe->screen, res[0], x, y0, width, height, packed) &&
+-        tva_direct_read_plane(c->pipe->screen, res[1], x, y0 / 2, width, uv_height,
++    if (tva_direct_read_plane(c->pipe->screen, res[0], x * bytes, y0, width * bytes, height, packed) &&
++        tva_direct_read_plane(c->pipe->screen, res[1], x * bytes, y0 / 2, width * bytes, uv_height,
+                               packed + y_size)) {
+         *out = packed;
+         *out_len = total;

@@ -407,14 +407,16 @@
      XferMode         xfer;
      int              shm_fd;           /* memfd, -1 = not established */
      int              shm_listen;       /* abstract socket listen fd, -1 = none */
-@@ -789,6 +795,17 @@
+@@ -789,6 +795,19 @@
       * carries the abstract socket name.  The daemon picks the name - the
       * client cannot know it is connection #N, and guessing would collide. */
      XferMode want = XFER_INLINE;
 +    /* Opt-in until the installed pixel/performance qualification completes. */
 +    const char *surface = getenv("TVA_SURFACE");
 +    if (xfer == XFER_DMABUF && surface && !strcmp(surface, "1") &&
-+        !codec_is_ten_bit(s->codec_id)) {
++        !codec_is_ten_bit(s->codec_id) &&
++        (!s->encoder || codec_base_id(s->codec_id) == CODEC_H264 ||
++         codec_base_id(s->codec_id) == CODEC_HEVC)) {
 +        YuvContext probe = {0};
 +        YuvBuffer allocation = {0};
 +        if (!yuv_open(&probe, NULL) && !yuv_buffer_new(&allocation, w, h))
@@ -425,7 +427,7 @@
      if (xfer == XFER_SHM && !s->encoder) {
          if (shm_prepare(s, (int)w, (int)h) == 0) {
              want = XFER_SHM;
-@@ -841,7 +858,7 @@
+@@ -841,7 +860,7 @@
              dlog(1, "[%d] SHM handoff failed, falling back to inline", s->id);
          }
      } else {
@@ -434,7 +436,21 @@
      }
  
      /* Frame return has exactly two modes: SHM (memfd zero-copy) or inline
-@@ -1340,6 +1357,7 @@
+@@ -855,11 +874,11 @@
+      * transport is always the Unix socket printed by "listening on ...". */
+     if (s->encoder)
+         dlog(1, "[%d] handshake ok: encoder %s %ux%u transport=%s bitrate=%u fps=%u/%u%s",
+-             s->id, mime, w, h, s->xfer == XFER_SHM ? "SHM" : "inline",
++             s->id, mime, w, h, s->xfer == XFER_DMABUF ? "dmabuf" : s->xfer == XFER_SHM ? "SHM" : "inline",
+              s->bitrate, s->fps_num, s->fps_den, s->enc_color ? " colour" : "");
+     else
+         dlog(1, "[%d] handshake ok: decoder %s %ux%u transport=%s",
+-             s->id, mime, w, h, s->xfer == XFER_SHM ? "SHM" : "inline");
++             s->id, mime, w, h, s->xfer == XFER_DMABUF ? "dmabuf" : s->xfer == XFER_SHM ? "SHM" : "inline");
+     return 0;
+ 
+ reply_fail:
+@@ -1340,6 +1359,7 @@
   */
  static int send_format_desc(Session *s)
  {
@@ -442,7 +458,7 @@
      /* Fallback for missing values: use what we know if FORMAT_CHANGED has
       * not arrived yet */
      if (s->stride <= 0)       s->stride = s->w;
-@@ -1570,10 +1588,61 @@
+@@ -1570,10 +1590,61 @@
   * socket.  Fully decoupled from the input thread - sending a large frame
   * never blocks unit reception or decoder feeding.
   */
@@ -504,7 +520,7 @@
  
      while (running && !s->stop) {
          AMediaCodecBufferInfo info;
-@@ -1582,6 +1651,25 @@
+@@ -1582,6 +1653,25 @@
          if (oi >= 0) {
              idle_after_eof = 0;
              int eos = (info.flags & FLAG_END_OF_STREAM) != 0;
@@ -530,7 +546,7 @@
  
              /* Handshaked clients must receive the format descriptor before
               * any frame.  Normally FORMAT_CHANGED arrives first, but do not
-@@ -1820,6 +1908,7 @@
+@@ -1820,6 +1910,7 @@
      /* Also covers unexpected MediaCodec errors and failed EOS delivery.
       * The input worker may otherwise stay blocked in recv_all forever. */
      session_abort(s);
@@ -538,7 +554,7 @@
      return NULL;
  }
  
-@@ -2503,6 +2592,74 @@
+@@ -2503,6 +2594,74 @@
      return NULL;
  }
  
@@ -613,7 +629,7 @@
  static int encoder_run(Session *s)
  {
      const size_t input_cap = codec_is_ten_bit(s->codec_id)
-@@ -2537,31 +2694,37 @@
+@@ -2537,31 +2696,37 @@
          }
          bool force_key = sz & ENC_UNIT_FORCE_KEY;
          sz &= ~ENC_UNIT_FORCE_KEY;
@@ -671,7 +687,7 @@
          uint32_t pts = ++frame_no;
          /* Encoder input timestamps are only used by MediaCodec's rate
           * controller.  A unit index scaled by 1 ms (the decoder pairing
-@@ -2583,17 +2746,22 @@
+@@ -2583,17 +2748,22 @@
                  usleep(1000);
              encoder_request_sync(s);
          }
@@ -701,7 +717,7 @@
      }
      out.input_done = 1;
      pthread_join(output_thread, NULL);
-@@ -2665,7 +2833,8 @@
+@@ -2665,7 +2835,8 @@
           * only Venus linear P010 together with the Main10 HDR10 profile constant (4096):
           * profile 2 and Android's P010 are refused. The stream is Main10 (profile_idc 2). */
          AMediaFormat_setInt32(enc_fmt, "color-format", codec_is_ten_bit(s->codec_id)
@@ -711,7 +727,7 @@
          if (codec_is_ten_bit(s->codec_id))
              AMediaFormat_setInt32(enc_fmt, "profile", 4096);
          /* CBR makes Qualcomm's encoder honor low VA-API targets instead of
-@@ -2688,6 +2857,13 @@
+@@ -2688,6 +2859,13 @@
          }
          if (st != AMEDIA_OK)
              goto out_started;
@@ -725,7 +741,7 @@
          st = AMediaCodec_start(s->codec);
          if (st != AMEDIA_OK) {
              dlog(0, "[%d] encoder start failed: %d", s->id, st);
-@@ -2794,7 +2970,14 @@
+@@ -2794,7 +2972,14 @@
      s->codec = AMediaCodec_createDecoderByType(s->mime);
      if (!s->codec) { dlog(0, "[%d] no available decoder: %s", s->id, s->mime); goto out_fmt; }
  
@@ -741,7 +757,7 @@
      if (st != AMEDIA_OK) { dlog(0, "[%d] configure failed: %d", s->id, st); goto out_started; }
  
      st = AMediaCodec_start(s->codec);
-@@ -2822,6 +3005,7 @@
+@@ -2822,6 +3007,7 @@
               s->id, s->units_in, s->frames_out);
  
  out_started:
@@ -749,7 +765,7 @@
      /* configure / start failures must STILL stop the codec before deleting.
       *
       * This used to jump straight to delete on failure and the whole daemon
-@@ -2850,6 +3034,7 @@
+@@ -2850,6 +3036,7 @@
  out_fmt:
      AMediaFormat_delete(fmt);
  out_fd:

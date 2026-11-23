@@ -221,8 +221,12 @@
  
          if (sz == FMTDESC_SENTINEL) {
              /* word 2 is the capability flags (0 on legacy daemons) */
-@@ -1277,6 +1328,10 @@
-     if (!f || !f->data)
+@@ -1274,9 +1325,13 @@
+ {
+     if (!s)
+         return TVA_ERR_INVAL;
+-    if (!f || !f->data)
++    if (!f || (!f->data && !f->dmabuf_plus_one))
          return TVA_OK;              /* unconditional release is safe */
  
 +    if (f->dmabuf_plus_one) {
@@ -283,7 +287,7 @@
  
     if (!y_stride || !y_height || !uv_height ||
         y_height > SIZE_MAX / y_stride ||
-@@ -1879,10 +1887,52 @@
+@@ -1879,10 +1887,76 @@
      pipe->texture_unmap(pipe, transfer);
  }
  
@@ -331,12 +335,36 @@
  {
      const uint64_t copy_start_ns = os_time_get_nano();
 +#if defined(__linux__)
-+    if (p->dmabuf_plus_one) return tva_copy_dmabuf_frame(c, p);
++    if (p->dmabuf_plus_one) {
++        if (tva_copy_dmabuf_frame(c, p)) return true;
++        /* A software/Mali screen may not import this dma-buf. Retain the
++         * conventional destination and stage only the visible NV12 rows. */
++        const uint32_t *m=p->dmabuf;
++        int fd=p->dmabuf_plus_one-1;
++        uint8_t *map=mmap(NULL,m[5],PROT_READ,MAP_SHARED,fd,0);
++        struct dma_buf_sync sync={.flags=DMA_BUF_SYNC_START|DMA_BUF_SYNC_READ};
++        if (map==MAP_FAILED) return false;
++        if (ioctl(fd,DMA_BUF_IOCTL_SYNC,&sync)) { munmap(map,m[5]); return false; }
++        size_t size=(size_t)m[1]*m[2]*3/2;
++        p->staging=malloc(size);
++        if (p->staging) {
++            for (unsigned y=0;y<m[2];y++)
++                memcpy(p->staging+y*m[1],map+y*m[3],m[1]);
++            for (unsigned y=0;y<m[2]/2;y++)
++                memcpy(p->staging+m[1]*m[2]+y*m[1],map+m[4]+y*m[3],m[1]);
++        }
++        sync.flags=DMA_BUF_SYNC_END|DMA_BUF_SYNC_READ;
++        int result=ioctl(fd,DMA_BUF_IOCTL_SYNC,&sync);
++        munmap(map,m[5]);
++        close(fd); p->dmabuf_plus_one=0;
++        if (!p->staging || result) return false;
++        p->staging_size=size; p->stride=m[1]; p->slice_height=m[2];
++    }
 +#endif
      if (!p->staging || !p->resources[0] || !p->resources[1] ||
          !p->frame_width || !p->frame_height || p->stride <= 0 ||
          p->slice_height <= 0 || p->crop_left < 0 || p->crop_top < 0 ||
-@@ -2057,7 +2107,7 @@
+@@ -2057,7 +2131,7 @@
           * hidden references.  It is enabled by default for the validated
           * linear resources; DMD_VA_READER_COPY=0 opts out.  A failed direct
           * map falls back to the staged application-thread copy below. */
@@ -345,7 +373,7 @@
              tva_copy_frame_direct(c, p, f.data, f.size)) {
              p->copied = true;
              p->ready = true;
-@@ -2070,6 +2120,17 @@
+@@ -2070,6 +2144,17 @@
          }
  #endif
  
@@ -363,7 +391,7 @@
          p->staging = malloc(f.size ? f.size : 1);
          if (!p->staging) {
              tva_mark_broken_locked(c);
-@@ -3213,6 +3274,54 @@
+@@ -3213,6 +3298,54 @@
      }
  }
  
@@ -418,7 +446,7 @@
  static int
  tva_encoder_ensure_session(struct tva_codec *c, struct pipe_video_buffer *source)
  {
-@@ -3237,6 +3346,7 @@
+@@ -3237,6 +3370,7 @@
      cfg.fps_den = c->encode_fps_den;
      cfg.enc_color = c->encode_color;
      cfg.want_shm = 0;
@@ -426,7 +454,7 @@
      if (cfg.codec < 0)
          return -1;
  
-@@ -3366,6 +3476,7 @@
+@@ -3366,6 +3500,7 @@
          struct pipe_resource *dest = job->dest;
          job->data = NULL;
          job->dest = NULL;
@@ -434,7 +462,7 @@
          job->ready = false;
          c->enc_done++;
          bool target = c->enc_done == seq;
-@@ -3394,12 +3505,18 @@
+@@ -3394,12 +3529,18 @@
      struct tva_codec *c = tva_codec(codec);
      uint8_t *raw = NULL;
      size_t raw_len = 0, encoded_len = 0;
@@ -456,7 +484,7 @@
          goto fail;
      /* Rate changes arrive per picture, as WebRTC adapts to the network. */
      if (c->encode_bitrate && c->encode_bitrate != c->encode_sent_bitrate) {
-@@ -3421,20 +3538,27 @@
+@@ -3421,20 +3562,27 @@
          mtx_lock(&c->pend_mutex);
          struct tva_enc_job *job = &c->enc_jobs[c->enc_sent % TVA_ENC_DEPTH];
          pipe_resource_reference(&job->dest, destination);
@@ -488,7 +516,7 @@
          goto fail;
      if (!c->encode_packet) {
          c->encode_packet_cap = TVA_MAX_UNIT_BYTES;
-@@ -3455,9 +3579,11 @@
+@@ -3455,9 +3603,11 @@
          *feedback = (void *)(((uintptr_t)1 << (sizeof(uintptr_t) * 8 - 1)) |
                               (uintptr_t)encoded_len);
      free(raw);
@@ -500,7 +528,7 @@
      free(raw);
      tva_mark_broken(c);
  }
-@@ -5224,7 +5350,7 @@
+@@ -5224,7 +5374,7 @@
      TVA_TRACE("fence unit=%u ready=%d failed=%d copied=%d staging=%p",
                p->unit_seq, p->ready, p->failed, p->copied, (void *)p->staging);
  
@@ -509,7 +537,7 @@
          p->copied = tva_copy_frame(c, p);
          TVA_TRACE("fence copy unit=%u result=%d", p->unit_seq, p->copied);
          if (!p->copied)
-@@ -5303,7 +5429,7 @@
+@@ -5303,7 +5453,7 @@
          if (!p->ready) {
              TVA_TRACE("recycled fence timed out unit=%u", p->unit_seq);
              fail = true;
@@ -518,7 +546,7 @@
              p->copied = tva_copy_frame(c, p);
              TVA_TRACE("recycled fence copy unit=%u result=%d",
                        p->unit_seq, p->copied);
-@@ -5335,6 +5461,8 @@
+@@ -5335,6 +5485,8 @@
      for (unsigned i = 0; i < TVA_ENC_DEPTH; i++) {
          free(c->enc_jobs[i].data);
          pipe_resource_reference(&c->enc_jobs[i].dest, NULL);
@@ -527,7 +555,7 @@
      }
      mtx_lock(&c->pend_mutex);
      while (c->pend_count)
-@@ -5521,6 +5649,7 @@
+@@ -5521,6 +5673,7 @@
       * kept on purpose) */
      const char *shm = getenv("DMD_WANT_SHM");
      cfg.want_shm = !encoder && !(shm && !strcmp(shm, "0"));

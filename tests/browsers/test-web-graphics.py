@@ -88,6 +88,7 @@ def main():
     p.add_argument('browser', choices=('chromium', 'chrome', 'firefox'))
     p.add_argument('--out', type=lambda value: Path(value).resolve(), required=True)
     p.add_argument('--cases', default='webgl1,webgl2,webgpu')
+    p.add_argument('--map-stress', action='store_true', help='also check many, repeatedly mapped and 64 MiB WebGPU buffers')
     p.add_argument('--expect', choices=('hardware', 'software'), default='hardware')
     p.add_argument('--flag', action='append', default=[], help='extra browser flag (experiments)')
     p.add_argument('--pref', action='append', default=[], help='extra Firefox preference NAME=JSON (experiments)')
@@ -154,7 +155,7 @@ def main():
     os.environ['DISPLAY'] = f':{display}'
     children = []
     result = {'browser': args.browser, 'expect': args.expect, 'display': display, 'flags': args.flag,
-              'prefs': args.pref}
+              'prefs': args.pref, 'map_stress': args.map_stress}
     browser = None
     try:
         with (out / 'x-server.log').open('w') as log:
@@ -206,7 +207,7 @@ def main():
                 result['console_errors'] = browser.evaluate(
                     "[...document.querySelectorAll('pre, .error, #error')].map(e => e.textContent.slice(0, 400))")
         else:
-            browser.open(f'http://127.0.0.1:{server.server_address[1]}/?cases=' + args.cases)
+            browser.open(f'http://127.0.0.1:{server.server_address[1]}/?cases=' + args.cases + ('&map_stress=1' if args.map_stress else ''))
             page = wait(lambda: browser.evaluate('window.RESULT'), 240, 'the page')
             time.sleep(1)
             browser.screenshot(out / 'screenshot.png')

@@ -177,7 +177,53 @@ var<workgroup> partial: array<u32, 256>;
 
 // Progress lines in the browser log locate a GPU process crash.
 const step = name => console.log('webgpu step: ' + name);
-async function webgpu(left) {
+// Exercise independent transfer handles, reuse after unmap, and a larger allocation.
+async function mappingStress(device) {
+  const MiB = 1024 * 1024, count = 32, cycles = 32, largeSize = 64 * MiB;
+  const buffers = [];
+  const create = (size, usage) => {
+    const buffer = device.createBuffer({size, usage}); buffers.push(buffer); return buffer;
+  };
+  const check = (buffer, expected) => {
+    const words = new Uint32Array(buffer.getMappedRange());
+    for (let i = 0; i < words.length; i++) {
+      if (words[i] !== expected(i)) throw new Error(`map stress: word ${i}: ${words[i]} != ${expected(i)}`);
+    }
+  };
+  try {
+    step('map stress: many buffers');
+    const many = Array.from({length: count}, () => create(MiB, GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST));
+    let encoder = device.createCommandEncoder();
+    for (const buffer of many) encoder.clearBuffer(buffer);
+    device.queue.submit([encoder.finish()]);
+    await Promise.all(many.map(buffer => buffer.mapAsync(GPUMapMode.READ)));
+    for (const buffer of many) { check(buffer, () => 0); buffer.unmap(); buffer.destroy(); }
+
+    step('map stress: repeated read/write maps');
+    const upload = create(MiB, GPUBufferUsage.MAP_WRITE | GPUBufferUsage.COPY_SRC);
+    const readback = create(MiB, GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST);
+    for (let cycle = 0; cycle < cycles; cycle++) {
+      const expected = i => (Math.imul(i, 2654435761) ^ Math.imul(cycle + 1, 2246822519)) >>> 0;
+      await upload.mapAsync(GPUMapMode.WRITE);
+      const words = new Uint32Array(upload.getMappedRange());
+      for (let i = 0; i < words.length; i++) words[i] = expected(i);
+      upload.unmap();
+      encoder = device.createCommandEncoder(); encoder.copyBufferToBuffer(upload, 0, readback, 0, MiB);
+      device.queue.submit([encoder.finish()]);
+      await readback.mapAsync(GPUMapMode.READ); check(readback, expected); readback.unmap();
+    }
+
+    step('map stress: large buffer');
+    const large = create(largeSize, GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST);
+    encoder = device.createCommandEncoder(); encoder.clearBuffer(large); device.queue.submit([encoder.finish()]);
+    await large.mapAsync(GPUMapMode.READ); check(large, () => 0); large.unmap();
+    return {ok: true, simultaneous_buffers: count, buffer_bytes: MiB, cycles, large_bytes: largeSize};
+  } finally {
+    for (const buffer of buffers) buffer.destroy();
+  }
+}
+
+async function webgpu(left, mapStress = false) {
   step('adapter');
   if (!navigator.gpu) return {available: false, reason: 'navigator.gpu missing'};
   const adapter = await navigator.gpu.requestAdapter({powerPreference: 'high-performance'});
@@ -195,6 +241,7 @@ async function webgpu(left) {
   let lost = null; device.lost.then(i => { lost = i.message || i.reason; });
   device.pushErrorScope('validation');
 
+  try {
   step('render');
   // Offscreen render to a texture, then copied to a buffer and compared.
   const tex = device.createTexture({size: [W, H], format: 'rgba8unorm',
@@ -256,6 +303,8 @@ async function webgpu(left) {
   for (let w = 0; w < 64; w++) { let s = 0; for (let l = 0; l < 256; l++) s += Hs[w * 256 + l] & 1023; if (R[w] !== s) rbad++; }
   out.checks.workgroup_reduce = {bad: rbad, ok: rbad === 0};
 
+  if (mapStress) out.checks.mapping_stress = await mappingStress(device);
+
   step('canvas');
   // A visible WebGPU canvas, presented by the compositor.
   const canvas = place(document.createElement('canvas'), left, 0);
@@ -273,11 +322,19 @@ async function webgpu(left) {
   out.errors = errors; out.lost = lost;
   out.ok = Object.values(out.checks).every(c => c.ok) && !validation && !errors.length && !lost && out.control_detects_error;
   return out;
+  } catch (error) {
+    // Keep the adapter, uncaptured errors and loss reason when mapping rejects.
+    // The rejection alone can hide a prior wire disconnect behind an allocation error.
+    await new Promise(resolve => setTimeout(resolve, 50));
+    out.error = String(error && error.stack || error);
+    out.errors = errors; out.lost = lost; out.ok = false;
+    return out;
+  }
 }
 
 (async () => {
   const q = new URLSearchParams(location.search), result = {userAgent: navigator.userAgent};
-  for (const [name, run] of [['webgl1', () => webgl(1, 0)], ['webgl2', () => webgl(2, 272)], ['webgpu', () => webgpu(544)]]) {
+  for (const [name, run] of [['webgl1', () => webgl(1, 0)], ['webgl2', () => webgl(2, 272)], ['webgpu', () => webgpu(544, q.get('map_stress') === '1')]]) {
     if (!(q.get('cases') || 'webgl1,webgl2,webgpu').split(',').includes(name)) continue;
     try { result[name] = await run(); } catch (e) { result[name] = {available: 'error', error: String(e && e.stack || e)}; }
   }

@@ -1,0 +1,14 @@
+--- a/src/gallium/frontends/va/picture.c
++++ b/src/gallium/frontends/va/picture.c
+@@ -317,7 +317,10 @@
+       else if (u_reduce_video_profile(context->templat.profile) == PIPE_VIDEO_FORMAT_AV1)
+          context->desc.av1enc.requested_metadata = driver_metadata_support;
+ 
+-      context->desc.base.in_fence = surf->fence;
++      /* Image uploads publish a pipe fence; decoded/VPP pictures may
++       * publish a video fence. CPU/dma-buf encoder consumers need either
++       * producer to finish before reading or importing this source. */
++      context->desc.base.in_fence = surf->fence ? surf->fence : surf->pipe_fence;
+       if (context->proc.dst_surface) {
+          if (!context->decoder->process_frame ||
+              context->decoder->process_frame(context->decoder, context->target, &context->proc.vpp) != 0) {

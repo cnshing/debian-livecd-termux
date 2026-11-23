@@ -14,6 +14,7 @@ from pathlib import Path
 parser=argparse.ArgumentParser(description="Private Android fd transport pixel/keyframe/throughput checks")
 parser.add_argument('--daemon',type=Path,required=True)
 parser.add_argument('--out',type=Path,required=True)
+parser.add_argument('--packed',action='store_true',help='force a valid non-gralloc linear layout through the upload fallback')
 parser.add_argument('--crop',type=int,nargs=4,metavar=('X','Y','W','H'))
 parser.add_argument('--decoder-assets',type=Path,help='h264/hevc .bin, .json packet positions and -expected.json unit-index MD5 files')
 args=parser.parse_args()
@@ -35,6 +36,12 @@ pitch=p.planes[0].row;uv=min(p.planes[1].data,p.planes[2].data)-p.planes[0].data
 assert a.AHardwareBuffer_unlock(b,None)==0
 handle=n.AHardwareBuffer_getNativeHandle(b);fd=os.dup(handle[3]);size=os.lseek(fd,0,2)
 a.AHardwareBuffer_release(b)
+allocator=None
+if args.packed:
+ helper=C.CDLL(str(Path(os.environ.get('PREFIX','/data/data/com.termux/files/usr'))/'lib/android-vaapi/libandroid-dma-heap.so'))
+ allocator=helper.livecd_dma_heap_alloc;allocator.argtypes=[C.c_char_p,C.c_uint64,C.c_uint32];allocator.restype=C.c_int
+ os.close(fd);pitch=w;uv=w*h;size=(w*h*3//2+4095)&~4095
+ fd=allocator(b'system',size,os.O_RDWR|os.O_CLOEXEC);assert fd>=0
 meta=[0x3231564e,w,h,pitch,uv,size,cx,cy];print('metadata',meta,flush=True)
 raw=mmap.mmap(fd,size)
 # A changing luma/chroma pattern, two frames repeated to check reuse.
@@ -50,6 +57,18 @@ def fill(i):
  row=bytes([70+i*40,170-i*30])*(w//2)
  for y in range(h//2):raw[uv+y*pitch:uv+y*pitch+w]=row
  fcntl.ioctl(fd,0x40086200,struct.pack('Q',2|4))
+# Two independent pixel allocations stay immutable while a pipeline is in flight.
+source_fds=[fd];source_maps=[raw]
+if allocator:
+ second_fd=allocator(b'system',size,os.O_RDWR|os.O_CLOEXEC);assert second_fd>=0
+else:
+ second=C.c_void_p();assert a.AHardwareBuffer_allocate(C.byref(d),C.byref(second))==0
+ second_fd=os.dup(n.AHardwareBuffer_getNativeHandle(second)[3]);assert os.lseek(second_fd,0,2)==size
+ a.AHardwareBuffer_release(second)
+source_fds.append(second_fd);source_maps.append(mmap.mmap(second_fd,size))
+for i in range(2):
+ fd=source_fds[i];raw=source_maps[i];fill(i)
+fd=source_fds[0];raw=source_maps[0]
 def rec(s,n):
  data=b''
  while len(data)<n:
@@ -70,6 +89,9 @@ try:
   if (out/'daemon.sock').exists():break
   assert proc.poll() is None
   time.sleep(.1)
+ for i in range(2):
+  fd=source_fds[i];raw=source_maps[i];fill(i)
+ fd=source_fds[0];raw=source_maps[0]
  for cid,ext in [(5,'h264'),(6,'hevc')]:
   s=session(cid,ew,eh);packets=[];flags=[]
   for i in range(4):
@@ -78,17 +100,20 @@ try:
    s.sendall(struct.pack('!8I',*meta))
    length,flag,pts=struct.unpack('!3I',rec(s,12));packets.append(rec(s,length));flags.append(flag)
   assert [i for i,flag in enumerate(flags) if flag&1]==[0,2],flags;print(ext,'flags',flags,flush=True);s.sendall(b'\0'*4);s.close();(out/('encode.'+ext)).write_bytes(b''.join(packets))
+ for i in range(2):
+  fd=source_fds[i];raw=source_maps[i];fill(i)
+ fd=source_fds[0];raw=source_maps[0]
  for cid,ext in [(5,'h264'),(6,'hevc')]:
-  fill(0);s=session(cid,ew,eh);packets=[]
+  s=session(cid,ew,eh);packets=[]
   def read_packets():
    for i in range(120):
     length,flag,pts=struct.unpack('!3I',rec(s,12));packets.append(rec(s,length))
   worker=threading.Thread(target=read_packets);worker.start();start=time.monotonic()
   for i in range(120):
    s.sendall(struct.pack('!I',0x20000000|32))
-   s.sendmsg([b'F'],[(socket.SOL_SOCKET,socket.SCM_RIGHTS,array.array('i',[fd]))])
+   s.sendmsg([b'F'],[(socket.SOL_SOCKET,socket.SCM_RIGHTS,array.array('i',[source_fds[i%2]]))])
    s.sendall(struct.pack('!8I',*meta))
-  worker.join();elapsed=time.monotonic()-start
+  worker.join();elapsed=time.monotonic()-start;assert len(packets)==120,len(packets)
   print('BENCH',ext,len(packets),elapsed,len(packets)/elapsed,flush=True)
   s.sendall(b'\0'*4);s.close();(out/('bench.'+ext)).write_bytes(b''.join(packets))
  (out/'source.nv12').write_bytes(b''.join(refs[i%2] for i in range(4)))
@@ -123,8 +148,34 @@ try:
   bad_lines=stats.read_text().splitlines();assert len(bad_lines)==4,bad_lines
   assert all(min(float(v) for v in re.findall(r'psnr_[uv]:([0-9.inf]+)',line))<25 for line in bad_lines)
   print('CONTROL',ext,'swapped chroma rejected on every frame',flush=True)
+  stats=out/(ext+'.pipeline.psnr')
+  with (out/(ext+'.pipeline-ffmpeg.log')).open('w') as compare_log:
+   compare=subprocess.Popen(['ffmpeg','-v','error','-r','60','-i',str(out/('bench.'+ext)),
+    '-r','60','-f','rawvideo','-pixel_format','nv12','-video_size',f'{ew}x{eh}',
+    '-i','pipe:0','-filter_complex',
+    f'[0:v]format=yuv420p,setparams=range=limited:colorspace=bt709[a];'
+    f'[1:v]format=yuv420p,setparams=range=limited:colorspace=bt709,split[b][d];'
+    f'[a][b]psnr=stats_file={stats}:eof_action=endall[p];'
+    f'[p][d]ssim=stats_file={out/(ext+".pipeline.ssim")}:eof_action=endall','-f','null','-'],
+    stdin=subprocess.PIPE,stdout=compare_log,stderr=compare_log)
+   try:
+    for i in range(120):compare.stdin.write(refs[i%2])
+    compare.stdin.close();assert compare.wait(timeout=120)==0
+   finally:
+    if compare.poll() is None:compare.kill();compare.wait()
+  lines=stats.read_text().splitlines();assert len(lines)==120,len(lines)
+  scores=[float(v) for line in lines for v in re.findall(r'psnr_[yuv]:([0-9.inf]+)',line)]
+  for line in lines:
+   fields={k:float(v) for k,v in re.findall(r'psnr_([yuv]):([0-9.inf]+)',line)}
+   assert fields['y']>=30 and min(fields['u'],fields['v'])>=32,(ext,line)
+  print('PIPELINE PIXELS',ext,'120/120 alternating independent buffers; minimum plane PSNR',min(scores),flush=True)
 
 
+
+  ssim_lines=(out/(ext+'.pipeline.ssim')).read_text().splitlines();assert len(ssim_lines)==120
+  minimum_ssim=min(float(re.search(r'All:([0-9.]+)',line)[1]) for line in ssim_lines)
+  assert minimum_ssim>.9,(ext,minimum_ssim)
+  print('PIPELINE SSIM',ext,'minimum',minimum_ssim,flush=True)
  if args.decoder_assets:
   import hashlib,json,re
   for cid,ext in [(0,'h264'),(1,'hevc')]:
@@ -169,4 +220,6 @@ finally:
  proc.terminate()
  try:proc.wait(timeout=10)
  except subprocess.TimeoutExpired:proc.kill();proc.wait()
- raw.close();os.close(fd);log.close()
+ for mapping in source_maps:mapping.close()
+ for descriptor in source_fds:os.close(descriptor)
+ log.close()

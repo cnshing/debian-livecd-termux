@@ -31,11 +31,29 @@ Reproduce with `tests/video-encode/test-main10-4k.py`; the script exercises a
 private daemon, so it alone is not default-session acceptance.
 
 CI run **45103922827 is void and cancelled; never install its debs** (it predates
-the P010 row-width fix). Replacement run 45105056762 builds android-vaapi 20,
-android-vaapi-glibc 15 and termux-va 7 from 14f1883. Installation and
-default-session results must be recorded before calling this shipped or
-pushing the change to main. `test-main10-4k.py --vaapi` runs the installed
-bridge/session; the original installed stack fails the same 4K encode.
+the P010 row-width fix). Replacement run 45105056762 passed and built
+android-vaapi 20, android-vaapi-glibc 15 and termux-va 7 from 14f1883. All three
+were installed through the phone's existing local APT repo under the atomic
+install lock, without downgrades; desktop restarted, `livecd validate` 30/30,
+lock released. The original installed stack fails the same 4K encode.
+
+`livecd exec -- python test-main10-4k.py --vaapi` now passes **3840x2160 and
+4096x2160** through the default installed VA driver/shared daemon: four pictures
+each, exact keyframes 0/2, minimum PSNR 54.29/55.64 dB, swapped-chroma controls
+16.74–16.76 dB. Source and decoded 4K pictures were opened and compared. Installed regressions:
+FFmpeg **46/46**, daemon **49/49**, H.264/HEVC/VP9/VP8 decode **48/48 bit-exact
+each**, and Main10 4K P010 decode **4/4 bit-exact** against software.
+WebRTC passes through the installed launchers in Chromium, Chrome and Firefox;
+Chromium and Firefox WebCodecs each pass 60 hardware pictures. Firefox's first
+desktop-wrapper attempt closed its automation connection before any encoder
+session; a runtime/control run and a fresh desktop-wrapper retry both pass.
+An earlier Firefox invocation used the package binary directly and bypassed the
+managed runtime; that attempt is not default-install evidence. Chrome
+WebCodecs remains skipped per the original brief.
+4096x2304 remains a **private daemon** result: VA advertises a maximum height
+of 2176 and FFmpeg refuses 2304 before sending a frame. Expanding that advertised
+bound was not part of the 3840x2160 input-cap fix. No Main10 real-time rate is
+claimed; this path still copies.
 
 ## A working GPU-to-encoder prototype
 
@@ -52,8 +70,10 @@ Android's stock EGL/GLES must execute this part, rather than Termux Mesa.
 3. Allocate an AHB descriptor as a **layout/metadata template**, clone its
    native handle with the pixel fd replaced by a separate ION allocation,
    then call createFromHandle with method CLONE (3). This succeeds on this
-   device. Keep the template alive for the metadata fd's lifetime; do not
-   mutate or close its original handles.
+   device. CLONE duplicates the handles: a later test releases the original
+   allocation before rendering two imported buffers and still passes. Retain
+   each imported AHB while its EGL image is in use; do not mutate or close
+   handles owned by the original AHB.
 4. Import the resulting AHB as an EGLImage, bind as an external texture, and
    sample with `GL_EXT_YUV_target`'s `__samplerExternal2DY2YEXT`.
 5. Choose an **EGL YUV window config**, and write `layout(yuv)` fragment
@@ -73,8 +93,21 @@ OMX.qcom.video.encoder.avc. The first decoded NV12 picture is byte-for-byte
 identical to the source. HEVC returns 120/120 at 71.70 fps. All 120 pictures
 were decoded and compared for both codecs: minimum PSNR 83.30 dB (H.264),
 64.18 dB (HEVC). Disabling the shader's U/V correction fails at 16.78 dB.
-The decoded gradient was opened. This static pattern does not establish frame
-ordering, crop handling or arbitrary-content correctness.
+The decoded gradient was opened.
+
+A second probe alternates **two independent ION buffers**, releasing their AHB
+allocation template before rendering. It returns 120/120 pictures at 66.42 fps
+(H.264) / 70.32 fps (HEVC). Every decoded picture matches the correct alternating
+reference at minimum PSNR 49.91 / 57.98 dB; a one-picture reference shift fails at ≤9.00 dB.
+A crop probe selects 1920x1080 at source origin **(16,32)** from a 3840x2160
+YUV pattern with changes in both axes: 120/120, minimum PSNR 84.01 dB; picture
+opened. These tests establish those cases for the standalone renderer, not the
+VA-API transport or arbitrary imported resource layouts.
+
+Raw MediaCodec output lacks reliable demuxer frame timing (the H.264 parser
+reports a default average 25 fps for this output). Force both comparison inputs
+to the same frame rate when checking the alternating references; a mismatched
+clock otherwise produces false order failures.
 
 Critical details from the experiments:
 
@@ -141,8 +174,9 @@ Pending, not qualified:
 - Browser and mpv integration. Browsers consume the VA path, whereas mpv
   defaults to FFmpeg's separate MediaCodec path; neither benefits merely
   because this standalone encoder probe runs quickly.
-- CI debs → local APT repo → installed launchers/session; FFmpeg suite,
-  Main10 and VP8 regressions, all three browsers and `livecd validate`.
+- Those checks must be repeated for the eventual zero-copy transport. The
+  independent Main10 cap/P010 fix has completed CI → local APT → installed
+  session verification and the regression checks above.
 
 Shared SSH is in use by webgpu-map. Do not remove its key or stop sshd while
 that lane is active. Every private process started by the completed probes

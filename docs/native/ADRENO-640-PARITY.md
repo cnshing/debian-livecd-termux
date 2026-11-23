@@ -115,9 +115,15 @@ prototype returns 120/120 H.264 pictures at 64.91 fps at 3840x2160. Its first
 decoded picture matches the synthetic NV12 source byte for byte. This is not
 an installed VA-API result: the bridge/daemon fd transport, lifetime, crop and
 fallback handling remain unimplemented. No zero-copy default has changed.
-The Main10-only 32 MiB input-cap fix separately passes private 3840x2160 and
-4096x2304 tests (four changing pictures, exact keyframes, >54 dB PSNR); CI and
-default-session qualification are pending.
+The Main10-only 32 MiB cap and P010 direct-read width fixes are installed from
+CI 45105056762 (android-vaapi 20, -glibc 15, termux-va 7). The default session
+passes 3840x2160 and 4096x2160 Main10 encoding (four changing pictures, exact
+keyframes, >54 dB PSNR, bad-chroma controls); validate 30/30. Private daemon
+4096x2304 also passes, but VA's advertised maximum height remains 2176. Installed regressions:
+FFmpeg 46/46, daemon 49/49, four 8-bit codecs 48/48 bit-exact each, 4K P010
+decode 4/4 bit-exact, WebRTC in all three installed browsers, WebCodecs 60/60
+in Chromium and Firefox. Firefox's first wrapper automation connection closed;
+a fresh installed-wrapper retry passed.
 See the [implementation handoff](handoff/zerocopy-mediacodec.md) for the tested
 route, rejected alternatives and remaining acceptance checks.
 
@@ -169,8 +175,11 @@ if the SPS says Main10; the bridge then offers `VAProfileHEVCMain10` encoding wi
 installed through the session: FFmpeg `hevc_vaapi -profile:v main10` 640x360 53.5 dB against the source,
 854x480 and 1080p correct (pictures viewed; those clips are noise, so their PSNR is low for any encoder);
 GStreamer `vah265enc` Main10 with 52.8 dB over the visible rows; 8-bit HEVC/H.264 encode, 10-bit decode
-and VP8 decode unchanged; a daemon without the probe refuses Main10. Limit: a packed P010 frame must fit
-the 16 MiB raw-frame cap, so 10-bit encode stops below 4K (4096x2304 needs 28 MiB).
+and VP8 decode unchanged; a daemon without the probe refuses Main10. The original 16 MiB raw-frame cap stopped encoding below 4K. Termux-va 7 and
+android-vaapi 20 raise it to 32 MiB for Main10 only and fix the bridge's P010
+byte widths; 3840x2160 and 4096x2160 now pass through the installed session.
+4096x2304 (27 MiB packed P010) works through the daemon, but exceeds VA's current
+advertised height limit of 2176.
 **Colour and HDR metadata (2026-11-18).** Decoding needs no colour on the wire: VA-API clients read
 colour and HDR metadata from the bitstream, and the bridge returns the decoder's P010 samples exactly
 (bit-exact above). For encoding, the colour the client signals (`ENC_XFER_COLOR`, ccdf3aa) reaches
@@ -192,7 +201,7 @@ Known, not 10-bit specific: GStreamer's `vah265enc`/`vah264enc` output is not cr
 | HEVC Main encode | Existing default | Not offered by tested VA WebCodecs path | Not qualified | Not qualified |
 | VP8 hardware encode | **On** (`CODEC_VP8_ENC` 14, `OMX.qcom.video.encoder.vp8`); FFmpeg `vp8_vaapi` 90/90 frames decode in libvpx, SSIM 0.998; GStreamer `vavp8enc` 90/90 | Chromium: WebRTC hardware 3/3 runs (280 frames), WebCodecs 60/60 (max colour error 6). Chrome: WebRTC hardware sessions every run, picture check 2/3 (starts at 236 kb/s and lags behind the changing test canvas); WebCodecs fails with Chrome's known GPU-memory-buffer encoding error | Software | Software |
 | VP9 / AV1 hardware encode | Not offered by daemon | Software | Software | Software |
-| Main10 / HDR10 HEVC encode | Bridge takes NV12 only | Not qualified | Not qualified | Not qualified |
+| Main10 / HDR10 HEVC encode | Main10 with P010 where the daemon probe passes; 4K installed with android-vaapi 20 / termux-va 7. HDR metadata limits above still apply | Not qualified | Not qualified | Not qualified |
 
 Firefox (2026-11-18): installed firefox `159.0-103` / android-firefox-video `9.0.2-8` /
 livecd-desktop `0.2.0-43`, encoding on by default. WebRTC H.264 640x360 and WebCodecs 60/60

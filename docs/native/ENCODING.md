@@ -252,6 +252,14 @@ way and fixed:
 
 The standalone Note10+ GPU-to-MediaCodec YUV prototype reaches 4K60 without
 CPU frame copies, but is not connected to the VA bridge or enabled by default.
-A separate Main10-only frame-cap fix permits 4K P010 in private daemon tests;
-installed-session validation is pending. See the
+The Main10-only frame-cap and P010 direct-read width fixes are installed from
+CI 45105056762 (android-vaapi 20 / -glibc 15 / termux-va 7): default-session
+3840x2160 and 4096x2160 Main10 pictures/keyframes pass, minimum PSNR >54 dB,
+with bad-chroma controls and `livecd validate` 30/30. The native daemon also
+handles 4096x2304; VA still advertises a 2176 maximum height. See the
 [handoff](handoff/zerocopy-mediacodec.md) before resuming implementation.
+
+Installed regressions for these fixes: FFmpeg 46/46, daemon 49/49;
+H.264/HEVC/VP9/VP8 decode 48/48 bit-exact each; 4K P010 decode 4/4 bit-exact;
+WebRTC through Chromium/Chrome/Firefox installed launchers and WebCodecs 60/60
+in Chromium/Firefox. Firefox required a fresh automation retry; see the handoff.

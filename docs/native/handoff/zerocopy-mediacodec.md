@@ -1,8 +1,11 @@
 # MediaCodec dma-buf work on Note10+ (2026-11-22)
 
-Production surface transport is implemented and installed for qualification
-(2026-11-23). The latest checkpoint below supersedes the earlier prototype
-checkpoints. Default enablement requires both Adreno client detection and the
+Production surface transport is delivered on main (7e7e998, 2026-11-23).
+A static review on 2026-11-24 found two bugs and three untested cases; the
+fixes and their tests are in "Review follow-up (2026-11-24)" at the end. The
+sections from "Main10 input limit" to "Remaining implementation and
+acceptance" are the earlier prototype checkpoints, kept for history and
+superseded by "Production transport candidate" onwards. Default enablement requires both Adreno client detection and the
 daemon's actual startup pixel round trip. Main10 encoding retains its copy path.
 The original brief is `temp/parity-note10-20261116/handoffs/zerocopy.md`;
 its coordination rules still apply. Worktree: `/home/cs/wt-zerocopy`, branch
@@ -152,7 +155,7 @@ compressed modifier correctly, or perform a raw-YUV GPU blit from this AHB
 into a linear shared buffer. Returning this fd as `DRM_FORMAT_MOD_LINEAR`
 would be incorrect. No decoder throughput or correctness result is claimed.
 
-## Remaining implementation and acceptance
+## Remaining implementation and acceptance (superseded prototype plan)
 
 The next step is a robust negotiated fd transport and ownership scheme,
 retaining source resources until the encoder has consumed them. Coordinate
@@ -167,7 +170,7 @@ known pixels, not just the presence of ION or EGL extensions. Keep a copy-path
 negative control and safe fallback for unsupported layouts and failed probes.
 Do not change Mali defaults without equivalent-device evidence.
 
-Pending, not qualified:
+Pending at the prototype stage, all since delivered or listed under the final limitations:
 
 - Default installed 4K60 H.264/HEVC via the VA bridge, dynamic pictures,
   SSIM/PSNR, frame ordering, exact keyframes and nonzero-origin crop tests.
@@ -180,8 +183,8 @@ Pending, not qualified:
   independent Main10 cap/P010 fix has completed CI → local APT → installed
   session verification and the regression checks above.
 
-Shared SSH is in use by webgpu-map. Do not remove its key or stop sshd while
-that lane is active. Every private process started by the completed probes
+At the prototype stage the shared SSH key was also in use by webgpu-map. Both
+lanes have finished; the key was removed and sshd stopped. Every private process started by the completed probes
 has exited; test assets remain in `~/pl-zerocopy/` for reproduction.
 
 API references:
@@ -470,3 +473,35 @@ controls and the original P010 timeout, without private browser profiles.
 Phone evidence roots are `~/pl-zerocopy/surface23-browser`,
 `surface23-regress`, `fallback-installed11`, `vaapi-final23`,
 `decode-surface23-4k` and `p010-final23-reruns`.
+
+## Review follow-up (2026-11-24)
+
+A host-only review of 7e7e998 confirmed the commits, CI runs, deb hashes and
+evidence tarball. Its findings and the fixes, on branch `fix/review-followups`
+(android-vaapi 24, android-vaapi-glibc 19, termux-va 12):
+
+| Finding | Fix | Test |
+|---|---|---|
+| Double free: when the encoder session fails with a picture in flight, `tva_codec_get_feedback` frees that picture's feedback, and `tva_codec_destroy` frees it again (patch 0152). Scudo aborts the browser GPU process or FFmpeg. | Patch 0154: `get_feedback` detaches the feedback from its job under `pend_mutex`; completion publishes `ready` under the lock and wakes waiters, so a concurrent completion cannot be freed under it. | `tests/video-encode/test-encoder-failure.py` kills a private daemon mid-encode; FFmpeg must exit without a signal. Against android-vaapi 23 it is expected to abort. |
+| Decoder sessions abort when the visible picture is under 96 pixels or odd: dma-buf is approved from the coded size, then the daemon rejects H.264 160x90. | Patch 0060: the daemon draws such pictures into an even buffer of at least 96x96, picture at the origin, like a hardware decoder's padded output. For odd sizes it draws the pair's second decoded pixel, so the last chroma column comes from the decoder. | `test-surface-gaps.py --only decode`: H.264 160x90, VP9 and VP8 161x95, plus an unchanged 640x360 control, bit-exact against FFmpeg's software decoder. |
+| VP8/VP9 decoders got dma-buf from the AVC/HEVC proofs. | The startup proof is split; VP8 and VP9 decoders each decode an embedded 128x128 key frame of the qualify pattern (libvpx, exact in FFmpeg). H.264 and HEVC decoders now use their own codec's proof instead of requiring both. A new log line reports `VP8=… VP9=…`. | `test-surface-fallback.py`: qualified VP8/VP9 get mode 2; `TVA_TEST_SURFACE_BAD_DECODE` swaps chroma in every decode proof and must drop all decoders to SHM. |
+| Untagged Main/High H.264 and HEVC surface colour was never tested. | Not changed until measured. `TVA_TEST_SURFACE_ANY_COLOUR` (test only) lifts the colour exclusions. | `test-surface-gaps.py --only colour`: every surface encoder × untagged/BT.709 limited/BT.709 full, copy vs surface, decoded to RGB as signalled. The control must catch the known-bad full-range or untagged Baseline sessions. |
+
+Also fixed: dead `< 0` checks on the unsigned `winsys_handle.handle` (it now
+uses `UINT_MAX` as "none"), a skipped `DMA_BUF_SYNC_END` when the encoder's CPU
+upload fallback failed to allocate, and a shadowed variable. Not changed: the
+per-frame gralloc allocations in the daemon, which likely contribute to the
+H.264 shortfall, and the shared `pipe_context` use in `fence_wait`, which
+predates this work.
+
+Evidence notes: the warm H.264 decode figure (66.0 fps against 60.5 fps copy)
+comes from the candidate-21 line in `COORDINATION.md`, not from the
+production evidence tarball. The 48/48 VP8/VP9 decode results did not record
+which transport they used.
+
+Host checks: both patch series apply to the pinned upstream tarballs and
+reproduce the reviewed trees; the patched daemon and bridge pass
+`gcc -fsyntax-only -Wall -Wextra -Wshadow` apart from pre-existing AV1
+type-limit warnings; packaging, ten-bit, daemon-upgrade and session-decode
+host tests pass. Phone verification is pending: see the lane's handoff.
+

@@ -116,8 +116,42 @@ Host regression results: mapping/launcher checks 10/10; package integration 16/1
 9/9. CI runs 45108106965 and 45176219600 pass. No release was modified.
 
 Evidence: `temp/parity-note10-20261116/webgpu-map/` on the host and
-`~/pl-webgpu-map/` on the Note10+. Private displays only. The shared temporary SSH
-key remains for the active zerocopy lane; the last lane removes it.
+`~/pl-webgpu-map/` on the Note10+. Private displays only. At the time the shared
+temporary SSH key remained for the zerocopy lane; that lane finished last and
+removed the key and stopped sshd.
+
+The delivered change is commits 34772e3 through bb41715 on main (the range
+`34772e3^..bb41715`). Its pre-rebase branch `fix/webgpu-map` was deleted on
+2026-11-24 after every commit was confirmed equivalent on main.
+
+## Review follow-up, 2026-11-24: Mali and maintenance
+
+A host-only review confirmed the claims, CI hashes and opt-out evidence and
+found no correctness bug. It found one scope gap: the cause is the 39-bit
+kernel address space, not the GPU, but the helper was KGSL-only, while Chromium
+and Chrome WebGPU are on by default on the Mali x1s (Galaxy S20). Branch
+`fix/review-followups` (android-webgpu 0.1.0-2, livecd-desktop 50) changes:
+
+- The library activates on its 39-bit probe alone: a temporary advisory
+  mapping at 2^39 must land below 2^39. Kernels with more address bits keep
+  their native mapping behaviour, which a new host test checks with a real
+  (not test-forced) build on the 47-bit host; a forced build fails it.
+- The launcher preloads it for Chromium, Chrome and ungoogled-chromium with a
+  GPU on any vendor. `0`, `false`, `no` and `off` opt out.
+- Retries pick a different free-gap slot per attempt, a failed `munmap` of the
+  helper's own mapping keeps that mapping instead of mapping a second copy,
+  and the `/proc/self/maps` scan stops once it has an answer.
+
+Pending: x1s verification. It needs the x1s's address limit and the WebGL1+2 +
+WebGPU stress with and without the helper, through the installed launchers.
+
+Maintenance: the helper recognises Chromium's memfd by the exact name
+`shared-memory-region` and V8's reservation by its size (at least 12 GiB minus
+a page, with size + page − 4 GiB a power of two). A browser update that changes
+either makes the helper inert without any message, and the original
+intermittent failure returns. Re-run the opt-out control and the installed
+stress after each Chromium or Chrome update. ungoogled-chromium receives the
+helper but has not been tested.
 
 ## Original report, 2026-11-19
 

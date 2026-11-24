@@ -10,6 +10,12 @@ independently of the desktop renderer.
 | Capability | Native Chromium 156 | glibc Google Chrome |
 | --- | --- | --- |
 | GPU compositing, WebGL 1/2, WebGPU | enabled; captures and readback correct | same |
+
+WebGPU buffer mapping: from android-webgpu 0.1.0-2 and livecd-desktop 50
+(2026-11-24) both browsers get the address-space helper from
+`docs/native/handoff/webgpu-buffer-mapping.md` here as well. It acts only if
+this kernel's probe shows a 39-bit address limit. The WebGL then WebGPU stress
+from that handoff has not yet been run on the x1s.
 | VP9 hardware playback | passes with android-vaapi revision 3 or later | decodes with android-vaapi-glibc revision 1; one of four compositor comparisons below the SSIM threshold |
 | HEVC hardware playback | passes with android-vaapi revision 5 and the launcher of livecd-desktop 0.2.0-17 | passes with android-vaapi-glibc revision 1 and the same launcher |
 | H.264 playback | software (off by default on every phone) | software |

@@ -108,30 +108,37 @@ The [Qualcomm product brief](https://www.qualcomm.com/content/dam/qcomm-martech/
 describes broader platform HDR capabilities; it does not establish that the
 desktop pipeline exposes them on this firmware.
 
-## Zero-copy continuation (2026-11-22, in progress)
+## Production surface transport (2026-11-23)
 
-A private ION → Android hardware buffer → stock EGL YUV → MediaCodec surface
-prototype returns 120/120 H.264 pictures at 64.91 fps at 3840x2160. Its first
-decoded picture matches the synthetic NV12 source byte for byte. This is not
-an installed VA-API result: the bridge/daemon fd transport, lifetime, crop and
-fallback handling remain unimplemented. No zero-copy default has changed.
-The Main10-only 32 MiB cap and P010 direct-read width fixes are installed from
-CI 45105056762 (android-vaapi 20, -glibc 15, termux-va 7). The default session
-passes 3840x2160 and 4096x2160 Main10 encoding (four changing pictures, exact
-keyframes, >54 dB PSNR, bad-chroma controls); validate 30/30. Private daemon
-4096x2304 also passes, but VA's advertised maximum height remains 2176. Installed regressions:
-FFmpeg 46/46, daemon 49/49, four 8-bit codecs 48/48 bit-exact each, 4K P010
-decode 4/4 bit-exact, WebRTC in all three installed browsers, WebCodecs 60/60
-in Chromium and Firefox. Firefox's first wrapper automation connection closed;
-a fresh installed-wrapper retry passed.
-See the [implementation handoff](handoff/zerocopy-mediacodec.md) for the tested
-route, rejected alternatives and remaining acceptance checks.
+Installed android-vaapi 22 / -glibc 17 / termux-va 9 use negotiated dma-buf
+transport by default on freedreno after the daemon proves a known-pixel
+fd→surface encoder→ImageReader decoder→linear NV12 round trip for AVC and HEVC.
+Session setup failures fall back to copy transport. TVA_ZEROCOPY=0 disables the
+client path. No Mali default changes; Main10/VP8 encoding and Chrome's softpipe
+VA variant retain copy transport. Decoder UBWC is converted on the GPU to a
+validated linear buffer; no UBWC storage is advertised as linear.
+
+End-to-end moving 4K encode, including FFmpeg startup: default queue 2 AVC 38 /
+HEVC 40 fps; async_depth 8,600 pictures AVC 54.2 / HEVC 60.4 fps. All pictures pass
+PSNR/SSIM, exact IDRs every 60. The old copy baseline was21.7/22.1fps. H.264
+still misses the explicit 55 fps floor narrowly; do not describe default queue 2
+as4K60. Warm 4K H.264 decode is66fps versus 60.5 fps with the path off, near the
+isolated 71 fps native reference. Installed H.264/HEVC 4K120/120 decode is bit-exact.
+
+The final installed regression passes FFmpeg 46/46, daemon 49/49, AVC/HEVC/VP9/
+VP8 decode48/48 bit-exact each,4096x2160 Main10 encode and 4KP010 decode4/4.
+CI 45189264023 (Mesa22/17) and45186614640 (daemon9) were delivered through local
+APT, with desktop restart and validate 30/30. The decoder retains a final GPU
+copy into the existing VA surface; mpv's default separate MediaCodec route is
+unchanged. See the [implementation handoff](handoff/zerocopy-mediacodec.md)
+for browser verification, actual throughput limits and remaining work.
 
 ## Decode routes
 
 “VA” below means the installed bridge used by FFmpeg VA-API, GStreamer's `va`
 elements and the three browsers. mpv uses FFmpeg's separate NDK MediaCodec
-route by default. No new decode default was enabled during this continuation.
+route by default. Qualified freedreno VA sessions now use the surface transport described above;
+mpv retains its separate default route.
 
 | Feature | FFmpeg VA / GStreamer VA | Chromium / Chrome / Firefox | FFmpeg MediaCodec / mpv | Status |
 | --- | --- | --- | --- | --- |

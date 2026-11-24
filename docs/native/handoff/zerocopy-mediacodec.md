@@ -1,7 +1,9 @@
 # MediaCodec dma-buf work on Note10+ (2026-11-22)
 
-This work is **in progress**. No zero-copy transport is enabled in the shipped
-bridge or daemon. The independent Main10 frame-limit fix is described below.
+Production surface transport is implemented and installed for qualification
+(2026-11-23). The latest checkpoint below supersedes the earlier prototype
+checkpoints. Default enablement requires both Adreno client detection and the
+daemon's actual startup pixel round trip. Main10 encoding retains its copy path.
 The original brief is `temp/parity-note10-20261116/handoffs/zerocopy.md`;
 its coordination rules still apply. Worktree: `/home/cs/wt-zerocopy`, branch
 `work/zerocopy`. Private evidence and probe sources:
@@ -291,9 +293,81 @@ varying in both axes, passes with plane minima66.31/60.29dB and exact keys0/2.
 bad import[0,1], session setup failure[0,1] and legacy-client[0,0], in encoder/
 decoder order. It checks the startup proof log as well as negotiated modes.
 
-CI45178853855 failed before compilation because the Termux builder strips EGL
+CI 45178853855 failed before compilation because the Termux builder strips EGL
 headers. The recipe now declares libglvnd as a **build-only** header dependency;
 runtime graphics are explicitly loaded from stock Android, with no EGL/GLES
-link dependency. CI45179828877 predates the startup qualification and is VOID
+link dependency. CI 45179828877 predates the startup qualification and is VOID
 for final installation. A replacement build follows the qualification commit.
 No candidate deb has yet been installed at this checkpoint.
+
+
+## Installed production checkpoint (2026-11-23)
+
+The phone now has android-vaapi **22**, android-vaapi-glibc **17** and
+termux-va **9**, delivered through CI debs and the local APT repository.
+Mesa packages: CI **45189264023**, source b3d3086; daemon: CI **45186614640**,
+source 58f0559. Desktop49 and android-webgpu0.1.0-1 from the other lane remain
+installed. The default daemon passes both AVC and HEVC startup pixel probes.
+There is no private driver, socket or library-path override in these VA tests.
+
+Revision 8 exposed a packaging/runtime mismatch: Termux's libandroid shim lacks
+AHardwareBuffer_lockPlanes even though the stock library supplies it. Revision 9
+resolves hardware-buffer/window operations from absolute stock libandroid;
+EGL/GLES are also stock dispatch. A temporary library-path recovery for 8 was
+removed by the default 9 desktop restart. No installed package binary was edited.
+
+Patch0152 adds cache-synchronized CPU VAImage uploads into Adreno linear NV12
+surfaces, real encoder-consumption fences and durable heap-owned feedback.
+Without durable feedback, completing jobs older than the eight-slot ring could
+lose their encoded length at async_depth 16. Source reuse now waits for the
+corresponding encoded packet, while mapping the coded buffer still retires
+feedback normally. TVA_CACHED_UPLOAD=0 isolates the old uploader;
+TVA_ZEROCOPY=0 disables the new upload and fd request together.
+
+### End-to-end measurements
+
+All rates below include FFmpeg startup unless explicitly labeled warm. These
+are moving testsrc2 pictures through the installed VA API, not private fd rates.
+
+| Installed path | H.264 fps | HEVC fps | Frames |
+|---|---:|---:|---:|
+| Original20/15/7 copy baseline |21.66|22.07|120|
+|22/17/9 default FFmpeg queue depth 2 |37.99|40.43|120|
+|22/17/9 async_depth 8 |51.01|56.30|240|
+|22/17/9 async_depth 8, longer run |54.23|60.44|600|
+
+Every picture in these runs passes PSNR/SSIM; exact IDRs are at multiples of 60.
+Long-run minimum plane scores are H.264 Y37.32/U37.88/V36.26dB, HEVC
+Y37.14/U37.71/V36.68dB; minimum SSIM0.982332/0.981512. The explicit 55 fps
+acceptance check still fails H.264 54.23. Do not claim default queue 2 reaches60.
+The raw surface transport separately achieves66.39/66.93fps with120 alternating
+independently owned buffers, all-frame PSNR/SSIM and wrong-chroma controls.
+That number excludes the VA upload and is not an installed application rate.
+
+Installed default H.264 decode (480 pictures, warmed) measured65.98fps versus
+60.48fps with TVA_ZEROCOPY=0. H.264 and HEVC 4K120/120 pictures each are bit-exact
+against software. The native isolated reference was approximately71fps; an
+FFmpeg direct-MediaCodec CLI rerun measured50.11fps and is a different pipeline.
+The decoder still GPU-copies into the VA destination surface. It eliminates
+CPU socket-frame copies, not every GPU operation.
+
+### Corrected validation findings
+
+The original C crop harness aliased the upload source and encoder CurrPic
+reconstruction surface. Mesa is allowed to replace the reconstruction storage;
+this invalid test caused the black first picture. The corrected test uses one
+input plus two reconstruction surfaces; crop(16,32),1920x1080 from4K passes all
+four pictures, exact IDRs0/2, minimum plane PSNR42.11dB. Patch0151 forwards the
+upload producer fence as synchronization hardening; the invalid harness did
+not establish that it fixed a production black-frame bug.
+
+The FFmpeg sample oracle also needed matching format/range/matrix metadata on
+both comparison inputs. The surface encoder announces BT.709, and the raw
+reference has no matrix; automatic filter conversion otherwise changes samples
+before PSNR (about 22 dB). Matching metadata without transforming sample values
+restores about 40 dB. Separate colour-bar signalling and wrong-metadata controls
+remain required; this correction must not mask a colour-signalling regression.
+
+Current evidence on phone: pl-zerocopy/vaapi-cached22-default-r1,
+vaapi-cached22-depth 8-r1, vaapi-cached22-depth 8-long, surface22-regress,
+and surface22-final. Earlier checkpoints above describe superseded work.

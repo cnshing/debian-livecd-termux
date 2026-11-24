@@ -248,18 +248,27 @@ way and fixed:
   comparison by one. A decoded frame matched its neighbor at 45.6 dB.
 - `-t` placed after `-i` stopped only one of two outputs.
 
-## Zero-copy continuation (2026-11-22)
+## Qualified surface transport (2026-11-23)
 
-The standalone Note10+ GPU-to-MediaCodec YUV prototype reaches 4K60 without
-CPU frame copies, but is not connected to the VA bridge or enabled by default.
-The Main10-only frame-cap and P010 direct-read width fixes are installed from
-CI 45105056762 (android-vaapi 20 / -glibc 15 / termux-va 7): default-session
-3840x2160 and 4096x2160 Main10 pictures/keyframes pass, minimum PSNR >54 dB,
-with bad-chroma controls and `livecd validate` 30/30. The native daemon also
-handles 4096x2304; VA still advertises a 2176 maximum height. See the
-[handoff](handoff/zerocopy-mediacodec.md) before resuming implementation.
+The installed VA bridge and termux-va now negotiate dma-buf transport on
+qualified Adreno devices. At startup the daemon proves fd import, surface
+encoding, ImageReader decoding and linear NV12 output with a known-pixel round
+trip for both AVC and HEVC. Per-session setup failures negotiate the compatible
+copy path. TVA_ZEROCOPY=0 selects that path explicitly. Mali and Chrome's
+softpipe VA variant keep their previous defaults; Main10/VP8 encoding stays on
+copy transport. Decoder UBWC output is GPU-converted to a real linear buffer
+before export, then GPU-copied into the VA destination.
 
-Installed regressions for these fixes: FFmpeg 46/46, daemon 49/49;
-H.264/HEVC/VP9/VP8 decode 48/48 bit-exact each; 4K P010 decode 4/4 bit-exact;
-WebRTC through Chromium/Chrome/Firefox installed launchers and WebCodecs 60/60
-in Chromium/Firefox. Firefox required a fresh automation retry; see the handoff.
+CI 45189264023 supplies android-vaapi 22 / -glibc 17; CI 45186614640 supplies
+termux-va 9, installed via local APT. With changing 4K pictures, the default
+FFmpeg queue 2 reaches 38/40 fps AVC/HEVC versus 22/22 fps before. At async_depth 8,
+a 600-frame run reaches 54.2/60.4 fps, with every picture and exact IDRs checked.
+H.264 remains slightly below the 55 fps acceptance floor; default queue 2 does
+not reach4K60. Warm 4K H.264 VA decode reaches 66 fps versus 60.5 fps with fd
+transport disabled; software comparisons are bit-exact.
+
+Main10-only frame-cap and P010 width fixes continue to pass 4096x2160 encoding;
+VA still advertises maximum height 2176. FFmpeg 46/46, daemon 49/49, four 8-bit
+codecs48/48 bit-exact each and 4K P0104/4 pass on the installed revisions.
+See the [implementation handoff](handoff/zerocopy-mediacodec.md) for ownership,
+qualification, throughput limits, controls and the latest browser results.

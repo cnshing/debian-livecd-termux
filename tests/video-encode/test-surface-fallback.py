@@ -20,10 +20,12 @@ def receive(sock, count):
     return result
 
 
-def negotiate(endpoint, codec, requested):
+def negotiate(endpoint, codec, requested, full_range=False):
     with socket.socket(socket.AF_UNIX) as sock:
         sock.settimeout(10)
         sock.connect(str(endpoint))
+        if codec == 5 and full_range:
+            requested |= 0xC0000000 | (1 << 22) | (13 << 14) | (1 << 6)
         words = [0x444D4400, 3, codec, 3840, 2160, requested]
         if codec == 5:
             words += [40_000_000, 60, 1]
@@ -65,6 +67,7 @@ def main():
         ('bad-import', {'TVA_TEST_SURFACE_BAD_IMPORT': '1'}, 2, [0, 1], 'AVC=copy HEVC=copy'),
         ('setup-failure', {'TVA_TEST_SURFACE_SETUP_FAIL': '1'}, 2, [0, 1], 'AVC=pass HEVC=pass'),
         ('legacy-client', {}, 0, [0, 0], 'AVC=pass HEVC=pass'),
+        ('full-range', {}, 2, [0, 2], 'AVC=pass HEVC=pass'),
     ]
     for name, options, requested, expected, proof in cases:
         endpoint = args.out.resolve() / f'{name}.sock'
@@ -83,7 +86,7 @@ def main():
                         break
                     assert proc.poll() is None, logfile.read_text()
                     time.sleep(.1)
-                actual = [negotiate(endpoint, codec, requested) for codec in [5, 0]]
+                actual = [negotiate(endpoint, codec, requested, name == 'full-range') for codec in [5, 0]]
                 assert actual == expected, (name, actual, expected)
             finally:
                 proc.terminate()

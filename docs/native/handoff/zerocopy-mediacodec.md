@@ -483,9 +483,9 @@ evidence tarball. Its findings and the fixes, on branch `fix/review-followups`
 | Finding | Fix | Test |
 |---|---|---|
 | Double free: when the encoder session fails with a picture in flight, `tva_codec_get_feedback` frees that picture's feedback, and `tva_codec_destroy` frees it again (patch 0152). Scudo aborts the browser GPU process or FFmpeg. | Patch 0154: `get_feedback` detaches the feedback from its job under `pend_mutex`; completion publishes `ready` under the lock and wakes waiters, so a concurrent completion cannot be freed under it. | `tests/video-encode/test-encoder-failure.py` kills a private daemon mid-encode; FFmpeg must exit without a signal. Against android-vaapi 23 it is expected to abort. |
-| Decoder sessions abort when the visible picture is under 96 pixels or odd: dma-buf is approved from the coded size, then the daemon rejects H.264 160x90. | Patch 0060: the daemon draws such pictures into an even buffer of at least 96x96, picture at the origin, like a hardware decoder's padded output. For odd sizes it draws the pair's second decoded pixel, so the last chroma column comes from the decoder. | `test-surface-gaps.py --only decode`: H.264 160x90, VP9 and VP8 161x95, plus an unchanged 640x360 control, bit-exact against FFmpeg's software decoder. |
+| Decoder sessions abort when the visible picture is under 96 pixels or odd: dma-buf is approved from the coded size, then the daemon rejects H.264 160x90. | Patch 0060: the daemon draws such pictures into an even buffer of at least 96x96, picture at the origin, like a hardware decoder's padded output. For odd sizes it draws the pair's second decoded pixel, so the last chroma column comes from the decoder. | `test-surface-gaps.py --only decode`: H.264 160x90, VP9 161x97 and VP8 161x95, plus an unchanged 640x360 control, bit-exact against FFmpeg's software decoder. |
 | VP8/VP9 decoders got dma-buf from the AVC/HEVC proofs. | The startup proof is split; VP8 and VP9 decoders each decode an embedded 128x128 key frame of the qualify pattern (libvpx, exact in FFmpeg). H.264 and HEVC decoders now use their own codec's proof instead of requiring both. A new log line reports `VP8=… VP9=…`. | `test-surface-fallback.py`: qualified VP8/VP9 get mode 2; `TVA_TEST_SURFACE_BAD_DECODE` swaps chroma in every decode proof and must drop all decoders to SHM. |
-| Untagged Main/High H.264 and HEVC surface colour was never tested. | Not changed until measured. `TVA_TEST_SURFACE_ANY_COLOUR` (test only) lifts the colour exclusions. | `test-surface-gaps.py --only colour`: every surface encoder × untagged/BT.709 limited/BT.709 full, copy vs surface, decoded to RGB as signalled. The control must catch the known-bad full-range or untagged Baseline sessions. |
+| Untagged Main/High H.264 and HEVC surface colour was never tested. | Measured on the Note10+: untagged surface input is wrong for every encoder, not only Baseline (RGB error 24 against 1 for copy). termux-va 13 keeps every untagged encoder session on copy input; only BT.709 limited-range sessions use dma-buf. `TVA_TEST_SURFACE_ANY_COLOUR` (test only) lifts the colour exclusions. | `test-surface-gaps.py --only colour`: every surface encoder × untagged/BT.709 limited/BT.709 full, copy vs surface, decoded to RGB as signalled. The control must catch the known-bad full-range or untagged Baseline sessions. |
 
 Also fixed: dead `< 0` checks on the unsigned `winsys_handle.handle` (it now
 uses `UINT_MAX` as "none"), a skipped `DMA_BUF_SYNC_END` when the encoder's CPU
@@ -503,5 +503,31 @@ Host checks: both patch series apply to the pinned upstream tarballs and
 reproduce the reviewed trees; the patched daemon and bridge pass
 `gcc -fsyntax-only -Wall -Wextra -Wshadow` apart from pre-existing AV1
 type-limit warnings; packaging, ten-bit, daemon-upgrade and session-decode
-host tests pass. Phone verification is pending: see the lane's handoff.
+host tests pass. Phone results follow.
+
+### Note10+ results (2026-11-24)
+
+Controls on the old stack (android-vaapi 23, termux-va 11), private daemons:
+the small and odd decoder sessions failed and the 640x360 control was
+bit-exact; FFmpeg aborted in 4 of 4 daemon-kill runs, with logcat showing
+Scudo "invalid chunk state when deallocating" in libgallium.
+
+Installed android-vaapi 24, android-vaapi-glibc 19, termux-va 12,
+android-webgpu 0.1.0-2 and livecd-desktop 50 from CI 45333014924:
+
+- `test-surface-fallback.py`: 8/8.
+- Padded decode: H.264 160x90 and VP8 161x95 bit-exact through dma-buf.
+- `test-encoder-failure.py`: 6/6, FFmpeg exits with an error and no signal.
+- Colour: the control caught the known-bad sessions, and it showed that
+  untagged H.264 default, Main and High and HEVC Main are as wrong as Baseline.
+  termux-va 13 (CI 45341136101) therefore puts every untagged encoder on copy.
+
+Trade-off: untagged encoders, such as FFmpeg without colour options, lose the
+zero-copy input speedup. Chromium WebRTC and WebCodecs tag BT.709 limited range
+and keep the dma-buf path.
+
+Hardware limit: the Snapdragon 855 VP9 decoder rejects pictures under 96 lines
+(MediaCodec error -10000), on copy as well as dma-buf. The odd-size VP9 case is
+therefore 161x97, and the gap test checks that VP9 161x95 gives the same frame
+count through both transports instead of requiring frames.
 

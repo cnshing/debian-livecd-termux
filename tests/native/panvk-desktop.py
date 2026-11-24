@@ -2,12 +2,16 @@
 """Private PanVK GNOME/GTK4 presentation experiment; no installed settings change."""
 import argparse
 import ctypes
+import faulthandler
 import fcntl
+import hashlib
 import importlib.util
 import json
 import os
+import re
 from pathlib import Path
 import signal
+import socket
 import shutil
 import shlex
 import subprocess
@@ -19,8 +23,11 @@ import traceback
 HOME = Path.home()
 PAN = HOME / 'gpu-x1s/panvk'
 ROOT = HOME / '.local/opt/livecd-native/gnome-48'
+BROWSERS = Path(__file__).resolve().parents[1] / 'browsers'
+if not BROWSERS.is_dir():
+    BROWSERS = HOME / 'gpu-x1s/browser-tests/browsers'
 sys.path.insert(0, str(HOME / '.local/lib/livecd-native'))
-sys.path.insert(0, str(HOME / 'gpu-x1s/browser-tests/browsers'))
+sys.path.insert(0, str(BROWSERS))
 
 
 def run(command, **kwargs):
@@ -91,11 +98,149 @@ def audit(pid):
                 devices.append({'fd': int(fd.name), 'target': target})
         except OSError:
             pass
-    return {'pid': pid, 'libraries': sorted({s.split()[-1] for s in maps.splitlines()
+    fields = (proc / 'stat').read_text().rsplit(')', 1)[1].split()
+    return {'pid': pid, 'cpu_ticks': int(fields[11]) + int(fields[12]),
+            'libraries': sorted({s.split()[-1] for s in maps.splitlines()
             if any(k in s for k in ('panfrost', 'gallium', 'EGL', 'GLES', 'mutter-cogl',
                                    'angle', 'libgtk-4', 'libX11', 'libxcb', 'libxshmfence'))}),
             'devices': devices, 'fd_count': len(list((proc / 'fd').iterdir())),
             'status': (proc / 'status').read_text()}
+
+
+def resources(include_battery=False):
+    thermal = {}
+    for zone in Path('/sys/class/thermal').glob('thermal_zone*'):
+        try:
+            thermal[zone.name] = {'type': (zone / 'type').read_text().strip(),
+                                  'raw_temp': (zone / 'temp').read_text().strip()}
+        except OSError:
+            pass
+    result = {'monotonic': time.monotonic(), 'wall_time': time.time(),
+              'clock_ticks_per_second': os.sysconf('SC_CLK_TCK'),
+              'meminfo': Path('/proc/meminfo').read_text(), 'thermal': thermal}
+    if include_battery:
+        try:
+            reply = subprocess.run(['termux-battery-status'], check=True,
+                                   capture_output=True, text=True, timeout=5)
+            result['battery'] = json.loads(reply.stdout)
+        except (OSError, subprocess.SubprocessError, json.JSONDecodeError) as error:
+            result['battery_error'] = str(error)
+    return result
+
+
+def benchmark(args, shell, start, check_displays):
+    """Measure transport cost separately from screenshots and correctness checks."""
+    from capture import screenshot
+    ticks = os.sysconf('SC_CLK_TCK')
+    video_socket = Path(os.environ['XDG_RUNTIME_DIR']) / 'benchmark-mpv.sock'
+
+    def video_stats():
+        with socket.socket(socket.AF_UNIX) as client:
+            client.settimeout(2)
+            client.connect(str(video_socket))
+            with client.makefile('rwb') as stream:
+                values = {}
+                for request_id, name in enumerate(('time-pos', 'estimated-vf-fps',
+                        'frame-drop-count', 'decoder-frame-drop-count')):
+                    stream.write((json.dumps({'command': ['get_property', name],
+                                              'request_id': request_id}) + '\n').encode())
+                    stream.flush()
+                    while True:
+                        line = stream.readline()
+                        if not line:
+                            raise RuntimeError('mpv IPC closed during benchmark')
+                        reply = json.loads(line)
+                        if reply.get('request_id') == request_id:
+                            if reply.get('error') != 'success' or reply.get('data') is None:
+                                raise RuntimeError('mpv property unavailable: ' + name + ': ' + str(reply))
+                            values[name] = reply
+                            break
+                return values
+
+    def sample(processes):
+        cpu = {}
+        for name, pid in processes.items():
+            # comm may contain spaces and parentheses; fields start after its final ')'.
+            fields = (Path('/proc') / str(pid) / 'stat').read_text().rsplit(')', 1)[1].split()
+            if fields[0] == 'Z':
+                raise RuntimeError('Benchmark process exited: ' + name)
+            cpu[name] = (int(fields[11]) + int(fields[12])) / ticks
+        result = {**resources(), 'cpu_seconds': cpu}
+        if 'video' in processes:
+            result['video'] = video_stats()
+        return result
+
+    phases = [('idle', None), ('gears', ['stdbuf', '-oL', 'glxgears', '-fullscreen'])]
+    if args.benchmark_video:
+        phases.append(('video', ['mpv', '--no-config', '--hwdec=no', '--vo=gpu',
+            '--gpu-api=opengl', '--fullscreen', '--loop-file=inf', '--audio=no',
+            '--input-ipc-server=' + str(video_socket),
+            '--term-status-msg=BENCH fps=${estimated-vf-fps} dropped=${frame-drop-count} '
+            'decoder_dropped=${decoder-frame-drop-count} avsync=${avsync}',
+            str(args.benchmark_video)]))
+    results = {'seconds_per_phase': args.benchmark_seconds,
+               'video_decode': 'software, audio disabled to isolate presentation cost',
+               'video': str(args.benchmark_video) if args.benchmark_video else None,
+               'display': run(['xdpyinfo'], capture_output=True, text=True).stdout,
+               'randr': run(['xrandr'], capture_output=True, text=True).stdout,
+               'phases': []}
+    if args.benchmark_video:
+        digest = hashlib.sha256()
+        with args.benchmark_video.open('rb') as fixture:
+            for chunk in iter(lambda: fixture.read(1024 * 1024), b''):
+                digest.update(chunk)
+        results['video_sha256'] = digest.hexdigest()
+    for name, command in phases:
+        proc = start(command, 'benchmark-' + name) if command else None
+        try:
+            time.sleep(5)  # Warm up before measuring each phase.
+            log_path = args.out / ('benchmark-' + name + '.log')
+            log_offset = log_path.stat().st_size if proc else 0
+            processes = {'shell': shell.pid, 'server': args.benchmark_server_pid}
+            if proc:
+                processes[name] = proc.pid
+            samples = [sample(processes)]
+            end = time.monotonic() + args.benchmark_seconds
+            while time.monotonic() < end:
+                check_displays()
+                if shell.poll() is not None or (proc and proc.poll() is not None):
+                    raise RuntimeError('Benchmark workload exited: ' + name)
+                time.sleep(min(1, max(0, end - time.monotonic())))
+                samples.append(sample(processes))
+            duration = samples[-1]['monotonic'] - samples[0]['monotonic']
+            wall_duration = samples[-1]['wall_time'] - samples[0]['wall_time']
+            if abs(wall_duration - duration) > max(2, duration * .1):
+                raise RuntimeError('Phone suspended or wall clock changed; keep it awake and rerun')
+            log_end = log_path.stat().st_size if proc else 0
+            results['phases'].append({'name': name, 'elapsed_seconds': duration,
+                'elapsed_wall_seconds': wall_duration,
+                'processes': {key: audit(pid) for key, pid in processes.items()},
+                'cpu_percent_one_core': {key: 100 * (samples[-1]['cpu_seconds'][key] - value) / duration
+                                        for key, value in samples[0]['cpu_seconds'].items()},
+                'samples': samples})
+            if name == 'video':
+                first, last = samples[0]['video'], samples[-1]['video']
+                advanced = last['time-pos']['data'] - first['time-pos']['data']
+                if advanced < duration * .8:
+                    raise RuntimeError('Video stalled or looped during measurement; use a longer fixture')
+                results['phases'][-1]['video_seconds_advanced'] = advanced
+                results['phases'][-1]['video_counters_delta'] = {
+                    key: last[key]['data'] - first[key]['data']
+                    for key in ('frame-drop-count', 'decoder-frame-drop-count')}
+                if any(value < 0 for value in results['phases'][-1]['video_counters_delta'].values()):
+                    raise RuntimeError('Video drop counters reset during measurement')
+            screenshot(args.out / ('benchmark-' + name + '.png'))
+        finally:
+            stop(proc)
+        if name == 'gears':
+            log = log_path.read_bytes()[log_offset:log_end].decode(errors='replace')
+            results['phases'][-1]['reported_fps'] = [float(fps) for fps in
+                re.findall(r'=\s*([\d.]+) FPS', log)]
+            if not results['phases'][-1]['reported_fps']:
+                raise RuntimeError('glxgears reported no FPS during measurement')
+        (args.out / 'benchmark.json').write_text(json.dumps(results, indent=2) + '\n')
+        print('BENCHMARK', name, results['phases'][-1]['cpu_percent_one_core'], flush=True)
+    return results
 
 
 def gtk(out):
@@ -206,7 +351,11 @@ disable() { global.compositor.enable_unredirect(); }
 }
 """)
         run(['gsettings', 'set', 'org.gnome.shell', 'disable-user-extensions', 'false'])
-        run(['gsettings', 'set', 'org.gnome.shell', 'enabled-extensions', "['panvk-capture@livecd']"])
+        extensions = ['panvk-capture@livecd']
+        if args.menu_race_button:
+            extensions += ['dash-to-panel@jderose9.github.com', 'arcmenu@arcmenu.com',
+                           'user-theme@gnome-shell-extensions.gcampax.github.com']
+        run(['gsettings', 'set', 'org.gnome.shell', 'enabled-extensions', str(extensions)])
         shell = start([str(ROOT / 'bin/gnome-shell'), '--x11', '--sm-disable'], 'shell')
         def ready():
             if shell.poll() is not None:
@@ -220,6 +369,20 @@ disable() { global.compositor.enable_unredirect(); }
         screenshot(out / 'shell.png')
         result['shell'] = audit(shell.pid)
         result['glxinfo'] = run(['glxinfo', '-B'], capture_output=True, text=True).stdout
+        if args.benchmark_seconds:
+            result['benchmark'] = benchmark(args, shell, start, check_displays)
+            if args.benchmark_only:
+                result['completed'] = True
+                return 0
+        if args.present_race_trials:
+            subprocess.run([sys.executable, str(Path(__file__).with_name('panvk-present-race.py')),
+                '--out', str(out / 'race'), '--trials', str(args.present_race_trials),
+                '--frames', str(args.present_race_frames),
+                *(['--menu-button', args.menu_race_button] if args.menu_race_button else [])], check=True,
+                timeout=180 + args.present_race_trials * (args.present_race_frames / 30 + 45))
+            if args.present_race_only:
+                result['completed'] = True
+                return 0
         if args.ghostty_probe:
             # Direct binary: exercise GPU rendering, bypassing the installed
             # software compatibility wrapper. Only this private display is used.
@@ -382,7 +545,7 @@ print("GHOSTTY INPUT PASS", phase, flush=True)
         result['gtk_end'] = audit(app.pid)
         if args.soak_seconds:
             stop(app)
-            cube = start([str(HOME / 'gpu-x1s/root/data/data/com.termux/files/usr/bin/vkcube'),
+            cube = start([str(args.vkcube or HOME / 'gpu-x1s/root/data/data/com.termux/files/usr/bin/vkcube'),
                           '--wsi', 'xcb', '--present_mode', '2'], 'soak-cube')
             gears = start(['glxgears', '-geometry', '400x400+30+60'], 'soak-gears')
             time.sleep(3)
@@ -396,6 +559,8 @@ print("GHOSTTY INPUT PASS", phase, flush=True)
                               'workloads': 'vkcube FIFO and glxgears concurrently; stability, not a benchmark',
                               'samples': []}
             begin = time.monotonic()
+            begin_wall = time.time()
+            result['soak']['wall_time_started'] = begin_wall
             index = 0
             while time.monotonic() - begin < args.soak_seconds:
                 check_displays()
@@ -405,7 +570,7 @@ print("GHOSTTY INPUT PASS", phase, flush=True)
                                                             'returncode': proc.returncode}
                         raise RuntimeError('Soak process exited: ' + name)
                 elapsed = time.monotonic() - begin
-                sample = {'elapsed': elapsed, 'processes': {name: audit(proc.pid) for name, proc in
+                sample = {**resources(include_battery=True), 'elapsed': elapsed, 'processes': {name: audit(proc.pid) for name, proc in
                           (('shell', shell), ('cube', cube), ('gears', gears))}}
                 path = out / f'soak-{index:03d}.png'
                 screenshot(path)
@@ -416,12 +581,13 @@ print("GHOSTTY INPUT PASS", phase, flush=True)
                 index += 1
                 time.sleep(min(30, max(0, args.soak_seconds - (time.monotonic() - begin))))
             result['soak']['seconds_completed'] = time.monotonic() - begin
+            result['soak']['wall_seconds_completed'] = time.time() - begin_wall
             result['soak']['final'] = {name: audit(proc.pid) for name, proc in
                                      (('shell', shell), ('cube', cube), ('gears', gears))}
         if args.restart_cycles:
             stop(app)
             result['restart_cycles'] = []
-            cube = HOME / 'gpu-x1s/root/data/data/com.termux/files/usr/bin/vkcube'
+            cube = args.vkcube or HOME / 'gpu-x1s/root/data/data/com.termux/files/usr/bin/vkcube'
             for i in range(args.restart_cycles):
                 start_time = time.monotonic()
                 p = run(['timeout', '-k', '5', '20', str(cube), '--wsi', 'xcb', '--c', '3'],
@@ -467,7 +633,7 @@ print("GHOSTTY INPUT PASS", phase, flush=True)
 def parent(args):
     from desktop import environment
     from graphics import apply_renderer
-    spec = importlib.util.spec_from_file_location('fullscreen', HOME / 'gpu-x1s/browser-tests/browsers/test-fullscreen.py')
+    spec = importlib.util.spec_from_file_location('fullscreen', BROWSERS / 'test-fullscreen.py')
     fs = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(fs)
     args.out.mkdir(parents=True, exist_ok=False)
@@ -480,6 +646,9 @@ def parent(args):
         raise RuntimeError('Another private X display is active; wait for its owner to finish: ' +
                            repr(before['displays']))
     status_before = run([str(HOME / '.local/bin/livecd'), 'status'], capture_output=True, text=True).stdout
+    if args.present_race_trials or args.benchmark_seconds or args.soak_seconds or args.restart_cycles:
+        # Graphics probes need real /proc counters, not the compatibility broker.
+        os.environ['ANDROID_PROCFS_COMPAT'] = '0'
     env = environment('zink' if args.integrated else 'software')
     for key in ('LIVECD_NATIVE_SESSION', 'XAUTHORITY', 'LIBGL_ALWAYS_SOFTWARE'):
         env.pop(key, None)
@@ -494,7 +663,10 @@ def parent(args):
                GSK_RENDERER='gl', COGL_DRIVER='gles2', LIVECD_NATIVE_RENDERER='panvk-experiment',
                LIVECD_FULLSCREEN_TEST=str(args.out), MUTTER_SYNC='1',
                TERMUX_VA_SOCKET=str(args.out / 'absent-va.sock'))
-    # Private graphics tests need no battery helper or privileged shell client.
+    if args.benchmark_seconds:
+        # MUTTER_SYNC enables synchronous X11 debugging; measure normal behavior.
+        env.pop('MUTTER_SYNC', None)
+    # Private graphics tests need no privileged shell client.
     env['MC_RISH'] = str(args.out / 'absent-rish')
     # Explicit $PREFIX/lib shadows Android platform dependencies: libui then
     # fails its libbinder_ndk version requirement. Default Termux lookup still
@@ -508,14 +680,26 @@ def parent(args):
     env.pop('PANVK_KBASE_DRI3', None)
     if args.mode == 'raw':
         env['PANVK_KBASE_DRI3'] = 'raw'
+    if args.present_mode:
+        env['MESA_VK_WSI_PRESENT_MODE'] = args.present_mode
     if args.server == 'xvfb':
         env['LIBGL_KOPPER_DRI2'] = '1'
     for name in ('config', 'data', 'cache', 'state'):
         directory = args.out / name
         directory.mkdir(mode=0o700)
         env['XDG_' + name.upper() + '_HOME'] = str(directory)
+    if args.shell_profile:
+        dconf = args.out / 'config/dconf'
+        dconf.mkdir()
+        shutil.copyfile(args.shell_profile, dconf / 'user')
     profile = args.out / 'dconf-profile'
-    profile.write_text('user-db:user\n')
+    profile.write_text('user-db:user\n' + (
+        'file-db:' + str(HOME / '.local/lib/livecd-native/dconf-defaults') + '\n'
+        if args.shell_profile else ''))
+    if args.shell_profile:
+        themes = HOME / '.local/share/livecd-native/themes'
+        if themes.is_dir():
+            (args.out / 'data/themes').symlink_to(themes, target_is_directory=True)
     env['DCONF_PROFILE'] = str(profile)
     display = next(n for n in range(74, 100) if not any(p.exists() for p in
         (Path(os.environ['TMPDIR']) / f'.X11-unix/X{n}', Path(os.environ['TMPDIR']) / f'.X{n}-lock')))
@@ -530,15 +714,31 @@ def parent(args):
         env['XDG_RUNTIME_DIR'] = server_env['XDG_RUNTIME_DIR'] = str(runtime)
         (args.out / 'runtime-directory.json').write_text(json.dumps({'path': str(runtime)}))
         with (args.out / 'server.log').open('w') as log:
-            command = [str(PAN / 'private-lorie/private-lorie'), env['DISPLAY']] if args.server == 'lorie' else [
+            command = [str(BROWSERS / 'private-lorie/private-lorie'), env['DISPLAY']] if args.server == 'lorie' else [
                 'Xvfb', env['DISPLAY'], '-screen', '0', '1280x720x24', '-nolisten', 'tcp']
+            if args.screen_fps:
+                command += ['-fakescreenfps', str(args.screen_fps)]
             server = subprocess.Popen(command, env=server_env, stdout=log, stderr=log)
         wait(lambda: subprocess.run(['xdpyinfo'], env=env, stdout=subprocess.DEVNULL,
                                     stderr=subprocess.DEVNULL, timeout=5).returncode == 0)
+        if args.screen_size:
+            run(['xrandr', '--fb', args.screen_size], env=env)
+            dimensions = run(['xdpyinfo'], env=env, capture_output=True, text=True).stdout
+            if not re.search(r'dimensions:\s+' + re.escape(args.screen_size) + r'\s', dimensions):
+                raise RuntimeError('Private server did not accept screen-size')
         (args.out / 'environment.json').write_text(json.dumps(env, indent=2))
         session = subprocess.Popen(['dbus-run-session', '--', sys.executable, __file__, '--worker',
              '--mode', args.mode, '--out', str(args.out), '--cycles', str(args.cycles),
              '--restart-cycles', str(args.restart_cycles), '--soak-seconds', str(args.soak_seconds),
+             '--benchmark-seconds', str(args.benchmark_seconds),
+             '--benchmark-server-pid', str(server.pid),
+             '--present-race-trials', str(args.present_race_trials),
+             '--present-race-frames', str(args.present_race_frames),
+             *(['--menu-race-button', args.menu_race_button] if args.menu_race_button else []),
+             *(['--vkcube', str(args.vkcube.resolve())] if args.vkcube else []),
+             *(['--present-race-only'] if args.present_race_only else []),
+             *(['--benchmark-only'] if args.benchmark_only else []),
+             *(['--benchmark-video', str(args.benchmark_video.resolve())] if args.benchmark_video else []),
              *(['--allow-other-displays'] if args.allow_other_displays else []),
              *(['--ghostty-probe'] if args.ghostty_probe else []),
              *(['--ghostty-launcher', str(args.ghostty_launcher)] if args.ghostty_launcher else []),
@@ -546,7 +746,9 @@ def parent(args):
              '--ghostty-gsk', args.ghostty_gsk,
              *(['--controller-dir', str(args.controller_dir)] if args.controller_dir else [])],
              env=env, start_new_session=True)
-        code = session.wait(timeout=480 + args.soak_seconds)
+        code = session.wait(timeout=480 + args.soak_seconds +
+                            (3 if args.benchmark_video else 2) * (args.benchmark_seconds + 5) +
+                            args.present_race_trials * (args.present_race_frames / 30 + 45))
     finally:
         if session:
             try:
@@ -578,35 +780,77 @@ def parent(args):
 
 
 if __name__ == '__main__':
+    faulthandler.register(signal.SIGUSR1)
     parser = argparse.ArgumentParser()
     parser.add_argument('--out', type=Path, required=True)
     parser.add_argument('--mode', choices=('shm', 'raw'), default='shm')
+    parser.add_argument('--present-mode', choices=('fifo', 'relaxed', 'mailbox', 'immediate'),
+                        help='Override the Vulkan present mode after controller environment setup')
     parser.add_argument('--server', choices=('lorie', 'xvfb'), default='lorie')
+    parser.add_argument('--screen-size', help='Private framebuffer size, e.g. 1920x1080')
+    parser.add_argument('--screen-fps', type=int, help='Private lorie refresh rate (1–600)')
     parser.add_argument('--cycles', type=int, default=20)
     parser.add_argument('--ghostty-launcher', type=Path, help='Private experimental Ghostty launcher')
     parser.add_argument('--ghostty-gsk', choices=('cairo', 'gl'), default='cairo')
     parser.add_argument('--ghostty-software', action='store_true', help='Software control for the Ghostty probe')
     parser.add_argument('--ghostty-probe', action='store_true', help='Check direct GPU Ghostty on the private display')
     parser.add_argument('--restart-cycles', type=int, default=0)
+    parser.add_argument('--vkcube', type=Path, help='Private or installed vkcube binary for restart/soak tests')
     parser.add_argument('--soak-seconds', type=int, default=0)
+    parser.add_argument('--benchmark-seconds', type=int, default=0,
+                        help='Measure idle, fullscreen gears and optional video before correctness checks')
+    parser.add_argument('--benchmark-video', type=Path, help='Local video fixture for the presentation benchmark')
+    parser.add_argument('--benchmark-only', action='store_true', help='Skip correctness checks after measuring')
+    parser.add_argument('--benchmark-server-pid', type=int, help=argparse.SUPPRESS)
+    parser.add_argument('--present-race-trials', type=int, default=0,
+                        help='Record fullscreen WebGL flips for race analysis')
+    parser.add_argument('--present-race-frames', type=int, default=900)
+    parser.add_argument('--present-race-only', action='store_true')
+    parser.add_argument('--menu-race-button', help='Record ArcMenu clicks instead of WebGL; private button X,Y')
+    parser.add_argument('--shell-profile', type=Path, help='Copy this dconf database into the private profile')
     parser.add_argument('--driver', type=Path)
     parser.add_argument('--mesa-lib-dir', type=Path)
     parser.add_argument('--no-xlibs', action='store_true', help='Verify the rebuilt driver uses Termux sonames directly')
-    parser.add_argument('--integrated', action='store_true', help='Use the controller-selected packaged PanVK ICD')
+    parser.add_argument('--integrated', action='store_true',
+                        help='Use the controller PanVK environment; --driver can override its ICD privately')
     parser.add_argument('--controller-dir', type=Path, help='Test a privately staged controller directory')
     parser.add_argument('--allow-other-displays', action='store_true',
                         help='Record other private displays without rejecting a short correctness run')
     parser.add_argument('--worker', action='store_true')
     parser.add_argument('--gtk', action='store_true')
     args = parser.parse_args()
+    if args.screen_size and not re.fullmatch(r'[1-9]\d{0,4}x[1-9]\d{0,4}', args.screen_size):
+        parser.error('screen-size must be WIDTHxHEIGHT')
+    if args.screen_fps is not None and (args.server != 'lorie' or not 1 <= args.screen_fps <= 600):
+        parser.error('screen-fps requires lorie and a rate from 1 to 600')
     if args.cycles < 1 or args.restart_cycles < 0 or args.soak_seconds < 0:
         parser.error('cycles must be positive; restart and soak counts must be nonnegative')
+    if args.vkcube and not args.vkcube.is_file():
+        parser.error('vkcube must be an existing binary')
+    if args.benchmark_seconds < 0 or 0 < args.benchmark_seconds < 10:
+        parser.error('benchmark-seconds must be zero or at least 10')
+    if args.benchmark_video and (not args.benchmark_seconds or not args.benchmark_video.is_file()):
+        parser.error('benchmark-video requires a benchmark and an existing file')
+    if args.benchmark_seconds and args.allow_other_displays:
+        parser.error('benchmarks require no other private displays')
+    if args.benchmark_only and not args.benchmark_seconds:
+        parser.error('benchmark-only requires benchmark-seconds')
+    if args.present_race_trials < 0 or args.present_race_frames < 1:
+        parser.error('race trials must be nonnegative and race frames positive')
+    if args.shell_profile and not args.shell_profile.is_file():
+        parser.error('shell-profile must be an existing dconf database')
+    if args.menu_race_button and (not args.present_race_trials or
+            not re.fullmatch(r'\d{1,5},\d{1,5}', args.menu_race_button) or
+            (not args.worker and not args.shell_profile)):
+        parser.error('menu-race-button requires race trials, X,Y coordinates and shell-profile')
+    if args.present_race_only and not args.present_race_trials:
+        parser.error('present-race-only requires present-race-trials')
+    if args.present_race_trials and (args.allow_other_displays or args.benchmark_only):
+        parser.error('race checks require isolation and cannot use benchmark-only')
     if args.server == 'xvfb' and args.mode == 'raw':
         parser.error('raw DRI3 requires the private lorie server')
     if args.allow_other_displays and args.soak_seconds:
         parser.error('overlapping displays are supported only for short correctness checks')
-    if args.integrated and args.driver:
-        parser.error('the integrated test uses the controller-selected driver')
     if args.controller_dir:
         sys.path.insert(0, str(args.controller_dir.resolve(strict=True)))
     signal.signal(signal.SIGTERM, lambda signum, frame: sys.exit(128 + signum))

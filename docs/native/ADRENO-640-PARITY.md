@@ -110,28 +110,28 @@ desktop pipeline exposes them on this firmware.
 
 ## Production surface transport (2026-11-23)
 
-Installed android-vaapi 22 / -glibc 17 / termux-va 9 use negotiated dma-buf
-transport by default on freedreno after the daemon proves a known-pixel
-fd→surface encoder→ImageReader decoder→linear NV12 round trip for AVC and HEVC.
-Session setup failures fall back to copy transport. TVA_ZEROCOPY=0 disables the
-client path. No Mali default changes; Main10/VP8 encoding and Chrome's softpipe
-VA variant retain copy transport. Decoder UBWC is converted on the GPU to a
-validated linear buffer; no UBWC storage is advertised as linear.
+Installed android-vaapi 23 / -glibc 18 / termux-va 11 negotiate dma-buf transport
+by default on freedreno after an actual startup pixel round trip for AVC and
+HEVC. Session failures select copy transport; `TVA_ZEROCOPY=0` disables the
+client path. Decoder UBWC is GPU-converted into validated linear storage,
+then copied on the GPU into the existing VA destination. Mali defaults and
+mpv's separate MediaCodec route are unchanged.
 
-End-to-end moving 4K encode, including FFmpeg startup: default queue 2 AVC 38 /
-HEVC 40 fps; async_depth 8,600 pictures AVC 54.2 / HEVC 60.4 fps. All pictures pass
-PSNR/SSIM, exact IDRs every 60. The old copy baseline was21.7/22.1fps. H.264
-still misses the explicit 55 fps floor narrowly; do not describe default queue 2
-as4K60. Warm 4K H.264 decode is66fps versus 60.5 fps with the path off, near the
-isolated 71 fps native reference. Installed H.264/HEVC 4K120/120 decode is bit-exact.
+Moving 4K encode, including FFmpeg startup: default queue 2 AVC 38 / HEVC 40 fps;
+queue 8, 600 pictures AVC 54.2 / HEVC 60.4 fps, versus 21.7/22.1 fps on the old copy
+path. All pictures pass PSNR/SSIM with exact IDRs every 60. H.264 still narrowly
+misses the 55 fps floor, and default queue 2 is not 4K60. Warm 4K H.264 VA decode
+measures 66 fps versus 60.5 fps with the path off, near the isolated 71 fps native
+reference. Installed H.264/HEVC 4K decode is bit-exact, 120/120 each. The timing
+runs used 22/17/9; final 23/18/11 adds browser fallback/fence corrections.
 
-The final installed regression passes FFmpeg 46/46, daemon 49/49, AVC/HEVC/VP9/
-VP8 decode48/48 bit-exact each,4096x2160 Main10 encode and 4KP010 decode4/4.
-CI 45189264023 (Mesa22/17) and45186614640 (daemon9) were delivered through local
-APT, with desktop restart and validate 30/30. The decoder retains a final GPU
-copy into the existing VA surface; mpv's default separate MediaCodec route is
-unchanged. See the [implementation handoff](handoff/zerocopy-mediacodec.md)
-for browser verification, actual throughput limits and remaining work.
+Browser qualification excludes full-range and untagged constrained-baseline
+encoding from surface input: Chromium/Firefox WebCodecs colour errors disappear
+with copy transport. Main10/VP8 encoding and Chrome's softpipe VA variant also
+retain copy transport. Chrome's opaque softpipe upload-fence crash is fixed.
+See the [encoding notes](ENCODING.md#qualified-surface-transport-2026-11-23)
+and [implementation handoff](handoff/zerocopy-mediacodec.md) for final installed
+regressions, CI delivery, browser evidence and remaining limits.
 
 ## Decode routes
 

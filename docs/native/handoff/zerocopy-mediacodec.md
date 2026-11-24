@@ -287,7 +287,7 @@ minimum changing-picture plane PSNR42.11/44.38dB; swapped-chroma controls reject
 every frame. H.264/HEVC decode120/120 bit-exact, separately timed without hashing
 71.10/94.80fps after session initialization. These are still transport-only rates.
 Production transport cropping1920x1080 from3840x2160 at(16,32), using a picture
-varying in both axes, passes with plane minima66.31/60.29dB and exact keys0/2.
+varying in both axes, passes with plane minima66.31/60.29dB and exact keys 0/2.
 
 `test-surface-fallback.py` passes qualified modes[2,2], opt-out[0,1], deliberately
 bad import[0,1], session setup failure[0,1] and legacy-client[0,0], in encoder/
@@ -306,7 +306,7 @@ No candidate deb has yet been installed at this checkpoint.
 The phone now has android-vaapi **22**, android-vaapi-glibc **17** and
 termux-va **9**, delivered through CI debs and the local APT repository.
 Mesa packages: CI **45189264023**, source b3d3086; daemon: CI **45186614640**,
-source 58f0559. Desktop49 and android-webgpu0.1.0-1 from the other lane remain
+source 58f0559. Desktop 49 and android-webgpu0.1.0-1 from the other lane remain
 installed. The default daemon passes both AVC and HEVC startup pixel probes.
 There is no private driver, socket or library-path override in these VA tests.
 
@@ -340,7 +340,7 @@ Every picture in these runs passes PSNR/SSIM; exact IDRs are at multiples of 60.
 Long-run minimum plane scores are H.264 Y37.32/U37.88/V36.26dB, HEVC
 Y37.14/U37.71/V36.68dB; minimum SSIM0.982332/0.981512. The explicit 55 fps
 acceptance check still fails H.264 54.23. Do not claim default queue 2 reaches60.
-The raw surface transport separately achieves66.39/66.93fps with120 alternating
+The raw surface transport separately achieves66.39/66.93fps with 120 alternating
 independently owned buffers, all-frame PSNR/SSIM and wrong-chroma controls.
 That number excludes the VA upload and is not an installed application rate.
 
@@ -357,7 +357,7 @@ The original C crop harness aliased the upload source and encoder CurrPic
 reconstruction surface. Mesa is allowed to replace the reconstruction storage;
 this invalid test caused the black first picture. The corrected test uses one
 input plus two reconstruction surfaces; crop(16,32),1920x1080 from4K passes all
-four pictures, exact IDRs0/2, minimum plane PSNR42.11dB. Patch0151 forwards the
+four pictures, exact IDRs0/2, minimum plane PSNR 42.11 dB. Patch 0151 forwards the
 upload producer fence as synchronization hardening; the invalid harness did
 not establish that it fixed a production black-frame bug.
 
@@ -369,5 +369,104 @@ restores about 40 dB. Separate colour-bar signalling and wrong-metadata controls
 remain required; this correction must not mask a colour-signalling regression.
 
 Current evidence on phone: pl-zerocopy/vaapi-cached22-default-r1,
-vaapi-cached22-depth 8-r1, vaapi-cached22-depth 8-long, surface22-regress,
+vaapi-cached22-depth8-r1, vaapi-cached22-depth8-long, surface22-regress,
 and surface22-final. Earlier checkpoints above describe superseded work.
+
+
+### Browser qualification corrections and final delivery candidate
+
+Installed 22/17/9 browser tests caught two real regressions before publication:
+
+- Chromium WebCodecs full-range input:60/60 packets, but colour error 19 with
+  nine frames above 16; TVA_ZEROCOPY=0 gives error 3 and no bad frames. Full-range
+  encoding now negotiates copy input, because the startup proof is limited-range.
+- Firefox WebCodecs untagged constrained-baseline:60/60 packets, colour error 22
+  with 16 bad frames; copy gives error 4. An explicit native BT.601 default did
+  not fix this and was discarded. Untagged constrained-baseline also negotiates
+  copy. Do not infer range or matrix support merely from the stream metadata.
+- Chrome's softpipe VA path crashed before a daemon encoder handshake. 0151
+  forwards its upload fence, which softpipe represents as literal `(void *)1`.
+  Reading bridge fence magic from that opaque handle caused the crash. 0153
+  sends low native handles to the backend fence callback without dereferencing
+  them. The changed bridge passes the Android compiler's syntax check.
+
+Mesa 23/18 (9c2f5c1,CI 45325850863) and daemon 11 (21b170a, CI 45326738201) contain
+these corrections. Daemon 10 CI 45325641016 passed but is superseded and must
+not be installed. CI 45326120914 also produced revision 10: an immediate
+after-push dispatch observed the preceding 9c2f5c1 ref. The artifact/version
+guard caught it before installation. Replacement 45326738201 is confirmed
+on 21b170a. Private daemon 11 passes all seven negotiation/proof controls,
+including full-range and untagged baseline downgrade while decoder mode stays 2.
+The packages are now installed through local APT, with a desktop restart and
+validate 30/30. Final installed acceptance is recorded below.
+
+On installed 22, copy-off 4K 120-picture controls pass at 20.98/21.59 fps with
+identical quality minima to the fd path. Depth 16 completes 600 pictures without
+the old assertion at 52.92/59.54 fps, with correct images and keys; H.264 still
+fails the 55 fps throughput threshold. 854x480, depth 16, 120 pictures passes both
+codecs. Final 22 VA crop also passes all 4, minimum Y43.1/U48.1/V42.1dB, keys 0/2.
+The 22 browser WebRTC passes were Chromium 287 hardware packets and Firefox 255
+across three sessions, but those results do not qualify the final corrections.
+
+
+## Final installed acceptance (2026-11-23)
+
+APT owns android-vaapi 27.0.0~devel20261029-23,
+android-vaapi-glibc 27.0.0~devel20261025-18 and termux-va 2026.10.30-11.
+The desktop restarted with its default daemon and startup AVC/HEVC pixel proofs
+passing. Desktop 49 and webgpu0.1.0-1 remain installed; validate 30/30 passes and
+the install lock is released. CI run 45325850863 is the Mesa source 9c2f5c1;
+run 45326738201 is daemon source 21b170a. Their package SHA256 values are:
+
+- android-vaapi:616d57462268488dc5bbe0cb00a7a7671f5a38ec17e84cf26a9bbddb60f71143
+- android-vaapi-glibc:6a13369e4180b8e7b99ff906032d8646b5688042be51c1ddc86030e92880a321
+- termux-va:d57bb4cbb84588c7de68aca811b228d56d6d97742609ee52964a411a0340ed33
+
+All required installed browser checks pass with the managed launchers and
+private displays/profiles. Saved pictures were opened:
+
+| Browser / mode | Hardware encoder pictures | Result |
+|---|---:|---|
+| Chromium WebRTC |286|Correct 640x360 and colours; fd encoder and decoder|
+| Chrome WebRTC |288|Correct 640x360 and colours; existing inline/SHM softpipe route|
+| Firefox WebRTC |263 across 3 sessions|Correct 640x360 and colours; copy encoder, fd decoder|
+| Chromium WebCodecs |60/60|Software decode 60/60, maximum colour error 3, no frame above 16|
+| Firefox WebCodecs |60/60|Software decode 60/60, maximum colour error 4, no frame above 16|
+
+Chromium HEVC and Chrome WebCodecs remain skipped by the user's instruction.
+No live-desktop input, cameras, Bluetooth or Android settings were used.
+
+The full installed codec regression passes FFmpeg 46/46 and daemon 49/49,
+including profiles, exact IDRs, bitrate, colour signalling and negative controls.
+Main10 at 4096x2160 passes 4/4, keys 0/2, PSNR 55.64–56.38dB; wrong chroma scores
+16.74–16.76dB. H.264/HEVC/VP9/VP8 decode matches software 48/48 each.
+
+Remaining limitations: H.264's measured 54.2 fps still falls just below the 55 fps
+threshold; default FFmpeg queue 2 is 38 fps. Surface colour fidelity for full-range
+and untagged baseline input needs separate qualification before enabling those
+cases. Main10/VP8 encoding and Chrome softpipe stay on copy transport; Mali is
+unqualified and unchanged. mpv uses a separate FFmpeg MediaCodec route, so its
+default is unaffected. The final decoder destination GPU copy is retained;
+no new direct consumer export or GStreamer integration was added.
+
+
+Final 23 follow-up checks: both 4K decoders match software 120/120 each, and
+all seven installed-daemon negotiation controls pass. The 120-picture 4K
+encoder smoke run at queue 8 passes every picture and exact IDRs 0/60;
+46.62/52.01fps AVC/HEVC includes startup and is not the longer throughput run.
+4K P010 has one recorded startup timeout after SHM negotiation with zero input
+units. A fresh default run with tracing, a copy-override control and three
+additional ordinary default processes all decode 4/4 bit-exact in under a
+second each. The timeout was not reproduced or attributed to a root cause;
+it remains a startup reliability follow-up, not a corrected pixel bug.
+Final `livecd validate` is 30/30. Installed encode/decode and browser PNGs were
+opened, including the nonzero-origin crop.
+
+Evidence: `temp/parity-note10-20261116/zerocopy/production-evidence.tar.gz`
+(15,512,391 bytes; SHA256
+`8f6167a5fec50f8617ae11878f301316da2bd2f85019a8f01c81c0f5b8fc9bc3`).
+It includes logs, packet/frame comparisons, metrics, pictures, colour failure
+controls and the original P010 timeout, without private browser profiles.
+Phone evidence roots are `~/pl-zerocopy/surface23-browser`,
+`surface23-regress`, `fallback-installed11`, `vaapi-final23`,
+`decode-surface23-4k` and `p010-final23-reruns`.

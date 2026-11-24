@@ -250,25 +250,37 @@ way and fixed:
 
 ## Qualified surface transport (2026-11-23)
 
-The installed VA bridge and termux-va now negotiate dma-buf transport on
-qualified Adreno devices. At startup the daemon proves fd import, surface
-encoding, ImageReader decoding and linear NV12 output with a known-pixel round
-trip for both AVC and HEVC. Per-session setup failures negotiate the compatible
-copy path. TVA_ZEROCOPY=0 selects that path explicitly. Mali and Chrome's
-softpipe VA variant keep their previous defaults; Main10/VP8 encoding stays on
-copy transport. Decoder UBWC output is GPU-converted to a real linear buffer
-before export, then GPU-copied into the VA destination.
+The installed VA bridge and termux-va negotiate dma-buf transport on qualified
+Adreno devices. The daemon proves fd import, surface encoding, ImageReader
+decoding and linear NV12 output with a startup pixel round trip for AVC and
+HEVC. Session setup failures negotiate the compatible copy path;
+`TVA_ZEROCOPY=0` selects it explicitly. Decoder UBWC output is GPU-converted
+to linear storage before export, then GPU-copied into the VA destination.
 
-CI 45189264023 supplies android-vaapi 22 / -glibc 17; CI 45186614640 supplies
-termux-va 9, installed via local APT. With changing 4K pictures, the default
-FFmpeg queue 2 reaches 38/40 fps AVC/HEVC versus 22/22 fps before. At async_depth 8,
-a 600-frame run reaches 54.2/60.4 fps, with every picture and exact IDRs checked.
-H.264 remains slightly below the 55 fps acceptance floor; default queue 2 does
-not reach4K60. Warm 4K H.264 VA decode reaches 66 fps versus 60.5 fps with fd
-transport disabled; software comparisons are bit-exact.
+The final installed packages are android-vaapi 23 / -glibc 18 from
+[CI 45325850863](https://github.com/cnshing/debian-livecd-termux/actions/runs/45325850863)
+and termux-va 11 from
+[CI 45326738201](https://github.com/cnshing/debian-livecd-termux/actions/runs/45326738201),
+delivered through local APT with desktop restart and validate 30/30.
 
-Main10-only frame-cap and P010 width fixes continue to pass 4096x2160 encoding;
-VA still advertises maximum height 2176. FFmpeg 46/46, daemon 49/49, four 8-bit
-codecs48/48 bit-exact each and 4K P0104/4 pass on the installed revisions.
-See the [implementation handoff](handoff/zerocopy-mediacodec.md) for ownership,
-qualification, throughput limits, controls and the latest browser results.
+Moving 4K encode, including FFmpeg startup, measured 38/40 fps AVC/HEVC with
+FFmpeg's default queue 2 versus 22/22 fps before. At `-async_depth 8`, a 600-frame
+run measured 54.2/60.4 fps, with every picture and exact IDRs checked. H.264
+narrowly misses the 55 fps acceptance floor; default queue 2 does not reach 4K60.
+Warm 4K H.264 VA decode measured 66 fps versus 60.5 fps with fd transport disabled;
+software comparisons are bit-exact. These rates were measured on 22/17/9;
+the final follow-ups fix browser fallback negotiation and softpipe fences.
+
+Mali and Chrome's softpipe VA variant retain their previous transport defaults.
+Main10/VP8 encoding, full-range encoding and untagged constrained-baseline
+encoding use copy input. Installed browser checks found surface colour errors
+for the latter two combinations; their copy controls pass. Those combinations
+are deliberately excluded from the limited-range startup qualification.
+The final decoder retains a GPU copy, and mpv's separate default MediaCodec
+route is unchanged. Direct decoder-to-Turnip/Zink consumer export and new
+GStreamer integrations were not added; existing VA destinations remain usable.
+
+Main10 frame-cap and P010 width fixes pass 4096x2160 encoding; VA still
+advertises maximum height 2176. See the
+[implementation handoff](handoff/zerocopy-mediacodec.md) for final installed
+regressions, browser evidence, ownership and remaining throughput limitations.

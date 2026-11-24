@@ -61,21 +61,30 @@ def main():
     parser.add_argument('--out', type=Path, required=True)
     args = parser.parse_args()
     args.out.mkdir(parents=True, exist_ok=False)
+    # name, environment, requested transport, codecs (encoders H.264 5 or
+    # Baseline 8, decoders H.264 0, VP9 2, VP8 3), expected modes, log proofs
+    both = ['AVC=pass HEVC=pass', 'VP8=pass VP9=pass']
     cases = [
-        ('qualified', {}, 2, [2, 2], 'AVC=pass HEVC=pass'),
-        ('opt-out', {'TVA_SURFACE': '0'}, 2, [0, 1], 'AVC=copy HEVC=copy'),
-        ('bad-import', {'TVA_TEST_SURFACE_BAD_IMPORT': '1'}, 2, [0, 1], 'AVC=copy HEVC=copy'),
-        ('setup-failure', {'TVA_TEST_SURFACE_SETUP_FAIL': '1'}, 2, [0, 1], 'AVC=pass HEVC=pass'),
-        ('legacy-client', {}, 0, [0, 0], 'AVC=pass HEVC=pass'),
-        ('full-range', {}, 2, [0, 2], 'AVC=pass HEVC=pass'),
-        ('untagged-baseline', {}, 2, [0, 2], 'AVC=pass HEVC=pass'),
+        ('qualified', {}, 2, [5, 0, 2, 3], [2, 2, 2, 2], both),
+        ('opt-out', {'TVA_SURFACE': '0'}, 2, [5, 0, 2, 3], [0, 1, 1, 1],
+         ['AVC=copy HEVC=copy', 'VP8=copy VP9=copy']),
+        ('bad-import', {'TVA_TEST_SURFACE_BAD_IMPORT': '1'}, 2, [5, 0, 2, 3], [0, 1, 2, 2],
+         ['AVC=copy HEVC=copy', 'VP8=pass VP9=pass']),
+        # Swapped chroma on the decoder side fails every decode proof.
+        ('bad-decode', {'TVA_TEST_SURFACE_BAD_DECODE': '1'}, 2, [5, 0, 2, 3], [0, 1, 1, 1],
+         ['AVC=copy HEVC=copy', 'VP8=copy VP9=copy']),
+        ('setup-failure', {'TVA_TEST_SURFACE_SETUP_FAIL': '1'}, 2, [5, 0], [0, 1], both),
+        ('legacy-client', {}, 0, [5, 0], [0, 0], both),
+        ('full-range', {}, 2, [5, 0], [0, 2], both),
+        ('untagged-baseline', {}, 2, [8, 0], [0, 2], both),
     ]
-    for name, options, requested, expected, proof in cases:
+    for name, options, requested, codecs, expected, proofs in cases:
         endpoint = args.out.resolve() / f'{name}.sock'
         logfile = args.out / f'{name}.log'
         env = os.environ.copy()
         for key in ['LD_PRELOAD', 'LD_LIBRARY_PATH', 'TVA_SURFACE',
-                    'TVA_TEST_SURFACE_BAD_IMPORT', 'TVA_TEST_SURFACE_SETUP_FAIL']:
+                    'TVA_TEST_SURFACE_BAD_IMPORT', 'TVA_TEST_SURFACE_BAD_DECODE',
+                    'TVA_TEST_SURFACE_SETUP_FAIL', 'TVA_TEST_SURFACE_ANY_COLOUR']:
             env.pop(key, None)
         env.update(options)
         with logfile.open('w') as log:
@@ -87,7 +96,6 @@ def main():
                         break
                     assert proc.poll() is None, logfile.read_text()
                     time.sleep(.1)
-                codecs = [8, 0] if name == 'untagged-baseline' else [5, 0]
                 actual = [negotiate(endpoint, codec, requested, name == 'full-range') for codec in codecs]
                 assert actual == expected, (name, actual, expected)
             finally:
@@ -97,8 +105,10 @@ def main():
                 except subprocess.TimeoutExpired:
                     proc.kill()
                     proc.wait()
-        assert proof in logfile.read_text(), logfile.read_text()
-        print(f'PASS {name}: encoder/decoder modes {actual}; startup {proof}', flush=True)
+        log_text = logfile.read_text()
+        for proof in proofs:
+            assert proof in log_text, (name, proof, log_text)
+        print(f'PASS {name}: codecs {codecs} modes {actual}; startup {" / ".join(proofs)}', flush=True)
 
 
 if __name__ == '__main__':

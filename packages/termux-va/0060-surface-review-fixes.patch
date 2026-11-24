@@ -1,0 +1,329 @@
+--- a/daemon/termux-va.c
++++ b/daemon/termux-va.c
+@@ -99,7 +99,7 @@
+ #include <media/NdkMediaFormat.h>
+ #include "tva_surface.h"
+ #include "tva_qualify.h"
+-static int surface_avc, surface_hevc;
++static int surface_avc, surface_hevc, surface_vp8, surface_vp9;
+ #include "tva_fd.h"
+ #include <linux/dma-buf.h>
+ #include <sys/ioctl.h>
+@@ -802,13 +802,19 @@ static int do_handshake(Session *s)
+      * carries the abstract socket name.  The daemon picks the name - the
+      * client cannot know it is connection #N, and guessing would collide. */
+     XferMode want = XFER_INLINE;
+-    int qualified = s->encoder ?
+-        (codec_base_id(s->codec_id) == CODEC_H264 ? surface_avc : surface_hevc) :
+-        (surface_avc && surface_hevc);
++    /* Each decoder needs its own pixel proof: VP8/VP9 sessions used to
++     * inherit the AVC and HEVC results without one. */
++    int base = codec_base_id(s->codec_id);
++    int qualified = base == CODEC_H264 ? surface_avc :
++                    base == CODEC_HEVC ? surface_hevc :
++                    !s->encoder && base == CODEC_VP8 ? surface_vp8 :
++                    !s->encoder && base == CODEC_VP9 ? surface_vp9 : 0;
+     /* The startup proof covers limited-range samples. On this firmware,
+      * surface input alters full-range values (WebCodecs error 19 vs 3 with
+      * ByteBuffer input). Preserve colour correctness with the copy path. */
+-    int surface_range_ok = !s->encoder ||
++    /* Test-only control: lets the colour checks prove they detect the
++     * excluded combinations. Never set by the desktop session. */
++    int surface_range_ok = getenv("TVA_TEST_SURFACE_ANY_COLOUR") || !s->encoder ||
+         (!(s->enc_color & ENC_XFER_FULL_RANGE) &&
+          /* Firefox WebCodecs supplies untagged constrained-baseline input.
+           * It fails surface colour checks (22 codes vs 4 with copy input),
+@@ -1651,15 +1657,28 @@ static int decoder_surface_frame(Session *s, uint32_t pts)
+         timestamp / (1000 * PTS_UNIT_SCALE) != pts) goto out;
+     z.AHardwareBuffer_describe(source, &desc);
+     int width=crop.right-crop.left, height=crop.bottom-crop.top;
+-    if (width < 96 || height < 96 || crop.left < 0 || crop.top < 0 ||
++    /* The client's frame contract is an even NV12 buffer of at least 96x96
++     * with the picture at its origin, like a hardware decoder's padded
++     * output. Small or odd visible pictures (160x90 H.264, odd VP8/VP9
++     * widths) are drawn into such a padded buffer instead of aborting. */
++    unsigned buffer_w = 0, buffer_h = 0;
++    if (width <= 0 || height <= 0 || crop.left < 0 || crop.top < 0 ||
+         crop.right > (int)desc.width || crop.bottom > (int)desc.height ||
+-        yuv_buffer_new(&output, width, height)) goto out;
+-    if (yuv_draw(&s->yuv, source, output.buffer, width, height,
++        tva_padded_frame_size((unsigned)width, (unsigned)height,
++                              &buffer_w, &buffer_h) ||
++        yuv_buffer_new(&output, buffer_w, buffer_h)) goto out;
++    /* Chroma is shared by pixel pairs. For an odd picture, draw the pair's
++     * second decoded pixel too when the decoder buffer holds it, so the last
++     * chroma column comes from the decoder rather than from interpolation. */
++    unsigned draw_w = (unsigned)width, draw_h = (unsigned)height;
++    if ((draw_w & 1) && crop.left + (int)draw_w < (int)desc.width) draw_w++;
++    if ((draw_h & 1) && crop.top + (int)draw_h < (int)desc.height) draw_h++;
++    if (yuv_draw(&s->yuv, source, output.buffer, draw_w, draw_h,
+                  (float)crop.left/desc.width, (float)crop.top/desc.height,
+-                 (float)width/desc.width, (float)height/desc.height,
++                 (float)draw_w/desc.width, (float)draw_h/desc.height,
+                  output.nv21, 0)) goto out;
+-    uint32_t header[4] = {htonl(width), htonl(height), htonl(DMABUFFRAME_SENTINEL), htonl(pts)};
+-    uint32_t metadata[8] = {0x3231564e, width, height, output.stride,
++    uint32_t header[4] = {htonl(buffer_w), htonl(buffer_h), htonl(DMABUFFRAME_SENTINEL), htonl(pts)};
++    uint32_t metadata[8] = {0x3231564e, buffer_w, buffer_h, output.stride,
+                             output.uv_offset, output.size, 0, 0};
+     for (int i=0; i<8; i++) metadata[i]=htonl(metadata[i]);
+     const YuvNativeHandle *handle = z.handle(output.buffer);
+@@ -2655,8 +2674,10 @@ static int encoder_surface_frame(Session *s, const uint8_t *raw, uint32_t size,
+             struct dma_buf_sync sync={.flags=DMA_BUF_SYNC_START|DMA_BUF_SYNC_READ};
+             size_t packed_size=(size_t)s->w*s->h*3/2;
+             uint8_t *packed=malloc(packed_size);
+-            int synced=ioctl(fd,DMA_BUF_IOCTL_SYNC,&sync)==0;
+-            if (!packed || !synced) { free(packed); munmap(map,m[5]); return -1; }
++            /* Begin CPU access only once the copy can run, so every
++             * successful SYNC_START is paired with SYNC_END. */
++            if (!packed) { munmap(map,m[5]); return -1; }
++            if (ioctl(fd,DMA_BUF_IOCTL_SYNC,&sync)) { free(packed); munmap(map,m[5]); return -1; }
+             for (int row=0;row<s->h;row++)
+                 memcpy(packed+row*s->w,map+(m[7]+row)*m[3]+m[6],s->w);
+             for (int row=0;row<s->h/2;row++)
+@@ -2665,9 +2686,9 @@ static int encoder_surface_frame(Session *s, const uint8_t *raw, uint32_t size,
+             sync.flags=DMA_BUF_SYNC_END|DMA_BUF_SYNC_READ;
+             int end=ioctl(fd,DMA_BUF_IOCTL_SYNC,&sync);
+             munmap(map,m[5]);
+-            int result=end ? -1 : encoder_surface_frame(s,packed,packed_size,-1,NULL,pts_us);
++            int uploaded=end ? -1 : encoder_surface_frame(s,packed,packed_size,-1,NULL,pts_us);
+             free(packed);
+-            return result;
++            return uploaded;
+         }
+         if ((metadata[6] | metadata[7]) & 1 ||
+             metadata[6] > metadata[1] || metadata[7] > metadata[2] ||
+@@ -3273,9 +3294,15 @@ int main(int argc, char **argv)
+     if (!surface_option || strcmp(surface_option,"0")) {
+         surface_avc=surface_codec_probe("video/avc");
+         surface_hevc=surface_codec_probe("video/hevc");
++        surface_vp8=surface_decode_probe("video/x-vnd.on2.vp8",qualify_vp8_key,
++                                         sizeof(qualify_vp8_key));
++        surface_vp9=surface_decode_probe("video/x-vnd.on2.vp9",qualify_vp9_key,
++                                         sizeof(qualify_vp9_key));
+     }
+     dlog(1,"surface startup pixel qualification: AVC=%s HEVC=%s (fd import -> encode -> decode -> linear YUV)",
+          surface_avc ? "pass" : "copy",surface_hevc ? "pass" : "copy");
++    dlog(1,"surface decoder pixel qualification: VP8=%s VP9=%s (key frame -> decode -> linear YUV)",
++         surface_vp8 ? "pass" : "copy",surface_vp9 ? "pass" : "copy");
+ 
+     if (pipe(wakefd) < 0) {
+         int pipe_errno = errno;
+--- a/daemon/tva_qualify.h
++++ b/daemon/tva_qualify.h
+@@ -13,15 +13,115 @@ static unsigned qualify_y(unsigned x, unsigned y)
+ {
+  return 40 + 48*(x/64) + 80*(y/64);
+ }
+-static int surface_codec_probe(const char *mime)
++/* Hardware VP8/VP9 decoders may have no matching encoder, so their proof
++ * starts from key frames of the 128x128 qualify pattern. Generated from the
++ * pattern above with libvpx (VP8 qmin 0 qmax 2, VP9 lossless); both decode
++ * back to the exact source samples in FFmpeg. */
++static const unsigned char qualify_vp8_key[] = {
++    0x10, 0x09, 0x00, 0x9d, 0x01, 0x2a, 0x80, 0x00, 0x80, 0x00, 0x00, 0x07, 0x08, 0x85, 0x85, 0x88,
++    0x85, 0x84, 0x88, 0x00, 0x28, 0x10, 0x17, 0x67, 0x28, 0x5f, 0xc0, 0x7f, 0x00, 0x79, 0x4a, 0x98,
++    0x8f, 0x01, 0xfc, 0x01, 0xfd, 0x01, 0xdc, 0x01, 0x03, 0xfd, 0x7e, 0x19, 0x57, 0xb2, 0x9b, 0xfd,
++    0xa6, 0x91, 0x9e, 0x53, 0xda, 0xa5, 0xe1, 0xe8, 0x01, 0xed, 0x1e, 0x1d, 0xd4, 0xf7, 0x04, 0xba,
++    0x78, 0xf0, 0x2d, 0xb2, 0x74, 0x69, 0x30, 0xb6, 0x87, 0x2c, 0x4b, 0xd3, 0x02, 0x33, 0x0a, 0xc2,
++    0x32, 0xc0, 0xfe, 0xff, 0x55, 0x5e, 0xa2, 0x46, 0x08, 0x81, 0x3b, 0x40, 0x39, 0x2c, 0x98, 0xe9,
++    0xb9, 0xf3, 0xaf, 0xde, 0x17, 0x11, 0xdb, 0x09, 0x34, 0xee, 0x8f, 0xe0, 0xbb, 0xc4, 0xaf, 0x0e,
++    0xd3, 0x36, 0xe8,
++};
++static const unsigned char qualify_vp9_key[] = {
++    0x82, 0x49, 0x83, 0x42, 0x00, 0x07, 0xf0, 0x07, 0xf6, 0x00, 0x38, 0x24, 0x1c, 0x18, 0x00, 0x00,
++    0x00, 0x90, 0x7d, 0x8e, 0xbd, 0xa3, 0xa0, 0xeb, 0xe9, 0x00, 0x00, 0x78, 0xb5, 0x43, 0x21, 0xd7,
++    0xdf, 0x88, 0x18, 0x23, 0x98, 0x75, 0xe0, 0xdf, 0x4c, 0xf0, 0x4a, 0xd8, 0xae, 0xfd, 0x81, 0x03,
++    0x5a, 0x22, 0x2a, 0x5f, 0xc6, 0xfa, 0x02, 0x96, 0xed, 0x06, 0xa7, 0x42, 0x00,
++};
++/* The decoder half of the proof: a key frame of the qualify pattern must
++ * reach linear YUV through the surface decoder, ImageReader and GPU draw.
++ * Codecs without a hardware encoder use an embedded key frame instead. */
++static int surface_decode_probe(const char *mime, const unsigned char *packet,
++                                size_t packet_size)
+ {
+- AMediaCodec *encoder=NULL, *decoder=NULL;
++ AMediaCodec *decoder=NULL;
+  AMediaFormat *format=NULL;
+  ANativeWindow *window=NULL;
+  AImageReader *reader=NULL;
+  AImage *image=NULL;
+  YuvContext context={0};
+- YuvBuffer source={0}, imported={0}, linear={0};
++ YuvBuffer linear={0};
++ int result=0;
++ if (!packet || !packet_size) return 0;
++ if (AImageReader_newWithUsage(128,128,AIMAGE_FORMAT_YUV_420_888,
++      AHARDWAREBUFFER_USAGE_GPU_SAMPLED_IMAGE,4,&reader)!=AMEDIA_OK ||
++     AImageReader_getWindow(reader,&window)!=AMEDIA_OK) { window=NULL; goto out; }
++ /* Reader owns this window; do not release that reference. */
++ ANativeWindow *decoder_window=window; window=NULL;
++ decoder=AMediaCodec_createDecoderByType(mime);
++ if (!decoder || !surface_hardware_codec(decoder)) goto out;
++ format=AMediaFormat_new();
++ if (!format) goto out;
++ AMediaFormat_setString(format,"mime",mime);
++ AMediaFormat_setInt32(format,"width",128); AMediaFormat_setInt32(format,"height",128);
++ AMediaFormat_setInt32(format,"vendor.qti-ext-dec-picture-order.enable",1);
++ if (AMediaCodec_configure(decoder,format,decoder_window,NULL,0)!=AMEDIA_OK ||
++     AMediaCodec_start(decoder)!=AMEDIA_OK) goto out;
++ ssize_t index=AMediaCodec_dequeueInputBuffer(decoder,1000000);
++ size_t capacity=0;
++ unsigned char *data=index>=0 ? AMediaCodec_getInputBuffer(decoder,index,&capacity) : NULL;
++ if (!data || capacity<packet_size) goto out;
++ memcpy(data,packet,packet_size);
++ if (AMediaCodec_queueInputBuffer(decoder,index,0,packet_size,1000,0)!=AMEDIA_OK) goto out;
++ index=AMediaCodec_dequeueInputBuffer(decoder,1000000);
++ if (index<0 || AMediaCodec_queueInputBuffer(decoder,index,0,0,2000,
++                              AMEDIACODEC_BUFFER_FLAG_END_OF_STREAM)!=AMEDIA_OK) goto out;
++ for (int attempt=0;attempt<300 && !image;attempt++) {
++  AMediaCodecBufferInfo info;
++  index=AMediaCodec_dequeueOutputBuffer(decoder,&info,10000);
++  if (index>=0 && AMediaCodec_releaseOutputBuffer(decoder,index,info.size>0)!=AMEDIA_OK) goto out;
++  media_status_t status=AImageReader_acquireNextImage(reader,&image);
++  if (status!=AMEDIA_OK && status!=AMEDIA_IMGREADER_NO_BUFFER_AVAILABLE) goto out;
++ }
++ AHardwareBuffer *decoded=NULL;
++ AImageCropRect crop;
++ AHardwareBuffer_Desc desc;
++ if (!image || AImage_getHardwareBuffer(image,&decoded)!=AMEDIA_OK ||
++     AImage_getCropRect(image,&crop)!=AMEDIA_OK ||
++     crop.right-crop.left!=128 || crop.bottom-crop.top!=128) goto out;
++ z.AHardwareBuffer_describe(decoded,&desc);
++ if (crop.left<0 || crop.top<0 || crop.right>(int)desc.width || crop.bottom>(int)desc.height ||
++     yuv_open(&context,NULL) || yuv_buffer_new(&linear,128,128) ||
++     yuv_draw(&context,decoded,linear.buffer,128,128,
++       (float)crop.left/desc.width,(float)crop.top/desc.height,
++       128.0f/desc.width,128.0f/desc.height,
++       linear.nv21 ^ !!getenv("TVA_TEST_SURFACE_BAD_DECODE"),0)) goto out;
++ AHardwareBuffer_Planes planes={0};
++ if (z.AHardwareBuffer_lockPlanes(linear.buffer,AHARDWAREBUFFER_USAGE_CPU_READ_OFTEN,
++                               -1,NULL,&planes)) goto out;
++ if (planes.planeCount!=3 || !planes.planes[0].data || !planes.planes[1].data ||
++     !planes.planes[2].data) { z.AHardwareBuffer_unlock(linear.buffer,NULL); goto out; }
++ unsigned char *uv=planes.planes[linear.nv21 ? 2 : 1].data;
++ result=1;
++ for (unsigned y=16;y<128;y+=32) for (unsigned x=16;x<128;x+=32) {
++  int actual=((unsigned char *)planes.planes[0].data)[y*linear.stride+x];
++  int u=uv[(y/2)*linear.stride+x], v=uv[(y/2)*linear.stride+x+1];
++  if (abs(actual-(int)qualify_y(x,y))>6 || abs(u-(70+20*(int)(x/64)))>6 ||
++      abs(v-(170-20*(int)(y/64)))>6) result=0;
++ }
++ if (z.AHardwareBuffer_unlock(linear.buffer,NULL)) result=0;
++out:
++ yuv_close(&context);
++ yuv_buffer_close(&linear);
++ if (image) AImage_delete(image);
++ if (decoder) { AMediaCodec_stop(decoder); AMediaCodec_delete(decoder); }
++ if (reader) AImageReader_delete(reader);
++ if (window) z.ANativeWindow_release(window);
++ if (format) AMediaFormat_delete(format);
++ return result;
++}
++static int surface_codec_probe(const char *mime)
++{
++ AMediaCodec *encoder=NULL;
++ AMediaFormat *format=NULL;
++ ANativeWindow *window=NULL;
++ YuvContext context={0};
++ YuvBuffer source={0}, imported={0};
+  unsigned char packet[128*1024];
+  size_t packet_size=0;
+  int result=0;
+@@ -80,72 +180,15 @@ static int surface_codec_probe(const char *mime)
+   AMediaCodec_releaseOutputBuffer(encoder,index,0);
+  }
+  if (!eos || !packet_size) goto out;
++ /* Release the encoder before the decoder starts, as before the split. */
+  yuv_close(&context); yuv_buffer_close(&imported);
+  AMediaCodec_stop(encoder); AMediaCodec_delete(encoder); encoder=NULL;
+  AMediaFormat_delete(format); format=NULL;
+- if (AImageReader_newWithUsage(128,128,AIMAGE_FORMAT_YUV_420_888,
+-      AHARDWAREBUFFER_USAGE_GPU_SAMPLED_IMAGE,4,&reader)!=AMEDIA_OK ||
+-     AImageReader_getWindow(reader,&window)!=AMEDIA_OK) { window=NULL; goto out; }
+- /* Reader owns this window; do not release that reference. */
+- ANativeWindow *decoder_window=window; window=NULL;
+- decoder=AMediaCodec_createDecoderByType(mime);
+- if (!decoder || !surface_hardware_codec(decoder)) goto out;
+- format=AMediaFormat_new();
+- if (!format) goto out;
+- AMediaFormat_setString(format,"mime",mime);
+- AMediaFormat_setInt32(format,"width",128); AMediaFormat_setInt32(format,"height",128);
+- AMediaFormat_setInt32(format,"vendor.qti-ext-dec-picture-order.enable",1);
+- if (AMediaCodec_configure(decoder,format,decoder_window,NULL,0)!=AMEDIA_OK ||
+-     AMediaCodec_start(decoder)!=AMEDIA_OK) goto out;
+- ssize_t index=AMediaCodec_dequeueInputBuffer(decoder,1000000);
+- size_t capacity=0;
+- unsigned char *data=index>=0 ? AMediaCodec_getInputBuffer(decoder,index,&capacity) : NULL;
+- if (!data || capacity<packet_size) goto out;
+- memcpy(data,packet,packet_size);
+- if (AMediaCodec_queueInputBuffer(decoder,index,0,packet_size,1000,0)!=AMEDIA_OK) goto out;
+- index=AMediaCodec_dequeueInputBuffer(decoder,1000000);
+- if (index<0 || AMediaCodec_queueInputBuffer(decoder,index,0,0,2000,
+-                              AMEDIACODEC_BUFFER_FLAG_END_OF_STREAM)!=AMEDIA_OK) goto out;
+- for (int attempt=0;attempt<300 && !image;attempt++) {
+-  AMediaCodecBufferInfo info;
+-  index=AMediaCodec_dequeueOutputBuffer(decoder,&info,10000);
+-  if (index>=0 && AMediaCodec_releaseOutputBuffer(decoder,index,info.size>0)!=AMEDIA_OK) goto out;
+-  media_status_t status=AImageReader_acquireNextImage(reader,&image);
+-  if (status!=AMEDIA_OK && status!=AMEDIA_IMGREADER_NO_BUFFER_AVAILABLE) goto out;
+- }
+- AHardwareBuffer *decoded=NULL;
+- AImageCropRect crop;
+- AHardwareBuffer_Desc desc;
+- if (!image || AImage_getHardwareBuffer(image,&decoded)!=AMEDIA_OK ||
+-     AImage_getCropRect(image,&crop)!=AMEDIA_OK ||
+-     crop.right-crop.left!=128 || crop.bottom-crop.top!=128) goto out;
+- z.AHardwareBuffer_describe(decoded,&desc);
+- if (crop.left<0 || crop.top<0 || crop.right>(int)desc.width || crop.bottom>(int)desc.height ||
+-     yuv_open(&context,NULL) || yuv_buffer_new(&linear,128,128) ||
+-     yuv_draw(&context,decoded,linear.buffer,128,128,
+-       (float)crop.left/desc.width,(float)crop.top/desc.height,
+-       128.0f/desc.width,128.0f/desc.height,linear.nv21,0)) goto out;
+- memset(&planes,0,sizeof(planes));
+- if (z.AHardwareBuffer_lockPlanes(linear.buffer,AHARDWAREBUFFER_USAGE_CPU_READ_OFTEN,
+-                               -1,NULL,&planes)) goto out;
+- if (planes.planeCount!=3 || !planes.planes[0].data || !planes.planes[1].data ||
+-     !planes.planes[2].data) { z.AHardwareBuffer_unlock(linear.buffer,NULL); goto out; }
+- uv=planes.planes[linear.nv21 ? 2 : 1].data;
+- result=1;
+- for (unsigned y=16;y<128;y+=32) for (unsigned x=16;x<128;x+=32) {
+-  int actual=((unsigned char *)planes.planes[0].data)[y*linear.stride+x];
+-  int u=uv[(y/2)*linear.stride+x], v=uv[(y/2)*linear.stride+x+1];
+-  if (abs(actual-(int)qualify_y(x,y))>6 || abs(u-(70+20*(int)(x/64)))>6 ||
+-      abs(v-(170-20*(int)(y/64)))>6) result=0;
+- }
+- if (z.AHardwareBuffer_unlock(linear.buffer,NULL)) result=0;
++ result=surface_decode_probe(mime,packet,packet_size);
+ out:
+  yuv_close(&context);
+- yuv_buffer_close(&source); yuv_buffer_close(&imported); yuv_buffer_close(&linear);
+- if (image) AImage_delete(image);
++ yuv_buffer_close(&source); yuv_buffer_close(&imported);
+  if (encoder) { AMediaCodec_stop(encoder); AMediaCodec_delete(encoder); }
+- if (decoder) { AMediaCodec_stop(decoder); AMediaCodec_delete(decoder); }
+- if (reader) AImageReader_delete(reader);
+  if (window) z.ANativeWindow_release(window);
+  if (format) AMediaFormat_delete(format);
+  return result;
+--- a/daemon/tva_surface.h
++++ b/daemon/tva_surface.h
+@@ -165,6 +165,18 @@ fail:
+  return -1;
+ }
+ 
++/* Smallest even buffer of at least 96x96 that holds a visible picture.
++ * Returns -1 above the 8192x4320 protocol limit. */
++static int tva_padded_frame_size(unsigned width, unsigned height,
++                                 unsigned *buffer_w, unsigned *buffer_h)
++{
++ if (!width || !height || width > 8192 || height > 4320) return -1;
++ unsigned w = (width + 1u) & ~1u, h = (height + 1u) & ~1u;
++ *buffer_w = w < 96 ? 96 : w;
++ *buffer_h = h < 96 ? 96 : h;
++ return 0;
++}
++
+ /* Geometry is derived from a real gralloc allocation, never vendor ints. */
+ typedef struct {
+  AHardwareBuffer *buffer;

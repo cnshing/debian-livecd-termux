@@ -1,0 +1,79 @@
+--- a/src/gallium/frontends/va/tva_bridge.c
++++ b/src/gallium/frontends/va/tva_bridge.c
+@@ -3366,13 +3366,14 @@ tva_encode_export(struct tva_codec *c, struct pipe_video_buffer *source,
+     c->pipe->screen->fence_reference(c->pipe->screen, &done, NULL);
+     if (!ready) return -1;
+     struct winsys_handle h[2]={{.type=WINSYS_HANDLE_TYPE_FD}, {.type=WINSYS_HANDLE_TYPE_FD}};
+-    h[0].handle=h[1].handle=-1;
++    /* winsys_handle.handle is unsigned: UINT_MAX marks "no descriptor". */
++    h[0].handle=h[1].handle=UINT_MAX;
+     int fd=-1;
+     for (int i=0; i<2; i++)
+         if (!c->pipe->screen->resource_get_handle(c->pipe->screen, c->pipe,
+                                                   resources[i], &h[i], 0)) goto out;
+     struct stat a,b;
+-    if (h[0].handle < 0 || h[1].handle < 0 ||
++    if (h[0].handle > INT_MAX || h[1].handle > INT_MAX ||
+         fstat(h[0].handle,&a) || fstat(h[1].handle,&b) ||
+         a.st_dev != b.st_dev || a.st_ino != b.st_ino ||
+         h[0].modifier != DRM_FORMAT_MOD_LINEAR || h[1].modifier != DRM_FORMAT_MOD_LINEAR ||
+@@ -3384,9 +3385,9 @@ tva_encode_export(struct tva_codec *c, struct pipe_video_buffer *source,
+     uint32_t m[DMABUF_WORDS]={0x3231564e, source->width, source->height,
+         h[0].stride, h[1].offset, h[0].size, c->encode_x, c->encode_y};
+     memcpy(metadata,m,sizeof(m));
+-    fd=h[0].handle; h[0].handle=-1;
++    fd=(int)h[0].handle; h[0].handle=UINT_MAX;
+ out:
+-    for (int i=0; i<2; i++) if (h[i].handle >= 0) close(h[i].handle);
++    for (int i=0; i<2; i++) if (h[i].handle <= INT_MAX) close((int)h[i].handle);
+     return fd;
+ }
+ #endif
+@@ -3463,9 +3464,31 @@ tva_codec_get_feedback(struct pipe_video_codec *codec, void *feedback,
+                        unsigned *size,
+                        struct pipe_enc_feedback_metadata *metadata)
+ {
++    struct tva_codec *c = tva_codec(codec);
+     struct tva_enc_feedback *f = feedback;
+-    if (f && !f->ready) tva_encode_complete(tva_codec(codec), f->seq);
+-    size_t len = f ? f->len : 0;
++    size_t len = 0;
++    if (f) {
++        mtx_lock(&c->pend_mutex);
++        bool ready = f->ready;
++        mtx_unlock(&c->pend_mutex);
++        if (!ready) tva_encode_complete(c, f->seq);
++        mtx_lock(&c->pend_mutex);
++        /* A failed session leaves this picture's job unfinished. Detach the
++         * feedback so codec teardown does not free it a second time. */
++        bool queued = false;
++        for (unsigned i = 0; i < TVA_ENC_DEPTH; i++) {
++            if (c->enc_jobs[i].feedback == f) {
++                c->enc_jobs[i].feedback = NULL;
++                queued = true;
++            }
++        }
++        /* Otherwise a completing thread owns the write and publishes ready
++         * under this lock, on success and on failure alike. */
++        while (!queued && !f->ready)
++            u_cnd_monotonic_wait(&c->pend_cond, &c->pend_mutex);
++        len = f->ready ? f->len : 0;
++        mtx_unlock(&c->pend_mutex);
++    }
+     free(f);
+     if (size)
+         *size = (unsigned)len;
+@@ -3554,8 +3577,12 @@ tva_encode_complete(struct tva_codec *c, uint64_t seq)
+         mtx_unlock(&c->pend_mutex);
+         bool ok = tva_encode_write_destination(c, dest, data, len) == 0;
+         if (f) {
++            mtx_lock(&c->pend_mutex);
+             f->len = ok ? len : 0; f->ready = true;
+-            if (f->discard) free(f);
++            bool discard = f->discard;
++            u_cnd_monotonic_broadcast(&c->pend_cond);
++            mtx_unlock(&c->pend_mutex);
++            if (discard) free(f);
+         }
+         free(data);
+         pipe_resource_reference(&dest, NULL);

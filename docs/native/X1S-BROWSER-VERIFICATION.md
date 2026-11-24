@@ -14,8 +14,21 @@ independently of the desktop renderer.
 WebGPU buffer mapping: from android-webgpu 0.1.0-2 and livecd-desktop 50
 (2026-11-24) both browsers get the address-space helper from
 `docs/native/handoff/webgpu-buffer-mapping.md` here as well. It acts only if
-this kernel's probe shows a 39-bit address limit. The WebGL then WebGPU stress
-from that handoff has not yet been run on the x1s.
+this kernel's probe shows a 39-bit address limit.
+
+Measured on 2026-11-24 with the installed Chromium 156.0.8078.79-3 and
+livecd-desktop 0.2.0-22 stack. Advisory mappings hinted at 2^39, 2^40 and
+2^47 all land below 2^39, so this kernel is 39-bit and the helper is active.
+`tests/browsers/test-web-graphics.py --map-stress` passes WebGL 1 and 2 with
+the helper preloaded through the livecd-desktop 50 launcher modules, three
+runs out of three, with the canvases checked. WebGPU itself has no adapter
+here: Chromium reports "No available adapters" with or without the helper. So
+the buffer-mapping failure cannot occur on this phone today, and the row above
+means WebGPU is enabled in Chromium's feature status, not that an adapter
+exists. With `--enable-unsafe-webgpu`, the livecd-desktop 50 modules on this
+older stack crash the GPU process while requesting an adapter, with or
+without the helper. The installed 22 modules do not crash; they only lack an
+adapter. Google Chrome is not installed on this phone.
 | VP9 hardware playback | passes with android-vaapi revision 3 or later | decodes with android-vaapi-glibc revision 1; one of four compositor comparisons below the SSIM threshold |
 | HEVC hardware playback | passes with android-vaapi revision 5 and the launcher of livecd-desktop 0.2.0-17 | passes with android-vaapi-glibc revision 1 and the same launcher |
 | H.264 playback | software (off by default on every phone) | software |

@@ -142,8 +142,11 @@ and Chrome WebGPU are on by default on the Mali x1s (Galaxy S20). Branch
   helper's own mapping keeps that mapping instead of mapping a second copy,
   and the `/proc/self/maps` scan stops once it has an answer.
 
-Pending: x1s verification. It needs the x1s's address limit and the WebGL1+2 +
-WebGPU stress with and without the helper, through the installed launchers.
+x1s result (2026-11-24): the kernel is 39-bit, so the helper activates. WebGL
+1 and 2 pass with it preloaded, but Chromium offers no WebGPU adapter on PanVK
+there, so the mapping failure cannot occur yet. Details are in
+`docs/native/X1S-BROWSER-VERIFICATION.md`. If a later PanVK or Chromium
+version offers an adapter, run the stress and its opt-out control on the x1s.
 
 Maintenance: the helper recognises Chromium's memfd by the exact name
 `shared-memory-region` and V8's reservation by its size (at least 12 GiB minus

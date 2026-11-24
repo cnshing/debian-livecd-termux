@@ -600,7 +600,7 @@
  static int do_handshake(Session *s)
  {
      uint32_t first;
-@@ -789,7 +802,27 @@
+@@ -789,7 +802,32 @@
       * carries the abstract socket name.  The daemon picks the name - the
       * client cannot know it is connection #N, and guessing would collide. */
      XferMode want = XFER_INLINE;
@@ -611,9 +611,14 @@
 +    /* The startup proof covers limited-range samples. On this firmware,
 +     * surface input alters full-range values (WebCodecs error 19 vs 3 with
 +     * ByteBuffer input). Preserve colour correctness with the copy path. */
-+    int surface_range_ok = !s->encoder || !(s->enc_color & ENC_XFER_FULL_RANGE);
++    int surface_range_ok = !s->encoder ||
++        (!(s->enc_color & ENC_XFER_FULL_RANGE) &&
++         /* Firefox WebCodecs supplies untagged constrained-baseline input.
++          * It fails surface colour checks (22 codes vs 4 with copy input),
++          * so this unqualified combination also retains ByteBuffer input. */
++         !(s->codec_id == CODEC_H264_BASELINE_ENC && !s->enc_color));
 +    if (!surface_range_ok && xfer == XFER_DMABUF)
-+        dlog(1, "[%d] full-range encoder uses qualified copy transport", s->id);
++        dlog(1, "[%d] unqualified encoder colour uses copy transport", s->id);
 +    if (xfer == XFER_DMABUF && qualified && surface_range_ok &&
 +        !codec_is_ten_bit(s->codec_id) &&
 +        (!s->encoder || codec_base_id(s->codec_id) == CODEC_H264 ||
@@ -629,7 +634,7 @@
          if (shm_prepare(s, (int)w, (int)h) == 0) {
              want = XFER_SHM;
          } else {
-@@ -797,6 +830,22 @@
+@@ -797,6 +835,22 @@
          }
      }
  
@@ -652,7 +657,7 @@
      /*
       * Response: [4B status][4B actual mode][4B name length][name...]
       * Inline mode has name length 0 and no following bytes.
-@@ -841,8 +890,10 @@
+@@ -841,8 +895,10 @@
              dlog(1, "[%d] SHM handoff failed, falling back to inline", s->id);
          }
      } else {
@@ -665,7 +670,7 @@
  
      /* Frame return has exactly two modes: SHM (memfd zero-copy) or inline
       * on the control connection.
-@@ -855,11 +906,11 @@
+@@ -855,11 +911,11 @@
       * transport is always the Unix socket printed by "listening on ...". */
      if (s->encoder)
          dlog(1, "[%d] handshake ok: encoder %s %ux%u transport=%s bitrate=%u fps=%u/%u%s",
@@ -679,7 +684,7 @@
      return 0;
  
  reply_fail:
-@@ -1340,6 +1391,7 @@
+@@ -1340,6 +1396,7 @@
   */
  static int send_format_desc(Session *s)
  {
@@ -687,7 +692,7 @@
      /* Fallback for missing values: use what we know if FORMAT_CHANGED has
       * not arrived yet */
      if (s->stride <= 0)       s->stride = s->w;
-@@ -1570,10 +1622,62 @@
+@@ -1570,10 +1627,62 @@
   * socket.  Fully decoupled from the input thread - sending a large frame
   * never blocks unit reception or decoder feeding.
   */
@@ -750,7 +755,7 @@
  
      while (running && !s->stop) {
          AMediaCodecBufferInfo info;
-@@ -1582,6 +1686,25 @@
+@@ -1582,6 +1691,25 @@
          if (oi >= 0) {
              idle_after_eof = 0;
              int eos = (info.flags & FLAG_END_OF_STREAM) != 0;
@@ -776,7 +781,7 @@
  
              /* Handshaked clients must receive the format descriptor before
               * any frame.  Normally FORMAT_CHANGED arrives first, but do not
-@@ -1820,6 +1943,7 @@
+@@ -1820,6 +1948,7 @@
      /* Also covers unexpected MediaCodec errors and failed EOS delivery.
       * The input worker may otherwise stay blocked in recv_all forever. */
      session_abort(s);
@@ -784,7 +789,7 @@
      return NULL;
  }
  
-@@ -2503,6 +2627,76 @@
+@@ -2503,6 +2632,76 @@
      return NULL;
  }
  
@@ -861,7 +866,7 @@
  static int encoder_run(Session *s)
  {
      const size_t input_cap = codec_is_ten_bit(s->codec_id)
-@@ -2537,31 +2731,37 @@
+@@ -2537,31 +2736,37 @@
          }
          bool force_key = sz & ENC_UNIT_FORCE_KEY;
          sz &= ~ENC_UNIT_FORCE_KEY;
@@ -919,7 +924,7 @@
          uint32_t pts = ++frame_no;
          /* Encoder input timestamps are only used by MediaCodec's rate
           * controller.  A unit index scaled by 1 ms (the decoder pairing
-@@ -2583,17 +2783,22 @@
+@@ -2583,17 +2788,22 @@
                  usleep(1000);
              encoder_request_sync(s);
          }
@@ -949,7 +954,7 @@
      }
      out.input_done = 1;
      pthread_join(output_thread, NULL);
-@@ -2615,6 +2820,7 @@
+@@ -2615,6 +2825,7 @@
      if (do_handshake(s) < 0) goto out_fd;
  
      if (s->encoder) {
@@ -957,7 +962,7 @@
          s->codec = AMediaCodec_createEncoderByType(s->mime);
          if (!s->codec) {
              dlog(0, "[%d] no available encoder: %s", s->id, s->mime);
-@@ -2665,7 +2871,8 @@
+@@ -2665,7 +2876,8 @@
           * only Venus linear P010 together with the Main10 HDR10 profile constant (4096):
           * profile 2 and Android's P010 are refused. The stream is Main10 (profile_idc 2). */
          AMediaFormat_setInt32(enc_fmt, "color-format", codec_is_ten_bit(s->codec_id)
@@ -967,7 +972,7 @@
          if (codec_is_ten_bit(s->codec_id))
              AMediaFormat_setInt32(enc_fmt, "profile", 4096);
          /* CBR makes Qualcomm's encoder honor low VA-API targets instead of
-@@ -2687,16 +2894,39 @@
+@@ -2687,16 +2899,39 @@
                   low_latency ? " with low-latency" : "", st);
          }
          if (st != AMEDIA_OK)
@@ -1009,7 +1014,7 @@
      }
  
      s->stall_timeout_ms = decoder_stall_timeout(s);
-@@ -2791,14 +3021,27 @@
+@@ -2791,14 +3026,27 @@
      if (codec_is_ten_bit(s->codec_id))
          AMediaFormat_setInt32(fmt, TVA_MF_KEY_COLOR_FORMAT, COLOR_FORMAT_YUV420_FLEXIBLE);
  
@@ -1040,7 +1045,7 @@
  
      pthread_t tin, tout;
      int have_in = (pthread_create(&tin, NULL, input_thread, s) == 0);
-@@ -2821,7 +3064,19 @@
+@@ -2821,7 +3069,19 @@
          dlog(1, "[%d] session end: %ld units in, %ld frames out",
               s->id, s->units_in, s->frames_out);
  
@@ -1060,7 +1065,7 @@
      /* configure / start failures must STILL stop the codec before deleting.
       *
       * This used to jump straight to delete on failure and the whole daemon
-@@ -2850,6 +3105,7 @@
+@@ -2850,6 +3110,7 @@
  out_fmt:
      AMediaFormat_delete(fmt);
  out_fd:
@@ -1068,7 +1073,7 @@
      shm_teardown(s);
      free(s->convert_buf);
      close(s->fd);
-@@ -3008,6 +3264,13 @@
+@@ -3008,6 +3269,13 @@
      signal(SIGPIPE, SIG_IGN);
  
      android_binder_threadpool_init();

@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: MIT
- * Keep V8's advisory shared-memory hints usable on 39-bit Adreno Android.
+ * Keep V8's advisory shared-memory hints usable on 39-bit Android kernels.
  *
- * Linux V8 assumes a larger address space than this Android kernel provides.
+ * Linux V8 assumes a larger address space than these Android kernels provide.
  * Its partial sandbox reserves an accessible prefix, but shared ArrayBuffers
  * must live AFTER that reservation. Random hints in the remaining logical 1 TiB
  * sandbox often exceed the kernel's 512 GiB limit. The kernel then puts the map
@@ -10,7 +10,9 @@
  * Remember the large no-access reservation and fold only out-of-range shared
  * memfd hints into its accessible tail. These remain advisory mappings: never
  * replace existing memory, change permissions or bypass V8's range checks.
- * Loaded only by the Chromium-family launchers on KGSL, with an opt-out.
+ * Loaded only by the Chromium-family launchers with a GPU, Adreno or Mali,
+ * with an opt-out. The cause is the kernel's address space, not the GPU, so
+ * activation follows a probe of that limit alone: wider kernels are untouched.
  */
 #define _GNU_SOURCE
 #include <fcntl.h>
@@ -28,17 +30,14 @@ static int enabled;
 __attribute__((constructor)) static void initialize(void) {
     int page = getpagesize();
     if (page >= 4096 && page <= 65536 && !(page & (page - 1))) page_size = (size_t)page;
-    enabled = access("/dev/kgsl-3d0", F_OK) == 0 && access("/dev/mali0", F_OK) != 0;
-    if (enabled) {
-        // Newer Adreno kernels may expose more virtual address bits. Keep
-        // their normal mapping behavior: probe with an advisory, temporary
-        // page instead of inferring the address limit from the GPU alone.
-        const uintptr_t limit = UINT64_C(1) << 39;
-        void *probe = (void *)syscall(SYS_mmap, (void *)limit, page_size, PROT_NONE,
-                                     MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
-        enabled = probe != MAP_FAILED && (uintptr_t)probe < limit;
-        if (probe != MAP_FAILED) syscall(SYS_munmap, probe, page_size);
-    }
+    // Newer kernels may expose more virtual address bits. Keep their normal
+    // mapping behavior: probe with an advisory, temporary page instead of
+    // inferring the address limit from the GPU or the device.
+    const uintptr_t limit = UINT64_C(1) << 39;
+    void *probe = (void *)syscall(SYS_mmap, (void *)limit, page_size, PROT_NONE,
+                                 MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
+    enabled = probe != MAP_FAILED && (uintptr_t)probe < limit;
+    if (probe != MAP_FAILED) syscall(SYS_munmap, probe, page_size);
 #ifdef WEBGPU_MAP_TEST
     enabled = 1;
 #endif
@@ -74,14 +73,16 @@ static uintptr_t free_hint(uintptr_t minimum, uintptr_t limit, size_t size, uint
     if (fd < 0) return 0;
     char buffer[4096];
     uintptr_t cursor = minimum, start = 0, end = 0, found = 0;
-    int field = 0;
+    int field = 0, done = 0;
     long count;
-    while (!found && (count = syscall(SYS_read, fd, buffer, sizeof(buffer))) > 0) {
-        for (long i = 0; i < count && !found; i++) {
+    while (!done && (count = syscall(SYS_read, fd, buffer, sizeof(buffer))) > 0) {
+        for (long i = 0; i < count && !done; i++) {
             unsigned char c = (unsigned char)buffer[i];
             if (c == '\n') {
-                if (start >= limit) { found = gap_hint(cursor, limit, size, entropy); break; }
+                // Mappings are sorted: past the limit, only the last gap is left.
+                if (start >= limit) { found = gap_hint(cursor, limit, size, entropy); done = 1; break; }
                 if (start > cursor) found = gap_hint(cursor, start, size, entropy);
+                if (found) done = 1;
                 if (end > cursor) cursor = end;
                 start = end = 0; field = 0;
             } else if (field < 2) {
@@ -95,7 +96,7 @@ static uintptr_t free_hint(uintptr_t minimum, uintptr_t limit, size_t size, uint
         }
     }
     syscall(SYS_close, fd);
-    return found ? found : gap_hint(cursor, limit, size, entropy);
+    return found || done ? found : gap_hint(cursor, limit, size, entropy);
 }
 
 void *mmap(void *hint, size_t size, int protection, int flags, int fd, off_t offset) {
@@ -118,10 +119,13 @@ void *mmap(void *hint, size_t size, int protection, int flags, int fd, off_t off
     if (adapt) {
         for (int attempt = 0; attempt < 3 && result != MAP_FAILED &&
              ((uintptr_t)result < end || (uintptr_t)result > limit - size); attempt++) {
-            uintptr_t next = free_hint(end, limit, size, requested >> 12);
+            // A different slot per attempt, in case the first gap was taken.
+            uintptr_t next = free_hint(end, limit, size,
+                                       (requested >> 12) + (uintptr_t)attempt * UINT64_C(0x9e3779b97f4a7c15));
             if (!next) break;
             // This is our just-created mapping, not a pre-existing reservation.
-            syscall(SYS_munmap, result, size);
+            // If it cannot be removed, return it rather than map a second copy.
+            if (syscall(SYS_munmap, result, size)) break;
             result = (void *)syscall(SYS_mmap, (void *)next, size, protection, flags, fd, offset);
         }
     }

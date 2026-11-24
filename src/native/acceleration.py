@@ -469,13 +469,14 @@ def command_line(profile, command, abi, video, gpu, mali=False, own_driver=False
     return [command[0], *flags, *command[1:]]
 
 
-def webgpu_environment(env, profile, abi, gpu, mali):
-    # Linux V8's partial sandbox can generate shared-memory hints beyond this
-    # Android kernel's address space. Keep the workaround local to these browsers.
+def webgpu_environment(env, profile, abi, gpu):
+    # Linux V8's partial sandbox can generate shared-memory hints beyond a
+    # 39-bit Android kernel's address space, on Adreno and Mali alike. Keep the
+    # workaround local to these browsers; the library itself probes the limit
+    # and stays inert on wider kernels.
     mapping = PREFIX / 'lib/android-webgpu/libwebgpu-map.so'
-    if (profile in BROWSERS and gpu and not mali and os.path.exists('/dev/kgsl-3d0')
-            and not os.path.exists('/dev/mali0') and os.environ.get('LIVECD_WEBGPU_MAP') != '0'
-            and mapping.is_file()):
+    opted_out = os.environ.get('LIVECD_WEBGPU_MAP', '').strip().lower() in ('0', 'false', 'no', 'off')
+    if profile in BROWSERS and gpu and not opted_out and mapping.is_file():
         key = 'BIONILUX_EXTRA_PRELOAD' if abi == 'glibc' else 'LD_PRELOAD'
         env[key] = ':'.join(filter(None, [str(mapping), env.get(key)]))
         env['LIVECD_WEBGPU_MAP'] = '1'
@@ -610,7 +611,7 @@ def prepare(profile, command, abi, video_override):
     if mali_vulkan:
         # Last, so no earlier library path or ICD choice overrides it.
         use_panvk(env, abi)
-    webgpu_environment(env, profile, abi, gpu, mali)
+    webgpu_environment(env, profile, abi, gpu)
     own_driver = bool(video and selected and source_built_driver(profile, abi, selected[1], mali_usable()))
     firefox_encode = bool(profile == 'firefox' and video and firefox_encode_ready(env.get('TERMUX_VA_SOCKET')))
     argv = command_line(profile, command, abi, video, gpu, mali=mali, own_driver=own_driver,

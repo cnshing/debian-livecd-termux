@@ -1,10 +1,10 @@
 TERMUX_PKG_HOMEPAGE=https://github.com/cnshing/debian-livecd-termux
-TERMUX_PKG_DESCRIPTION="Adreno Android address-space compatibility for WebGPU buffer mapping"
+TERMUX_PKG_DESCRIPTION="Android 39-bit address-space compatibility for WebGPU buffer mapping"
 TERMUX_PKG_LICENSE="MIT"
 TERMUX_PKG_LICENSE_FILE="LICENSE"
 TERMUX_PKG_MAINTAINER="@cnshing"
 TERMUX_PKG_VERSION="0.1.0"
-TERMUX_PKG_REVISION=1
+TERMUX_PKG_REVISION=2
 TERMUX_PKG_EXCLUDED_ARCHES="arm, i686, x86_64"
 TERMUX_PKG_SKIP_SRC_EXTRACT=true
 TERMUX_PKG_BUILD_IN_SRC=true

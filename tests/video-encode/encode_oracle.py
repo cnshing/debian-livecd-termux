@@ -100,13 +100,16 @@ def sps_profile(data):
 def psnr(encoded, source, width, height, rate=30, raw=False):
     """Per-frame PSNR of a decoded stream, or raw NV12 frames, against raw NV12
     frames, by index. Returns dicts with n, y, u and v; FFmpeg reports
-    identical planes as inf."""
+    identical planes as inf. Both inputs receive matching metadata before comparison
+    so automatic conversion does not change samples based on stream signalling.
+    Colour signalling is tested separately by the colour-bar checks."""
     stats = Path(f'{encoded}.{Path(source).stem}.psnr.log')
     stats.unlink(missing_ok=True)
     decoded = ['-f', 'rawvideo', '-pix_fmt', 'nv12', '-s', f'{width}x{height}'] if raw else []
     run(['ffmpeg', '-v', 'error', '-nostdin', *decoded, '-i', encoded,
          '-f', 'rawvideo', '-pix_fmt', 'nv12', '-s', f'{width}x{height}', '-r', rate, '-i', source,
-         '-lavfi', f'[0:v]setpts=N/({rate}*TB)[a];[1:v]setpts=N/({rate}*TB)[b];'
+         '-lavfi', f'[0:v]format=yuv420p,setparams=range=limited:colorspace=bt709,setpts=N/({rate}*TB)[a];'
+                   f'[1:v]format=yuv420p,setparams=range=limited:colorspace=bt709,setpts=N/({rate}*TB)[b];'
                    f'[a][b]psnr=stats_file={stats}:eof_action=endall',
          '-f', 'null', '-'])
     frames = []

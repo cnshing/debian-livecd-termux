@@ -28,20 +28,24 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--out', type=Path, required=True)
     parser.add_argument('--frames', type=int, default=120)
+    parser.add_argument('--width', type=int, default=3840)
+    parser.add_argument('--height', type=int, default=2160)
     parser.add_argument('--require-fps', type=float, default=0)
+    parser.add_argument('--async-depth', type=int, default=None)
     args = parser.parse_args()
     args.out.mkdir(parents=True, exist_ok=False)
-    graph = 'testsrc2=size=3840x2160:rate=60'
+    graph = f'testsrc2=size={args.width}x{args.height}:rate=60'
     results = []
     for codec, extension, profile in [('h264_vaapi', 'h264', 'high'),
                                        ('hevc_vaapi', 'hevc', 'main')]:
         stream = args.out / f'{codec}.{extension}'
+        queue_options = ['-async_depth',str(args.async_depth)] if args.async_depth else []
         _, elapsed = run(['ffmpeg', '-hide_banner', '-nostdin',
                           '-init_hw_device', 'vaapi=va', '-filter_hw_device', 'va',
                           '-f', 'lavfi', '-i', graph, '-frames:v', args.frames,
                           '-vf', 'format=nv12,hwupload', '-c:v', codec,
                           '-profile:v', profile, '-b:v', '40M', '-maxrate', '40M',
-                          '-g', '60', '-bf', '0', '-f', extension, stream],
+                          '-g', '60', '-bf', '0', *queue_options, '-f', extension, stream],
                          args.out / f'{codec}.log')
         probe, _ = run(['ffprobe', '-v', 'error', '-show_frames', '-show_entries',
                         'frame=width,height,key_frame', '-of', 'json', stream])
@@ -49,7 +53,7 @@ def main():
         keys = [i for i, frame in enumerate(frames) if frame['key_frame']]
         assert len(frames) == args.frames, len(frames)
         assert keys == list(range(0, args.frames, 60)), keys
-        assert all((frame['width'], frame['height']) == (3840, 2160) for frame in frames)
+        assert all((frame['width'], frame['height']) == (args.width, args.height) for frame in frames)
         psnr = args.out / f'{codec}.psnr'
         ssim = args.out / f'{codec}.ssim'
         run(['ffmpeg', '-v', 'error', '-r', '60', '-i', stream,
@@ -69,7 +73,7 @@ def main():
         minimum_ssim = min(float(re.search(r'All:([0-9.]+)', line)[1]) for line in lines)
         assert minimum_ssim > .9, minimum_ssim
         fps = args.frames / elapsed
-        result = dict(codec=codec, frames=len(frames), keys=keys, seconds=elapsed,
+        result = dict(codec=codec, async_depth=args.async_depth, frames=len(frames), keys=keys, seconds=elapsed,
                       fps=fps, minimum_psnr=minima, minimum_ssim=minimum_ssim,
                       passed=fps >= args.require_fps)
         results.append(result)

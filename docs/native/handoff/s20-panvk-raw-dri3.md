@@ -1,6 +1,6 @@
 # Handoff: S20 PanVK presentation over raw DRI3 instead of the software path
 
-State on 2026-11-23. Cost measured; race qualification in progress. Raw DRI3 remains opt-in.
+State on 2026-11-23. Private Bionic qualification passed; cost tradeoff confirmed in both run orders. Raw DRI3 remains opt-in.
 Shared rules: [README.md](README.md).
 
 ## Goal
@@ -71,13 +71,14 @@ rebased it as `tools/panvk-probes/platform-patches/0003-wsi-x11-wait-for-fences-
 keeping the existing `sw ||` term. [CI run 44501187850](https://github.com/cnshing/debian-livecd-termux/actions/runs/44501187850)
 passed for both ABIs, with `combined-ahb`. The patched libraries are in each
 artifact's **`out/patched/`** directory; `out/` itself contains the baseline build.
-The patched Bionic library also completes the private benchmark below. Race, resize, teardown
-and soak qualification are still required before publishing it.
+The patched Bionic library also completes the private benchmark below. Patched race, resize, teardown and isolated soak checks passed below. GLibc
+runtime and installed-desktop qualification remain outstanding.
 
 ## Measurements and current evidence
 
-The completed `normal-shm-1` and `normal-raw-wait-1` runs used a private lorie at
-1920×1080/60, five-second warmups and 30-second measurement intervals. Both passed
+The completed runs used the order `normal-shm-1`, `normal-raw-wait-1`,
+`normal-raw-wait-2`, `normal-shm-2`, on a private lorie at 1920×1080 with
+`-fakescreenfps 60` (RandR nevertheless reports about 29.95 Hz), five-second warmups and 30-second measurement intervals. Both passed
 `isolation.json`, all workloads completed, and wall-clock and monotonic durations
 agreed. `MUTTER_SYNC` was unset, matching normal desktop behavior. Earlier runs
 inherited synchronous X11 debugging from the correctness harness; do not mix those
@@ -96,12 +97,23 @@ with audio disabled; drops are mpv counter deltas after warmup.
 | Installed ICD, MIT-SHM | video | 40.2% | 13.8% | 83.1% | — | 489 |
 | CI ICD with wait, raw DRI3 | video | 53.0% | 71.7% | 83.6% | — | 118 |
 
-Neither route reported decoder drops. Raw DRI3 reduced reported video drops by
-about 76%, but total measured video CPU rose from 137.1% to 208.3% of a core.
-Gears throughput fell by about 32%. This justifies further investigation of
-smoothness; it does not establish a general performance or power win. Repeat the
-normal comparison in reverse order before making the default decision. Thermal
-zones were unreadable, so temperature effects have not been excluded. The
+The reverse-order pair produced:
+
+| Route | Workload | Shell CPU | X server CPU | App CPU | Gears FPS | Video drops / 30 s |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| CI ICD with wait, raw DRI3 | idle | 1.0% | 1.8% | — | — | — |
+| Installed ICD, MIT-SHM | idle | 1.2% | 2.6% | — | — | — |
+| CI ICD with wait, raw DRI3 | gears | 91.7% | 75.3% | 9.3% | 39.6 | — |
+| Installed ICD, MIT-SHM | gears | 105.3% | 36.7% | 81.0% | 75.6 | — |
+| CI ICD with wait, raw DRI3 | video | 52.9% | 71.1% | 67.4% | — | 122 |
+| Installed ICD, MIT-SHM | video | 49.2% | 15.5% | 91.7% | — | 409 |
+
+Neither route reported decoder drops. Across the two pairs raw DRI3 reduced
+reported video drops by 70–76%, but total measured video CPU rose by 23–52%.
+Gears throughput fell by 32–48%, with substantial variation between runs.
+This supports a video-smoothness tradeoff, not a general performance or power win.
+Keep raw DRI3 opt-in. Thermal zones were unreadable, so temperature effects have
+not been excluded. The
 soak logger can also read battery temperature through `termux-battery-status`;
 this is a battery sensor, not a CPU/GPU thermal-zone reading.
 
@@ -125,8 +137,30 @@ Race evidence so far:
 - Synthetic checker controls detect a red/blue split and an intentionally cut
   menu frame, while accepting the solid-color and fully open/closed controls.
   These validate the analyzers, not the hardware race.
-- Patched race trials, the new 20-cycle colour check, 100 vkcube restarts and the
-  isolated 30-minute soak remain pending. Nothing was installed or enabled.
+- Patched FIFO WebGL flips: **0 splits in 9,000 captured frames**, all valid,
+  with both colours observed in each trial. The browser GPU process mapped the
+  exact private patched library above.
+- Patched FIFO ArcMenu: **0 cuts in 3,338 captured frames**, ten trials and 600
+  clicks; all calibrations and open/closed observations passed.
+- Patched 20-cycle colour check: **40 captures, maximum channel error 0**;
+  the stale-phase negative control was rejected. **100 vkcube restarts** returned
+  zero and GNOME Shell kept the same PID. Isolation checks passed.
+- Patched isolated soak: **1,800.001 monotonic seconds / 1,801.448 wall seconds**,
+  59 samples, all completed. Gears reported positive FPS and vkcube CPU counters
+  advanced at each interval. Shell PID 23982 remained unchanged. Shell/cube/gears
+  FD counts stayed exactly 38/17/17; RSS ranges were 282.8–302.4 / 27.1 / 164.3–166.4
+  MiB, with no monotonic growth in the shell. Minimum MemAvailable was 5.09 GiB.
+  All 58 successful battery readings were 33.1°C; one API call timed out at five
+  minutes. CPU/GPU thermal zones remain unreadable. The UID-filtered Android crash
+  reader stayed alive with no entries or errors. Four additional colour captures
+  passed with maximum channel error 0. Before/after isolation passed and only X0
+  remained afterward. First, middle and last soak images, a GTK capture and actual
+  menu/flip recording samples were opened and visually inspected.
+- Nothing was installed or enabled. The test wake lock was released, shared SSH
+  was left running, and the live desktop was left stopped as found.
+
+Compact benchmark and qualification summaries are checked in as
+[s20-panvk-raw-dri3-results.json](s20-panvk-raw-dri3-results.json).
 
 Evidence is on the S20 under `~/s20-raw-dri3/`, named as above, with `result.json`,
 `environment.json`, `benchmark.json` and `isolation.json`. Race clips and recording
@@ -179,24 +213,23 @@ throughput, not the number of complete frames seen on the display.
 
 ## Next steps
 
-1. **Confirm the cost tradeoff.** The first normal comparison is complete (table above).
-   Repeat in reverse order. On a private lorie, with the installed driver, measure
-   GNOME Shell and a GL demo (glxgears, vkcube) at the desktop resolution: frame rate, CPU time of
-   gnome-shell and the X server, and dropped frames while playing video. Then repeat with
-   `PANVK_KBASE_DRI3=raw` set after the launcher's environment step (see Gotchas). If raw DRI3 is
-   not better, write that down and stop.
-2. **Race check without the wait.** With raw DRI3 and the unpatched driver, run the two Note10+
-   tests (described below). Expect split or cut frames; that is the negative control, and it
-   proves the tests can fail. If none show up after about 10 trials, record that, but still add
-   the wait (the preconditions are there).
-3. **Qualify the wait.** The rebased patch and both CI builds are ready (see above). Use the rebuilt ICDs
-   privately (`VK_DRIVER_FILES`/`VK_ICD_FILENAMES` set after the launcher step). Rerun step 2:
-   expect 0. Rerun the 20-cycle window/fullscreen colour check
-   (`tests/native/panvk-desktop.py --mode raw`) and vkcube start/stop.
-4. **Soak.** 30 minutes of raw DRI3 on a private display with nothing else running on the phone:
-   resource and thermal samples, and crash logs that can be attributed. The earlier failure (session
-   ended at 16.5 minutes, vkcube SIGSEGV at shutdown) must not recur.
-5. **Turn it on.** Only after steps 3–4 pass:
+1. **Cost tradeoff confirmed in both run orders.** Raw DRI3 improves the video
+   drop counter but increases video CPU and reduces gears throughput. Keep the
+   accepted MIT-SHM default; any future switch needs an explicit product tradeoff
+   and installed-desktop evidence.
+2. **Unpatched race check complete without reproduction.** Ten trials of each
+   probe produced zero defects. Synthetic controls prove the analyzers detect
+   defects, but do not supply the requested nonzero hardware control. The wait
+   remains justified by the missing implicit-sync preconditions.
+3. **Private Bionic wait checks passed.** Both CI builds exist, but only Bionic
+   has runtime evidence. Patched race, 20-cycle colour and 100-restart tests pass.
+   GLibc runtime qualification remains outstanding.
+4. **Isolated soak passed.** The full 30 minutes completed without the earlier
+   session loss or shutdown crash. This does not identify the cause of the old
+   overlapping-session failure, nor establish long-term stability beyond this run.
+5. **Future promotion, not authorized by these results alone.** Resolve the
+   performance tradeoff and missing hardware negative, qualify GLibc and complete
+   installed-desktop checks before considering this sequence:
    - Publish the driver as a new release. Update `source.lock.json` and the SHA-256 values in
      `packages/mesa-vulkan-icd-panvk-kbase/build.sh`, then bump its revision.
    - In `src/native/graphics.py`, set `PANVK_KBASE_DRI3=raw` for the automatic x1s PanVK profile

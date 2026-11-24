@@ -1,0 +1,247 @@
+{
+  "date": "2026-11-23",
+  "scope": "Private Bionic lorie; requested fake 60 fps, RandR reports 29.95 Hz; software video decoding, no audio; no installed-desktop or Android scanout qualification",
+  "benchmarks": [
+    {
+      "run": "normal-shm-1",
+      "randr": "Screen 0: minimum 1 x 1, current 1920 x 1080, maximum 32767 x 32767\nscreen connected primary 1920x1080+0+0 0mm x 0mm\n   1920x1080     29.95* \n",
+      "fixture_sha256": "d574c3cbf096854f82f8678c2aeb23c5a4d4c12c30ef8a06214e3bbdd651519c",
+      "phases": [
+        {
+          "name": "idle",
+          "elapsed_seconds": 30.005249248002656,
+          "elapsed_wall_seconds": 30.005250453948975,
+          "cpu_percent_one_core": {
+            "shell": 1.2997725723806832,
+            "server": 2.466235137337708
+          }
+        },
+        {
+          "name": "gears",
+          "elapsed_seconds": 30.008292939979583,
+          "elapsed_wall_seconds": 30.008302450180054,
+          "cpu_percent_one_core": {
+            "shell": 101.93848767467013,
+            "server": 25.459628827541025,
+            "gears": 68.11450435012286
+          },
+          "reported_fps": [
+            48.93,
+            52.995,
+            53.095,
+            51.114,
+            51.767,
+            52.751
+          ],
+          "mean_reported_fps": 51.775333333333336
+        },
+        {
+          "name": "video",
+          "elapsed_seconds": 30.008985248045065,
+          "elapsed_wall_seconds": 30.008978843688965,
+          "cpu_percent_one_core": {
+            "shell": 40.221286725402685,
+            "server": 13.79586802346041,
+            "video": 83.10844166789917
+          },
+          "video_seconds_advanced": 29.999999999999996,
+          "video_counters_delta": {
+            "frame-drop-count": 489,
+            "decoder-frame-drop-count": 0
+          }
+        }
+      ]
+    },
+    {
+      "run": "normal-raw-wait-1",
+      "randr": "Screen 0: minimum 1 x 1, current 1920 x 1080, maximum 32767 x 32767\nscreen connected primary 1920x1080+0+0 0mm x 0mm\n   1920x1080     29.95* \n",
+      "fixture_sha256": "d574c3cbf096854f82f8678c2aeb23c5a4d4c12c30ef8a06214e3bbdd651519c",
+      "phases": [
+        {
+          "name": "idle",
+          "elapsed_seconds": 30.006208593957126,
+          "elapsed_wall_seconds": 30.006213665008545,
+          "cpu_percent_one_core": {
+            "shell": 1.166425271303637,
+            "server": 2.466156287899121
+          }
+        },
+        {
+          "name": "gears",
+          "elapsed_seconds": 30.006121863028966,
+          "elapsed_wall_seconds": 30.00612497329712,
+          "cpu_percent_one_core": {
+            "shell": 91.7479443883755,
+            "server": 75.51792298730797,
+            "gears": 13.463919191029316
+          },
+          "reported_fps": [
+            42.74,
+            31.919,
+            34.049,
+            32.176,
+            35.865,
+            33.227
+          ],
+          "mean_reported_fps": 34.996
+        },
+        {
+          "name": "video",
+          "elapsed_seconds": 30.011443824041635,
+          "elapsed_wall_seconds": 30.01144576072693,
+          "cpu_percent_one_core": {
+            "shell": 53.046431532383565,
+            "server": 71.67265968979713,
+            "video": 83.60144266001906
+          },
+          "video_seconds_advanced": 30.033333,
+          "video_counters_delta": {
+            "frame-drop-count": 118,
+            "decoder-frame-drop-count": 0
+          }
+        }
+      ]
+    },
+    {
+      "run": "normal-raw-wait-2",
+      "randr": "Screen 0: minimum 1 x 1, current 1920 x 1080, maximum 32767 x 32767\nscreen connected primary 1920x1080+0+0 0mm x 0mm\n   1920x1080     29.95* \n",
+      "fixture_sha256": "d574c3cbf096854f82f8678c2aeb23c5a4d4c12c30ef8a06214e3bbdd651519c",
+      "phases": [
+        {
+          "name": "idle",
+          "elapsed_seconds": 30.00359732506331,
+          "elapsed_wall_seconds": 30.003599882125854,
+          "cpu_percent_one_core": {
+            "shell": 0.9998801035414402,
+            "server": 1.8331135231593076
+          }
+        },
+        {
+          "name": "gears",
+          "elapsed_seconds": 30.00363490206655,
+          "elapsed_wall_seconds": 30.003633737564087,
+          "cpu_percent_one_core": {
+            "shell": 91.72221995710433,
+            "server": 75.29087750112596,
+            "gears": 9.332202611914683
+          },
+          "reported_fps": [
+            43.292,
+            40.271,
+            36.2,
+            36.946,
+            39.439,
+            41.199
+          ],
+          "mean_reported_fps": 39.557833333333335
+        },
+        {
+          "name": "video",
+          "elapsed_seconds": 30.01041890203487,
+          "elapsed_wall_seconds": 30.01041841506958,
+          "cpu_percent_one_core": {
+            "shell": 52.948277902653906,
+            "server": 71.07531577492811,
+            "video": 67.40992208751973
+          },
+          "video_seconds_advanced": 30.066667000000002,
+          "video_counters_delta": {
+            "frame-drop-count": 122,
+            "decoder-frame-drop-count": 0
+          }
+        }
+      ]
+    },
+    {
+      "run": "normal-shm-2",
+      "randr": "Screen 0: minimum 1 x 1, current 1920 x 1080, maximum 32767 x 32767\nscreen connected primary 1920x1080+0+0 0mm x 0mm\n   1920x1080     29.95* \n",
+      "fixture_sha256": "d574c3cbf096854f82f8678c2aeb23c5a4d4c12c30ef8a06214e3bbdd651519c",
+      "phases": [
+        {
+          "name": "idle",
+          "elapsed_seconds": 30.006664208951406,
+          "elapsed_wall_seconds": 30.006667852401733,
+          "cpu_percent_one_core": {
+            "shell": 1.199733490844368,
+            "server": 2.5994225634961285
+          }
+        },
+        {
+          "name": "gears",
+          "elapsed_seconds": 30.00797609402798,
+          "elapsed_wall_seconds": 30.007977724075317,
+          "cpu_percent_one_core": {
+            "shell": 105.30533582466047,
+            "server": 36.72356964518223,
+            "gears": 80.97847027022941
+          },
+          "reported_fps": [
+            70.259,
+            78.213,
+            77.24,
+            76.899,
+            76.86,
+            73.912
+          ],
+          "mean_reported_fps": 75.56383333333333
+        },
+        {
+          "name": "video",
+          "elapsed_seconds": 30.015954171074554,
+          "elapsed_wall_seconds": 30.01595449447632,
+          "cpu_percent_one_core": {
+            "shell": 49.20716468255203,
+            "server": 15.525077008848507,
+            "video": 91.65125933764429
+          },
+          "video_seconds_advanced": 30.066665999999998,
+          "video_counters_delta": {
+            "frame-drop-count": 409,
+            "decoder-frame-drop-count": 0
+          }
+        }
+      ]
+    }
+  ],
+  "qualification": {
+    "driver_sha256": "b40b4d712a33cf6f5962eee1e1fa60d97db7adb9596521e52949f4440dd189be",
+    "unpatched": {
+      "flip_frames": 9000,
+      "split_frames": 0,
+      "menu_frames": 2294,
+      "cut_frames": 0,
+      "hardware_negative_reproduced": false
+    },
+    "patched": {
+      "flip_frames": 9000,
+      "split_frames": 0,
+      "menu_frames": 3338,
+      "cut_frames": 0,
+      "colour_captures": 40,
+      "maximum_channel_error": 0,
+      "vkcube_restarts": 100,
+      "all_restart_exit_codes": 0,
+      "soak": {
+        "seconds_requested": 1800,
+        "seconds_completed": 1800.0007421359187,
+        "wall_seconds_completed": 1801.4479739665985,
+        "samples": 59,
+        "completed": true,
+        "isolation_ok": true,
+        "crash_log_bytes": 0,
+        "crash_reader_errors_bytes": 0,
+        "battery_successful_readings": 58,
+        "battery_failed_readings": 1,
+        "battery_temperature_celsius": 33.1,
+        "minimum_mem_available_kib": 5336640
+      }
+    },
+    "remaining": [
+      "No nonzero unpatched hardware negative control",
+      "CPU/throughput tradeoff prevents default promotion",
+      "GLibc runtime qualification",
+      "Installed-desktop qualification"
+    ],
+    "default": "MIT-SHM unchanged"
+  }
+}

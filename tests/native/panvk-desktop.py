@@ -547,7 +547,7 @@ print("GHOSTTY INPUT PASS", phase, flush=True)
             stop(app)
             cube = start([str(args.vkcube or HOME / 'gpu-x1s/root/data/data/com.termux/files/usr/bin/vkcube'),
                           '--wsi', 'xcb', '--present_mode', '2'], 'soak-cube')
-            gears = start(['glxgears', '-geometry', '400x400+30+60'], 'soak-gears')
+            gears = start(['stdbuf', '-oL', 'glxgears', '-geometry', '400x400+30+60'], 'soak-gears')
             time.sleep(3)
             windows = run(['xdotool', 'search', '--onlyvisible', '--name', 'vkcube'],
                           capture_output=True, text=True).stdout.split()
@@ -562,6 +562,7 @@ print("GHOSTTY INPUT PASS", phase, flush=True)
             begin_wall = time.time()
             result['soak']['wall_time_started'] = begin_wall
             index = 0
+            gears_log_offset = 0
             while time.monotonic() - begin < args.soak_seconds:
                 check_displays()
                 for name, proc in (('shell', shell), ('cube', cube), ('gears', gears)):
@@ -572,6 +573,17 @@ print("GHOSTTY INPUT PASS", phase, flush=True)
                 elapsed = time.monotonic() - begin
                 sample = {**resources(include_battery=True), 'elapsed': elapsed, 'processes': {name: audit(proc.pid) for name, proc in
                           (('shell', shell), ('cube', cube), ('gears', gears))}}
+                gears_log = (out / 'soak-gears.log').read_bytes()
+                sample['gears_reported_fps'] = [float(fps) for fps in re.findall(
+                    r'=\s*([\d.]+) FPS', gears_log[gears_log_offset:].decode(errors='replace'))]
+                gears_log_offset = len(gears_log)
+                if result['soak']['samples']:
+                    previous = result['soak']['samples'][-1]
+                    if (not sample['gears_reported_fps'] or
+                            not all(fps > 0 for fps in sample['gears_reported_fps']) or
+                            sample['processes']['cube']['cpu_ticks'] <= previous['processes']['cube']['cpu_ticks']):
+                        result['soak']['stalled_sample'] = sample
+                        raise RuntimeError('Soak rendering stopped advancing')
                 path = out / f'soak-{index:03d}.png'
                 screenshot(path)
                 sample['capture'] = path.name

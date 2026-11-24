@@ -1,0 +1,25 @@
+--- a/src/gallium/frontends/va/tva_bridge.c
++++ b/src/gallium/frontends/va/tva_bridge.c
+@@ -3727,8 +3727,12 @@
+      * this dependency for us. */
+     if (c->encoder && picture && picture->in_fence) {
+         struct tva_fence *fence = (struct tva_fence *)picture->in_fence;
++        /* softpipe represents an already-complete pipe fence as (void *)1.
++         * Opaque native fences need not point to readable memory. */
++        bool video_fence = (uintptr_t)picture->in_fence > 4095 &&
++                           fence->magic == TVA_FENCE_MAGIC;
+         bool ready;
+-        if (fence->magic == TVA_FENCE_MAGIC && fence->codec) {
++        if (video_fence && fence->codec) {
+             ready = tva_codec_fence_wait(&fence->codec->base,
+                                          picture->in_fence, UINT64_MAX);
+         } else {
+@@ -3738,7 +3742,7 @@
+         }
+         TVA_TRACE("encode input fence=%p kind=%s ready=%d",
+                   (void *)picture->in_fence,
+-                  fence->magic == TVA_FENCE_MAGIC ? "tva" : "pipe",
++                  video_fence ? "tva" : "pipe",
+                   ready);
+         if (!ready) {
+             TVA_TRACE("encode input fence wait failed");

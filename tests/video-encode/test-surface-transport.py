@@ -78,7 +78,8 @@ def rec(s,n):
  return data
 def session(cid,w,h):
  s=socket.socket(socket.AF_UNIX);s.settimeout(20);s.connect(str(out/'daemon.sock'))
- words=[0x444d4400,3,cid,w,h,2]
+ # Encoders tag BT.709 limited range: the daemon keeps untagged input on copy.
+ words=[0x444d4400,3,cid,w,h,2|(0x80000000|1<<22|1<<14|1<<6 if cid in (5,6,8,9,10) else 0)]
  if cid in (5,6,8,9,10):words += [40000000,60,1]
  s.sendall(struct.pack('!%dI'%len(words),*words));status,mode,namelen=struct.unpack('!3I',rec(s,12));rec(s,(16 if namelen>>31 else 0)+(namelen&0x7fffffff));assert (status,mode)==(0,2),(status,mode)
  return s

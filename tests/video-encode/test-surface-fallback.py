@@ -20,14 +20,19 @@ def receive(sock, count):
     return result
 
 
-def negotiate(endpoint, codec, requested, full_range=False):
+BT709_LIMITED = 0x80000000 | (1 << 22) | (1 << 14) | (1 << 6)
+
+
+def negotiate(endpoint, codec, requested, full_range=False, colour=0):
     with socket.socket(socket.AF_UNIX) as sock:
         sock.settimeout(10)
         sock.connect(str(endpoint))
         if codec == 5 and full_range:
             requested |= 0xC0000000 | (1 << 22) | (13 << 14) | (1 << 6)
+        if codec in (5, 8, 9, 10):
+            requested |= colour
         words = [0x444D4400, 3, codec, 3840, 2160, requested]
-        if codec in (5, 8):
+        if codec in (5, 8, 9, 10):
             words += [40_000_000, 60, 1]
         sock.sendall(struct.pack(f'!{len(words)}I', *words))
         status, mode, length = struct.unpack('!3I', receive(sock, 12))
@@ -77,6 +82,9 @@ def main():
         ('legacy-client', {}, 0, [5, 0], [0, 0], both),
         ('full-range', {}, 2, [5, 0], [0, 2], both),
         ('untagged-baseline', {}, 2, [8, 0], [0, 2], both),
+        # Every untagged encoder keeps copy input; tagged BT.709 uses the surface.
+        ('untagged-high', {}, 2, [10, 0], [0, 2], both),
+        ('tagged-high', {}, 2, [10, 0], [2, 2], both),
     ]
     for name, options, requested, codecs, expected, proofs in cases:
         endpoint = args.out.resolve() / f'{name}.sock'
@@ -96,7 +104,8 @@ def main():
                         break
                     assert proc.poll() is None, logfile.read_text()
                     time.sleep(.1)
-                actual = [negotiate(endpoint, codec, requested, name == 'full-range') for codec in codecs]
+                colour = BT709_LIMITED if name in ('qualified', 'bad-import', 'tagged-high') else 0
+                actual = [negotiate(endpoint, codec, requested, name == 'full-range', colour) for codec in codecs]
                 assert actual == expected, (name, actual, expected)
             finally:
                 proc.terminate()

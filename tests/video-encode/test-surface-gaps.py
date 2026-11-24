@@ -113,14 +113,20 @@ class Daemon:
 DECODE_CASES = [
     # name, codec id, encoder, visible size, session size the VA client opens
     ('h264-160x90', 0, ['libx264', '-bf', '0', '-g', '10'], (160, 90), (160, 96)),
-    ('vp9-161x95', 2, ['libvpx-vp9', '-auto-alt-ref', '0', '-lag-in-frames', '0', '-g', '10'],
-     (161, 95), (162, 96)),
+    ('vp9-161x97', 2, ['libvpx-vp9', '-auto-alt-ref', '0', '-lag-in-frames', '0', '-g', '10'],
+     (161, 97), (162, 98)),
     ('vp8-161x95', 3, ['libvpx', '-auto-alt-ref', '0', '-lag-in-frames', '0', '-g', '10'],
      (161, 95), (162, 96)),
     # Unchanged path: an ordinary even picture larger than the minimum.
     ('h264-640x360', 0, ['libx264', '-bf', '0', '-g', '10'], (640, 360), (640, 368)),
 ]
 DECODE_FRAMES = 30
+# Snapdragon 855's VP9 decoder rejects pictures under 96 lines in either
+# transport (MediaCodec error -10000 before any output). The fd transport
+# must fail or succeed exactly as copy does there, not differently.
+SAME_AS_COPY = [('vp9-161x95', 2, ['libvpx-vp9', '-auto-alt-ref', '0', '-lag-in-frames', '0', '-g', '10'],
+                 (161, 95), (162, 96))]
+FMTDESC, SHMFRAME, CAP_FRAME_PTS = 0xFFFFFFFF, 0xFFFFFFFE, 1
 
 
 def h264_units(data):
@@ -154,6 +160,75 @@ def ivf_units(data):
         units.append(('picture', data[offset + 12:offset + 12 + size]))
         offset += 12 + size
     return units
+
+
+def make_clip(out, name, codec, encoder, visible):
+    vw, vh = visible
+    source = out / f'{name}.{"h264" if codec == 0 else "ivf"}'
+    if not source.exists():
+        oracle.run(['ffmpeg', '-v', 'error', '-y', '-f', 'lavfi', '-i',
+                    f'testsrc2=size={(vw + 15) // 16 * 16}x{(vh + 15) // 16 * 16}:rate=30',
+                    '-vf', f'crop={vw}:{vh}:0:0:exact=1', '-frames:v', DECODE_FRAMES, '-pix_fmt', 'yuv420p',
+                    '-c:v', *encoder, '-f', 'h264' if codec == 0 else 'ivf', source])
+    data = source.read_bytes()
+    return source, h264_units(data) if codec == 0 else ivf_units(data)
+
+
+def inline_frames(daemon, codec, session_size, units, pictures):
+    """Pictures the copy transport returns for the same units."""
+    sock, mode = daemon.connect([MAGIC, VERSION, codec, *session_size, 0])
+    caps, frames = 0, 0
+    try:
+        for _, unit in units:
+            sock.sendall(struct.pack('!I', len(unit)) + unit)
+        sock.sendall(b'\0' * 4)
+        while frames < pictures:
+            width, height, size = struct.unpack('!3I', receive(sock, 12))
+            if size == FMTDESC:
+                caps = height
+                receive(sock, 32)
+                continue
+            if caps & CAP_FRAME_PTS:
+                receive(sock, 4)
+            receive(sock, size)
+            frames += 1
+    except (EOFError, OSError):
+        pass
+    finally:
+        sock.close()
+    return mode, frames
+
+
+def dmabuf_frames(daemon, codec, session_size, units, pictures):
+    sock, mode = daemon.connect([MAGIC, VERSION, codec, *session_size, 2])
+    frames = 0
+    try:
+        for _, unit in units:
+            sock.sendall(struct.pack('!I', len(unit)) + unit)
+        sock.sendall(b'\0' * 4)
+        while frames < pictures:
+            _, _, kind, _ = struct.unpack('!4I', receive(sock, 16))
+            _, ancillary, _, _ = sock.recvmsg(1, socket.CMSG_SPACE(4))
+            for level, kind_, content in ancillary:
+                if level == socket.SOL_SOCKET and kind_ == socket.SCM_RIGHTS:
+                    for fd in array.array('i', content):
+                        os.close(fd)
+            receive(sock, 32)
+            frames += 1
+    except (EOFError, OSError):
+        pass
+    finally:
+        sock.close()
+    return mode, frames
+
+
+def same_as_copy_case(daemon, out, name, codec, encoder, visible, session_size):
+    _, units = make_clip(out, name, codec, encoder, visible)
+    pictures = sum(kind == 'picture' for kind, _ in units)
+    copy_mode, copy_frames = inline_frames(daemon, codec, session_size, units, pictures)
+    fd_mode, fd_frames = dmabuf_frames(daemon, codec, session_size, units, pictures)
+    check(f'{name} fd transport matches the copy outcome', copy_mode == 0 and fd_mode == 2 and
+          fd_frames == copy_frames, f'copy {copy_frames}/{pictures} frames, fd {fd_frames}/{pictures}')
 
 
 def decode_case(daemon, out, name, codec, encoder, visible, session_size):
@@ -235,9 +310,9 @@ def run_decode(args):
     daemon = Daemon(args.daemon, out)
     try:
         log = daemon.log_path.read_text()
-        for case in DECODE_CASES:
+        for runner, case in [(decode_case, c) for c in DECODE_CASES] + [(same_as_copy_case, c) for c in SAME_AS_COPY]:
             try:
-                decode_case(daemon, out, *case)
+                runner(daemon, out, *case)
             except Exception as error:  # a crashed session is a failed case
                 check(f'{case[0]} session', False, f'{type(error).__name__}: {error}')
             if daemon.proc.poll() is not None:
@@ -255,15 +330,20 @@ def run_decode(args):
 # ---------------------------------------------------------------- colour
 
 WIDTH, HEIGHT, COLOUR_FRAMES = 640, 384, 8
-ENCODERS = [(5, 'h264', 'default'), (8, 'h264', 'baseline'), (9, 'h264', 'main'),
-            (10, 'h264', 'high'), (6, 'hevc', 'main')]
+ENCODERS = [(5, 'h264', 'h264-default'), (8, 'h264', 'h264-baseline'), (9, 'h264', 'h264-main'),
+            (10, 'h264', 'h264-high'), (6, 'hevc', 'hevc-main')]
 # name, source matrix, full range, transport-word colour bits
 TAGS = [('untagged', 'bt601', False, 0),
         ('bt709-limited', 'bt709', False, ENC_XFER_COLOR | (1 << 22) | (1 << 14) | (1 << 6)),
         ('bt709-full', 'bt709', True,
          ENC_XFER_COLOR | ENC_XFER_FULL_RANGE | (1 << 22) | (1 << 14) | (1 << 6))]
-# The daemon keeps these on copy after browser colour failures.
-KNOWN_BAD = {('baseline', 'untagged')} | {(name, 'bt709-full') for _, _, name in ENCODERS}
+# The daemon keeps these on copy: full range failed browser colour checks,
+# untagged Baseline failed them too, and this test measured every other
+# untagged profile 24 codes off through the surface (2026-11-24).
+KNOWN_BAD = {(name, tag) for _, _, name in ENCODERS for tag in ('untagged', 'bt709-full')}
+# BT.709 and SMPTE 170M transfer functions are the same curve, and decoding to
+# RGB ignores the transfer: compare the fields that change the picture.
+SIGNALLED = ('color_range', 'color_space', 'color_primaries')
 
 
 class Gralloc:
@@ -375,7 +455,7 @@ def colour_run(args, out, env, label):
                 row['same'] = (surface['mode'] == 2 and copy['worst'] is not None and
                                surface['worst'] is not None and
                                surface['worst'] <= copy['worst'] + COLOUR_MARGIN and
-                               surface['signalled'] == copy['signalled'])
+                               all(surface['signalled'].get(k) == copy['signalled'].get(k) for k in SIGNALLED))
                 row['summary'] = summary
                 print(f'{label} {profile} {tag}: {summary}', flush=True)
     finally:

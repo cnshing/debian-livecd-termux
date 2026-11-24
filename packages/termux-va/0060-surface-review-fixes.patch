@@ -9,7 +9,7 @@
  #include "tva_fd.h"
  #include <linux/dma-buf.h>
  #include <sys/ioctl.h>
-@@ -802,13 +802,19 @@ static int do_handshake(Session *s)
+@@ -802,18 +802,27 @@ static int do_handshake(Session *s)
       * carries the abstract socket name.  The daemon picks the name - the
       * client cannot know it is connection #N, and guessing would collide. */
      XferMode want = XFER_INLINE;
@@ -31,9 +31,21 @@
 +     * excluded combinations. Never set by the desktop session. */
 +    int surface_range_ok = getenv("TVA_TEST_SURFACE_ANY_COLOUR") || !s->encoder ||
          (!(s->enc_color & ENC_XFER_FULL_RANGE) &&
-          /* Firefox WebCodecs supplies untagged constrained-baseline input.
-           * It fails surface colour checks (22 codes vs 4 with copy input),
-@@ -1651,15 +1657,28 @@ static int decoder_surface_frame(Session *s, uint32_t pts)
+-         /* Firefox WebCodecs supplies untagged constrained-baseline input.
+-          * It fails surface colour checks (22 codes vs 4 with copy input),
+-          * so this unqualified combination also retains ByteBuffer input. */
+-         !(s->codec_id == CODEC_H264_BASELINE_ENC && !s->enc_color));
++         /* Untagged input keeps ByteBuffer input for every profile. Firefox
++          * WebCodecs' untagged Baseline failed browser colour checks (22
++          * codes vs 4 with copy), and test-surface-gaps.py measured the same
++          * for untagged default, Main and High H.264 and HEVC: the surface
++          * encoder signals BT.709 and decodes 24 codes off, copy decodes 1
++          * off with unspecified colour (2026-11-24). */
++         (s->enc_color & ENC_XFER_COLOR));
+     if (!surface_range_ok && xfer == XFER_DMABUF)
+         dlog(1, "[%d] unqualified encoder colour uses copy transport", s->id);
+     if (xfer == XFER_DMABUF && qualified && surface_range_ok &&
+@@ -1651,15 +1660,28 @@ static int decoder_surface_frame(Session *s, uint32_t pts)
          timestamp / (1000 * PTS_UNIT_SCALE) != pts) goto out;
      z.AHardwareBuffer_describe(source, &desc);
      int width=crop.right-crop.left, height=crop.bottom-crop.top;
@@ -68,7 +80,7 @@
                              output.uv_offset, output.size, 0, 0};
      for (int i=0; i<8; i++) metadata[i]=htonl(metadata[i]);
      const YuvNativeHandle *handle = z.handle(output.buffer);
-@@ -2655,8 +2674,10 @@ static int encoder_surface_frame(Session *s, const uint8_t *raw, uint32_t size,
+@@ -2655,8 +2677,10 @@ static int encoder_surface_frame(Session *s, const uint8_t *raw, uint32_t size,
              struct dma_buf_sync sync={.flags=DMA_BUF_SYNC_START|DMA_BUF_SYNC_READ};
              size_t packed_size=(size_t)s->w*s->h*3/2;
              uint8_t *packed=malloc(packed_size);
@@ -81,7 +93,7 @@
              for (int row=0;row<s->h;row++)
                  memcpy(packed+row*s->w,map+(m[7]+row)*m[3]+m[6],s->w);
              for (int row=0;row<s->h/2;row++)
-@@ -2665,9 +2686,9 @@ static int encoder_surface_frame(Session *s, const uint8_t *raw, uint32_t size,
+@@ -2665,9 +2689,9 @@ static int encoder_surface_frame(Session *s, const uint8_t *raw, uint32_t size,
              sync.flags=DMA_BUF_SYNC_END|DMA_BUF_SYNC_READ;
              int end=ioctl(fd,DMA_BUF_IOCTL_SYNC,&sync);
              munmap(map,m[5]);
@@ -93,7 +105,7 @@
          }
          if ((metadata[6] | metadata[7]) & 1 ||
              metadata[6] > metadata[1] || metadata[7] > metadata[2] ||
-@@ -3273,9 +3294,15 @@ int main(int argc, char **argv)
+@@ -3273,9 +3297,15 @@ int main(int argc, char **argv)
      if (!surface_option || strcmp(surface_option,"0")) {
          surface_avc=surface_codec_probe("video/avc");
          surface_hevc=surface_codec_probe("video/hevc");

@@ -1,0 +1,51 @@
+wsi: let the X11 AHB swapchain prove its buffers' linear layout.
+
+Turnip imports an AHB into a dedicated image through vk_android_get_ahb_layout.
+On the Note10+ (Android 11) no gralloc mapper is reachable from an app
+namespace, so that fails with VK_ERROR_INVALID_EXTERNAL_HANDLE unless the
+driver owns the buffer and vk_android_probe_linear_ahb may test it. The AHB WSI
+allocated the buffer a moment earlier and nothing else holds it yet, so mark it
+owned around the import. The probe also accepts B8G8R8A8 (AHB format 5), the
+only format the X11 AHB WSI offers; its corner-cookie test is the same for any
+32-bit pixel. Anything that does not read back linearly is still refused.
+
+diff --git a/src/vulkan/runtime/vk_android.c b/src/vulkan/runtime/vk_android.c
+index 97637ed..958e45e 100644
+--- a/src/vulkan/runtime/vk_android.c
++++ b/src/vulkan/runtime/vk_android.c
+@@ -712,7 +712,8 @@ vk_android_probe_linear_ahb(struct AHardwareBuffer *ahb,
+    if (!h || h->numFds < 1 || max_planes < 1 || d->layers != 1 ||
+        !d->width || !d->height || d->stride < d->width ||
+        (d->format != AHARDWAREBUFFER_FORMAT_R8G8B8A8_UNORM &&
+-        d->format != AHARDWAREBUFFER_FORMAT_R8G8B8X8_UNORM) ||
++        d->format != AHARDWAREBUFFER_FORMAT_R8G8B8X8_UNORM &&
++        d->format != 5 /* B8G8R8A8, the X11 AHB WSI's format */) ||
+        !(d->usage & AHARDWAREBUFFER_USAGE_CPU_READ_MASK)) {
+       why = "unsupported desc";
+       goto done;
+diff --git a/src/vulkan/wsi/wsi_common.c b/src/vulkan/wsi/wsi_common.c
+index a30f093..633ee90 100644
+--- a/src/vulkan/wsi/wsi_common.c
++++ b/src/vulkan/wsi/wsi_common.c
+@@ -26,6 +26,7 @@
+ #ifdef VK_USE_PLATFORM_ANDROID_KHR
+ #include <android/native_window.h>
+ #include <android/hardware_buffer.h>
++#include "vk_android.h"
+ #endif
+ #include "util/u_debug.h"
+ #include "util/log.h"
+@@ -531,8 +532,13 @@ wsi_create_ahb_image_mem(const struct wsi_swapchain *chain,
+       .allocationSize = props.allocationSize,
+       .memoryTypeIndex = memory_type,
+    };
++   /* The buffer was allocated just above and holds no contents yet: drivers
++    * with no reachable gralloc mapper may prove its linear layout by writing
++    * to it (vk_android_probe_linear_ahb). */
++   vk_android_set_owned_ahb(image->ahb);
+    result = wsi->AllocateMemory(chain->device, &alloc, &chain->alloc,
+                                 &image->memory);
++   vk_android_set_owned_ahb(NULL);
+    if (result != VK_SUCCESS)
+       return result;
+    image->num_planes = 1;

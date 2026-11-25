@@ -725,6 +725,9 @@ def parent(args):
     # finds Termux libraries; keep only the private GNOME and X11 paths here.
     env['LD_LIBRARY_PATH'] = ':'.join([*([] if args.no_xlibs or args.integrated else [str(PAN / 'android/xlibs')]), *(
         p for p in env['LD_LIBRARY_PATH'].split(':') if p != os.environ['PREFIX'] + '/lib')])
+    if args.driver and (args.driver.parent / 'x11').is_dir():
+        # Zenith-built Android drivers dlopen versioned X11 sonames (see the PanVK package).
+        env['LD_LIBRARY_PATH'] = str(args.driver.resolve().parent / 'x11') + ':' + env['LD_LIBRARY_PATH']
     if args.mesa_lib_dir:
         libraries = args.mesa_lib_dir.resolve(strict=True)
         env['LD_LIBRARY_PATH'] = str(libraries) + ':' + env['LD_LIBRARY_PATH']
@@ -735,8 +738,12 @@ def parent(args):
             {'PANVK_KBASE_DRI3': env.get('PANVK_KBASE_DRI3')}) + '\n')
     else:
         env.pop('PANVK_KBASE_DRI3', None)
+        env.pop('TU_KGSL_DRI3', None)
     if args.mode in ('raw', 'ahb'):
         env['PANVK_KBASE_DRI3'] = args.mode
+    if args.mode == 'ahb':
+        # Turnip's equivalent; each driver ignores the other's switch.
+        env['TU_KGSL_DRI3'] = 'ahb'
     if args.present_mode:
         env['MESA_VK_WSI_PRESENT_MODE'] = args.present_mode
     if args.wsi_debug:
@@ -766,6 +773,7 @@ def parent(args):
     env['DISPLAY'] = ':' + str(display)
     server_env = apply_renderer(env.copy(), 'software')
     server_env.pop('PANVK_KBASE_DRI3', None)
+    server_env.pop('TU_KGSL_DRI3', None)
     # Keep the control independent of the caller's environment.
     env.pop('TERMUX_X11_FORCE_FLIP', None)
     server_env.pop('TERMUX_X11_FORCE_FLIP', None)

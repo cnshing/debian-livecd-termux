@@ -92,6 +92,52 @@ class Graphics(unittest.TestCase):
         with mock.patch.object(graphics, 'qualified_mali', return_value=True):
             self.assertTrue(graphics.qualified_desktop_stack())
 
+    def write_source(self, tree):
+        manifest = self.prefix / 'share/doc/mesa-vulkan-icd-panvk-kbase/SOURCE.json'
+        manifest.parent.mkdir(parents=True, exist_ok=True)
+        manifest.write_text(json.dumps({'variant': 'combined-ahb', 'mesa_tree': tree}))
+
+    def session(self, config=None):
+        home = self.root / 'home'
+        if config is not None:
+            (home / '.local/lib/livecd').mkdir(parents=True, exist_ok=True)
+            (home / '.local/lib/livecd/config.json').write_text(json.dumps(config))
+        with mock.patch.object(graphics.Path, 'home', return_value=home), \
+                mock.patch.object(graphics, 'qualified_mali', return_value=True):
+            return graphics.session_presentation(graphics.apply_renderer({'PANVK_KBASE_DRI3': 'raw'}, 'zink'))
+
+    def test_ahb_tree_opts_only_the_desktop_session_into_ahb(self):
+        self.install_panvk()
+        ahb = next(t for t, enabled in graphics.QUALIFIED_TREES.items() if enabled)
+        self.write_source(ahb)
+        env = self.session()
+        self.assertEqual(env['PANVK_KBASE_DRI3'], 'ahb')
+        self.assertEqual((env['PANVK_G77_LWG'], env['PANVK_G77_NESTED']), ('1', '1'))
+        # A browser launcher reapplies the ICD: it keeps MIT-SHM, whatever it inherits.
+        with mock.patch.object(graphics, 'qualified_mali', return_value=True):
+            graphics.use_panvk(env, 'bionic')
+        self.assertNotIn('PANVK_KBASE_DRI3', env)
+        self.assertNotIn('PANVK_KBASE_DRI3', self.session({'panvk_presentation': 'shm'}))
+
+    def test_shm_tree_unqualified_tree_and_turnip_keep_shm(self):
+        self.install_panvk()
+        self.write_source('b28956ffc095bda26bf8241badba014be178536b')
+        env = self.session()
+        self.assertNotIn('PANVK_KBASE_DRI3', env)
+        self.assertEqual(env['PANVK_G77_LWG'], '1')
+        self.write_source('0' * 40)
+        self.assertNotIn('PANVK_KBASE_DRI3', self.session())
+        self.assertNotIn('PANVK_G77_LWG', self.session())
+        env = graphics.session_presentation({'LIVECD_NATIVE_VULKAN_DRIVER': 'turnip'})
+        self.assertNotIn('PANVK_KBASE_DRI3', env)
+
+    def test_glibc_never_receives_ahb(self):
+        icd = self.panvk / 'glibc/panfrost_icd.json'
+        self.manifest(icd, icd.parent / 'libvulkan_panfrost.so')
+        env = {'PANVK_KBASE_DRI3': 'ahb'}
+        graphics.use_panvk(env, 'glibc')
+        self.assertNotIn('PANVK_KBASE_DRI3', env)
+
     def test_missing_or_outside_package_library_is_rejected(self):
         icd = self.install_panvk()
         for library in (icd.parent / 'missing.so', self.root / 'outside.so'):

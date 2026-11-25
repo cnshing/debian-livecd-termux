@@ -16,7 +16,7 @@ import tempfile
 import time
 import uuid
 
-from graphics import apply_renderer, legacy_drawing, preferred_renderer
+from graphics import apply_renderer, legacy_drawing, preferred_renderer, session_presentation
 from terminal import environment as terminal_environment
 from terminal import command as ghostty_command
 from integrations import Integrations
@@ -114,7 +114,7 @@ def environment(renderer='software'):
         env['LD_PRELOAD'] = ':'.join(preload)
     else:
         env.pop('LD_PRELOAD', None)
-    return apply_renderer(env, renderer)
+    return session_presentation(apply_renderer(env, renderer))
 
 
 def acceleration_settings():
@@ -506,7 +506,7 @@ def run(safe, renderer='software'):
                         stopping = True
                         result = {'ok': True}
                     elif mode in ('termux', 'terminal'):
-                        terminal_env = apply_renderer(live_env.copy(), message['renderer']) if message.get('renderer') else live_env
+                        terminal_env = session_presentation(apply_renderer(live_env.copy(), message['renderer'])) if message.get('renderer') else live_env
                         child = launch_terminal(terminal_env, message.get('cwd', str(Path.home())), message.get('emulator', 'ghostty'))
                         children.append(child)
                         result = {'ok': True, 'pid': child.pid}

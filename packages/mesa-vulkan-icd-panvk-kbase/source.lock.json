@@ -1,15 +1,15 @@
 {
   "format": 1,
   "variant": "combined-ahb",
-  "release": "https://github.com/cnshing/debian-livecd-termux/releases/download/panvk-desktop-26.3.1-1",
-  "build_run": "https://github.com/cnshing/debian-livecd-termux/actions/runs/43695585757",
-  "build_commit": "32e7ebc21ae7c32acc1356c1cb420e99256b6fdf",
-  "bionic_build_run": "https://github.com/cnshing/debian-livecd-termux/actions/runs/43692804161",
-  "bionic_build_commit": "ee95158f279de84e0b60734074e4a1aeb61b4104",
+  "release": "https://github.com/cnshing/debian-livecd-termux/releases/download/panvk-desktop-26.3.1-2",
+  "build_run": "https://github.com/cnshing/debian-livecd-termux/actions/runs/45600751232",
+  "build_commit": "18a096987e4e4b17e0e3484979a18dfb691798aa",
+  "bionic_build_run": "https://github.com/cnshing/debian-livecd-termux/actions/runs/45600751232",
+  "bionic_build_commit": "18a096987e4e4b17e0e3484979a18dfb691798aa",
   "zenith_commit": "cf70e02b918e1864cbcd746a7fefa57b96c673ce",
   "mesa_base": "5a07217f034b3e50d8c7c7794f97a2df1742613b",
   "base_tree": "4a8e9a8cbb34b9fb91a9ad2040319aceb075b973",
-  "mesa_tree": "b28956ffc095bda26bf8241badba014be178536b",
+  "mesa_tree": "7c6284194b4a6a5df1575848aeeb7ec771fc82f7",
   "patch_level": "p0175",
   "driver_patches": [
     {
@@ -53,12 +53,24 @@
       "sha256": "b33b004a09c57c53a678271741c33967ca9350a6f92ba1ef1f01c873cf7144ef"
     },
     {
+      "file": "tools/panvk-probes/platform-patches/0003-wsi-x11-wait-for-fences-without-implicit-sync.patch",
+      "sha256": "e0b3f9ede1d3fe935473fc49e0dded1422e6a2c023d83f450a2c8838e887200f"
+    },
+    {
       "file": "tools/panvk-probes/workgroup-patches/0004-g77-experimental-opt-in-and-rejection.patch",
       "sha256": "efb4eeeb8e00ba5df60efa5c65c52eb8c5b7eeeb079acf9c86a21d6f1871b8e8"
     },
     {
+      "file": "tools/panvk-probes/platform-patches/0004-wsi-x11-termux-ahb.patch",
+      "sha256": "089002c5ff129b7127c70099cb60667be53a919252547c7515af9fb22d23829f"
+    },
+    {
       "file": "tools/panvk-probes/workgroup-patches/0005-mask-partial-subgroups.patch",
       "sha256": "39596945e8b5214555b8892237cc7e316a99d4dd6febb4f401eb6e263292c8f9"
+    },
+    {
+      "file": "tools/panvk-probes/platform-patches/0005-wsi-ahb-gpu-only-import.patch",
+      "sha256": "9e2439b7a2a4494b687476c5c75f521bef050d32cc35b1efbded528745c554a7"
     },
     {
       "file": "tools/panvk-probes/workgroup-patches/0006-key-caches-by-workgroup-mode.patch",
@@ -71,7 +83,7 @@
   ],
   "glibc_postprocess": "patchelf --set-rpath '$ORIGIN'",
   "source_archive": "prepared-source.tar.zst",
-  "source_sha256": "dfe43ef9b9914d51ac7ee845bd660301d39a3e8baa4cbb7ce466b5cb19c517f0",
-  "bionic_sha256": "134b668a988626a64f01ce8f1c93307a439cf208e47d775a17a42b60358c5758",
-  "glibc_sha256": "64f5516f608fa31db503e8c45f5442790d0afe1cf28ba2aa6a334030dd608b04"
+  "source_sha256": "544a20843b47a916c3d86cdab58288fd6043716b6b5dde1a331e9a34b70a4faa",
+  "bionic_sha256": "0d83ff81440666c7896b2239a32544171c569d014262496010706ca49a0ab881",
+  "glibc_sha256": "0251cd6478e9f77448d5aa089d383af15bf022d209dd43200d2113bb3abc2aad"
 }

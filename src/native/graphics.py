@@ -22,15 +22,49 @@ def panvk(abi):
     return icd if icd.is_file() and mali_usable() else None
 
 
-def qualified_desktop_stack():
+# Qualified PanVK desktop builds by Mesa content tree, and whether each presents through
+# Android hardware buffers (PANVK_KBASE_DRI3=ahb) rather than MIT-SHM.
+QUALIFIED_TREES = {
+    'b28956ffc095bda26bf8241badba014be178536b': False,
+    '7c6284194b4a6a5df1575848aeeb7ec771fc82f7': True,
+}
+
+
+def desktop_tree():
     if not qualified_mali():
-        return False
+        return None
     try:
         manifest = json.loads((PREFIX / 'share/doc/mesa-vulkan-icd-panvk-kbase/SOURCE.json').read_text())
-        return (manifest.get('variant') == 'combined-ahb' and
-                manifest.get('mesa_tree') == 'b28956ffc095bda26bf8241badba014be178536b')
     except (OSError, ValueError):
+        return None
+    if not isinstance(manifest, dict) or manifest.get('variant') != 'combined-ahb':
+        return None
+    tree = manifest.get('mesa_tree')
+    return tree if tree in QUALIFIED_TREES else None
+
+
+def qualified_desktop_stack():
+    return desktop_tree() is not None
+
+
+def ahb_presentation():
+    """Whether the installed Bionic PanVK presents through AHBs, unless the user chose MIT-SHM."""
+    tree = desktop_tree()
+    if not tree or not QUALIFIED_TREES[tree]:
         return False
+    path = Path.home() / '.local/lib/livecd/config.json'
+    try:
+        config = json.loads(path.read_text()) if path.exists() else {}
+    except (OSError, ValueError):
+        config = {}
+    return config.get('panvk_presentation', 'ahb') != 'shm'
+
+
+def session_presentation(env):
+    """AHB presentation needs Termux:X11's socket import, so only the session on its display gets it."""
+    if env.get('LIVECD_NATIVE_VULKAN_DRIVER') == 'panvk' and ahb_presentation():
+        env['PANVK_KBASE_DRI3'] = 'ahb'
+    return env
 
 
 def use_panvk(env, abi):
@@ -40,6 +74,9 @@ def use_panvk(env, abi):
         raise RuntimeError('Install mesa-vulkan-icd-panvk-kbase and check access to /dev/mali0')
     icd_library(icd, PANVK / abi)
     env.update(VK_DRIVER_FILES=str(icd), VK_ICD_FILENAMES=str(icd))
+    # Browsers keep their qualified MIT-SHM presentation, and the glibc build has no
+    # Android WSI at all; session_presentation opts the desktop session in afterwards.
+    env.pop('PANVK_KBASE_DRI3', None)
     if qualified_desktop_stack():
         env.setdefault('PANVK_G77_LWG', '1')
         env.setdefault('PANVK_G77_NESTED', env['PANVK_G77_LWG'])
@@ -75,7 +112,8 @@ def zink_driver():
 
 
 def legacy_drawing(renderer):
-    # PanVK's accepted desktop transport is MIT-SHM. Raw DRI3 remains a probe.
+    # Termux:X11 still samples flipped AHB frames on the GPU in legacy drawing; only the
+    # fd-backed root is uploaded. PanVK uses MIT-SHM or AHB presentation, never raw DRI3.
     return renderer == 'software' or zink_driver() == 'panvk'
 
 

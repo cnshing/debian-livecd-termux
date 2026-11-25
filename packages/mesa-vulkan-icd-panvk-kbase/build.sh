@@ -3,9 +3,9 @@ TERMUX_PKG_DESCRIPTION="Mesa PanVK Vulkan driver for Mali GPUs through Android's
 TERMUX_PKG_LICENSE="custom"
 TERMUX_PKG_LICENSE_FILE="COPYRIGHTS"
 TERMUX_PKG_MAINTAINER="@cnshing"
-# Source-built p0175 plus the qualified desktop patch series.
+# Source-built p0175 plus the qualified desktop patch series, with AHB presentation (patches 0004–0005).
 TERMUX_PKG_VERSION="26.3.1"
-TERMUX_PKG_REVISION=1
+TERMUX_PKG_REVISION=2
 TERMUX_PKG_EXCLUDED_ARCHES="arm, i686, x86_64"
 TERMUX_PKG_SKIP_SRC_EXTRACT=true
 TERMUX_PKG_BUILD_IN_SRC=true

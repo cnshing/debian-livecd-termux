@@ -1,0 +1,50 @@
+turnip/wsi: present to Termux:X11 through Android hardware buffers (opt-in).
+
+TU_KGSL_DRI3=ahb sets wsi_device.x11.ahb on KGSL so the X11 WSI from
+0004-wsi-x11-termux-ahb.patch allocates CPU-usable AHBs, imports them as
+dedicated image memory and sends them over DRI3 modifier 1255. Termux:X11
+can flip those instead of mapping a raw dma-buf and copying it on the CPU.
+Non-Android builds refuse the option. Modifiers stay off in this mode, as
+for PanVK. The render-completion wait from 0003 still applies: KGSL attaches
+no implicit fences.
+
+--- a/src/freedreno/vulkan/tu_wsi.cc
++++ b/src/freedreno/vulkan/tu_wsi.cc
+@@ -14,6 +14,7 @@
+ #include "wsi_common_drm.h"
+ 
+ #include "tu_device.h"
++#include "tu_knl.h"
+ 
+ static VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL
+ tu_wsi_proc_addr(VkPhysicalDevice physicalDevice, const char *pName)
+@@ -38,6 +39,19 @@ tu_wsi_init(struct tu_physical_device *physical_device)
+ {
+    VkResult result;
+ 
++   /* TU_KGSL_DRI3=ahb presents to Termux:X11 through Android hardware buffers
++    * (DRI3 modifier 1255), which the server can flip without a CPU copy.  The
++    * X11 WSI then has no fallback, so callers enable it only for Termux:X11.
++    * KGSL only; the buffers need Android's allocator.
++    */
++   const char *dri3_option = getenv("TU_KGSL_DRI3");
++   const bool kgsl_ahb_dri3 = dri3_option && !strcmp(dri3_option, "ahb") &&
++      !strcmp(physical_device->instance->knl->name, "kgsl");
++#ifndef VK_USE_PLATFORM_ANDROID_KHR
++   if (kgsl_ahb_dri3)
++      return VK_ERROR_FEATURE_NOT_PRESENT;
++#endif
++
+    const struct wsi_device_options options = { .sw_device = false };
+    result = wsi_device_init(&physical_device->wsi_device,
+                             tu_physical_device_to_handle(physical_device),
+@@ -49,7 +63,8 @@ tu_wsi_init(struct tu_physical_device *physical_device)
+    if (result != VK_SUCCESS)
+       return result;
+ 
+-   physical_device->wsi_device.supports_modifiers = true;
++   physical_device->wsi_device.x11.ahb = kgsl_ahb_dri3;
++   physical_device->wsi_device.supports_modifiers = !kgsl_ahb_dri3;
+    physical_device->wsi_device.can_present_on_device =
+       tu_wsi_can_present_on_device;
+ 

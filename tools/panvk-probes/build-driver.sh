@@ -22,6 +22,11 @@ case "${PANVK_BUILD_VARIANT:-research}" in
     cp "$here/workgroup-patches/"*.patch "$here/budget-patches/"*.patch \
       "$here/ion-patches/"*.patch "$here/coherence-patches/"*.patch \
       "$here/driver-patches/0002-v9-per-vertex-point-size.patch" "$patch_dir/" ;;
+  # Turnip (Adreno/KGSL) from the same tree: the shared X11 WSI parts only (render
+  # wait 0003, AHB transport 0004) and Turnip's own opt-in switch.
+  turnip-ahb) patch_dir="$out/selected-patches"; mkdir -p "$patch_dir"
+    cp "$here/platform-patches/0003-"*.patch "$here/platform-patches/0004-"*.patch \
+      "$here/turnip-patches/"*.patch "$patch_dir/" ;;
   *) echo 'Unknown PANVK_BUILD_VARIANT' >&2; exit 1 ;;
 esac
 if [[ "${PANVK_BUILD_VARIANT:-research}" = combined-platform || "${PANVK_BUILD_VARIANT:-research}" = combined-ahb || "${PANVK_BUILD_VARIANT:-research}" = combined-ahb-trace ]]; then
@@ -32,6 +37,20 @@ if [ "${PANVK_BUILD_VARIANT:-research}" = combined-ahb-trace ]; then
 fi
 if [ "${PANVK_BUILD_VARIANT:-research}" = combined-ahb ]; then
   cp "$here/ahb-patches/"*.patch "$patch_dir/"
+fi
+lib=libvulkan_panfrost.so
+android_build="$zenith/scripts/build-android.sh"
+if [ "${PANVK_BUILD_VARIANT:-research}" = turnip-ahb ]; then
+  test "$kind" = android
+  # Zenith's Android+X11 build with Turnip in place of PanVK. msm keeps libdrm (static)
+  # and with it the DRI3 path that the same build uses when AHB is not requested.
+  lib=libvulkan_freedreno.so
+  android_build="$zenith/scripts/build-android-turnip.sh"
+  sed -e 's/-Dvulkan-drivers=panfrost -Dpanfrost-kmds=kbase/-Dvulkan-drivers=freedreno -Dfreedreno-kmds=msm,kgsl/' \
+      -e 's/libvulkan_panfrost\.so/libvulkan_freedreno.so/g' \
+      "$zenith/scripts/build-android.sh" > "$android_build"
+  grep -q 'freedreno-kmds=msm,kgsl' "$android_build"
+  ! grep -q panfrost "$android_build"
 fi
 mkdir -p "$out"
 mesa="$zenith/work/mesa"
@@ -55,7 +74,7 @@ if [ "$kind" = android ]; then
   # Host pkg-config paths otherwise override pkg_config_libdir in the cross file.
   unset PKG_CONFIG_PATH
   MESA="$mesa" BDIR="$zenith/build/android-ci" DDIR="$out" \
-    bash "$zenith/scripts/build-android.sh" --profile g615-v11-csf --api 29 \
+    bash "$android_build" --profile g615-v11-csf --api 29 \
       --ndk "${ANDROID_NDK_LATEST_HOME:-${ANDROID_NDK_HOME:?missing NDK}}"
 else
   test "$kind" = glibc
@@ -68,14 +87,14 @@ else
     -Degl=disabled -Dgles1=disabled -Dgles2=disabled -Dopengl=false \
     -Dglx=disabled -Dgbm=disabled -Dzstd=disabled -Dlibunwind=disabled
   ninja -j4 -C "$zenith/build/glibc-ci"
-  cp "$zenith/build/glibc-ci/src/panfrost/vulkan/libvulkan_panfrost.so" "$out/"
-  llvm-strip-18 "$out/libvulkan_panfrost.so"
+  cp "$zenith/build/glibc-ci/src/panfrost/vulkan/$lib" "$out/"
+  llvm-strip-18 "$out/$lib"
   # Runtime libraries come from the package's glibc/lib directory, selected by
   # BIONILUX_LIBRARY_PATH. A CI-only RUNPATH must never ship in a package.
-  patchelf --remove-rpath "$out/libvulkan_panfrost.so"
+  patchelf --remove-rpath "$out/$lib"
 fi
-readelf -d "$out/libvulkan_panfrost.so" > "$out/DYNAMIC.txt"
-readelf --version-info "$out/libvulkan_panfrost.so" > "$out/VERSIONS.txt"
+readelf -d "$out/$lib" > "$out/DYNAMIC.txt"
+readelf --version-info "$out/$lib" > "$out/VERSIONS.txt"
 cp "$zenith/work/ci-deps/PACKAGES.sha256" "$out/DEPENDENCIES.sha256"
 {
   echo "kind=$kind"
@@ -89,7 +108,7 @@ cp "$zenith/work/ci-deps/PACKAGES.sha256" "$out/DEPENDENCIES.sha256"
   fi
   dpkg-query -W llvm-18-dev libclang-18-dev libclc-18-dev libllvmspirvlib-18-dev spirv-tools
 } > "$out/BUILD.txt"
-(cd "$out" && sha256sum libvulkan_panfrost.so > SHA256SUMS)
+(cd "$out" && sha256sum $lib > SHA256SUMS)
 cat "$out/BUILD.txt" "$out/DYNAMIC.txt" "$out/SHA256SUMS"
 
 # A source-built baseline is the package qualification control. No driver
@@ -109,22 +128,22 @@ for patch in "$patch_dir"/*.patch; do
 done
 if [ "$kind" = android ]; then
   MESA="$mesa" BDIR="$zenith/build/android-ci" DDIR="$out/patched" \
-    bash "$zenith/scripts/build-android.sh" --profile g615-v11-csf --api 29 \
+    bash "$android_build" --profile g615-v11-csf --api 29 \
       --ndk "${ANDROID_NDK_LATEST_HOME:-${ANDROID_NDK_HOME:?missing NDK}}"
 else
   ninja -j4 -C "$zenith/build/glibc-ci"
-  cp "$zenith/build/glibc-ci/src/panfrost/vulkan/libvulkan_panfrost.so" "$out/patched/"
-  llvm-strip-18 "$out/patched/libvulkan_panfrost.so"
+  cp "$zenith/build/glibc-ci/src/panfrost/vulkan/$lib" "$out/patched/"
+  llvm-strip-18 "$out/patched/$lib"
   # The research artifact carries no CI build path in RUNPATH. Its runtime
   # dependencies are supplied privately beside it or via BIONILUX_LIBRARY_PATH.
-  patchelf --set-rpath '$ORIGIN' "$out/patched/libvulkan_panfrost.so"
+  patchelf --set-rpath '$ORIGIN' "$out/patched/$lib"
 fi
 if [ "${PANVK_KEEP_SYMBOLS:-0}" = 1 ]; then
   case "$kind" in
-    android) symbol_file=$(find "$zenith/build/android-ci" -name libvulkan_panfrost.so -print -quit) ;;
-    glibc) symbol_file="$zenith/build/glibc-ci/src/panfrost/vulkan/libvulkan_panfrost.so" ;;
+    android) symbol_file=$(find "$zenith/build/android-ci" -name $lib -print -quit) ;;
+    glibc) symbol_file="$zenith/build/glibc-ci/src/panfrost/vulkan/$lib" ;;
   esac
-  install -Dm644 "$symbol_file" "$out/patched/symbols/libvulkan_panfrost.so"
+  install -Dm644 "$symbol_file" "$out/patched/symbols/$lib"
 fi
 {
   echo "mesa-commit=$(git -C "$mesa" rev-parse HEAD)"
@@ -132,6 +151,6 @@ fi
   sha256sum "$patch_dir"/*.patch
   if [ "$kind" = glibc ]; then echo 'postprocess=patchelf --set-rpath $ORIGIN'; fi
 } > "$out/patched/PATCHES.txt"
-readelf -d "$out/patched/libvulkan_panfrost.so" > "$out/patched/DYNAMIC.txt"
-(cd "$out/patched" && sha256sum libvulkan_panfrost.so > SHA256SUMS)
+readelf -d "$out/patched/$lib" > "$out/patched/DYNAMIC.txt"
+(cd "$out/patched" && sha256sum $lib > SHA256SUMS)
 cat "$out/patched/PATCHES.txt" "$out/patched/DYNAMIC.txt" "$out/patched/SHA256SUMS"

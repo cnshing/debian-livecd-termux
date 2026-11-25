@@ -23,7 +23,10 @@ def check(folder, minimum=1800):
     assert 0 <= elapsed[0] <= 60, 'missing initial sample'
     assert all(0 < b - a <= 90 for a, b in zip(elapsed, elapsed[1:])), 'sample gap'
     assert 0 <= completed - elapsed[-1] <= 60, 'missing final sample'
-    driver = [p for p in result['shell']['libraries'] if p.endswith('/libvulkan_panfrost.so')]
+    library, device = next(((lib, dev) for lib, dev in (('/libvulkan_panfrost.so', '/dev/mali0'),
+                            ('/libvulkan_freedreno.so', '/dev/kgsl-3d0'))
+                            if any(p.endswith(lib) for p in result['shell']['libraries'])), (None, None))
+    driver = [p for p in result['shell']['libraries'] if library and p.endswith(library)]
     assert len(driver) == 1, 'ambiguous driver'
     identities, metrics = {}, {}
     for processes in [*(s['processes'] for s in samples), soak['final']]:
@@ -31,9 +34,9 @@ def check(folder, minimum=1800):
         for name, process in processes.items():
             pid = identities.setdefault(name, process['pid'])
             assert pid == process['pid'], name + ' restarted'
-            assert [p for p in process['libraries'] if p.endswith('/libvulkan_panfrost.so')] == driver, name + ' driver changed'
+            assert [p for p in process['libraries'] if p.endswith(library)] == driver, name + ' driver changed'
             assert not any('angle' in p.lower() for p in process['libraries']), name + ' loaded ANGLE'
-            assert any(d['target'] == '/dev/mali0' for d in process['devices']), name + ' lost Mali'
+            assert any(d['target'] == device for d in process['devices']), name + ' lost ' + device
             status = dict(line.split(':', 1) for line in process['status'].splitlines() if ':' in line)
             assert status['State'].strip()[0] not in 'ZTX', name + ' stopped'
             rss = int(status['VmRSS'].split()[0])

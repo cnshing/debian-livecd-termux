@@ -53,18 +53,30 @@ def check_capture(folder, capture, stale=False):
             'interior_pixels_checked': interior_pixels}
 
 
+GPUS = (('libvulkan_panfrost.so', '/dev/mali0', 'Mali-G77'),
+        ('libvulkan_freedreno.so', '/dev/kgsl-3d0', 'Adreno'))
+
+
+def gpu(process):
+    """PanVK on the S20, Turnip on the Note10+: whichever driver the Shell maps."""
+    found = [g for g in GPUS if any(g[0] in p for p in process['libraries'])]
+    assert len(found) == 1, 'Shell maps no single known Vulkan driver'
+    return found[0]
+
+
 def check(folder):
     r = json.loads((folder / 'result.json').read_text())
     assert r.get('completed'), r.get('error')
     assert json.loads((folder / 'isolation.json').read_text())['ok'], 'shared state changed'
     for name in ('nautilus', 'settings'):
         assert r[name]['window_found'], name + ' missing'
-    assert 'zink' in r['gtk_initial']['renderer'] and 'Mali-G77' in r['gtk_initial']['renderer']
+    library, device, renderer = gpu(r['shell'])
+    assert 'zink' in r['gtk_initial']['renderer'] and renderer in r['gtk_initial']['renderer']
     for name in ('shell', 'shell_end', 'gtk_process', 'gtk_end'):
         a = r[name]
-        assert any('libvulkan_panfrost.so' in p for p in a['libraries']), name + ' has no PanVK'
+        assert any(library in p for p in a['libraries']), name + ' has no ' + library
         assert not any('angle' in p.lower() for p in a['libraries']), name + ' loaded ANGLE'
-        assert any(d['target'] == '/dev/mali0' for d in a['devices']), name + ' has no Mali FD'
+        assert any(d['target'] == device for d in a['devices']), name + ' has no ' + device + ' FD'
     assert r['shell']['pid'] == r['shell_end']['pid'], 'shell restarted'
     checked = [check_capture(folder, c) for c in r['captures']]
     assert len(checked) >= 4

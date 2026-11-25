@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Record WebGL flips or ArcMenu clicks on an isolated PanVK GNOME display.
+"""Record WebGL flips or ArcMenu clicks on an isolated PanVK or Turnip GNOME display.
 
 Invoked by panvk-desktop.py, never against the user's display. Analyze recordings
 on the host with --check FILE. A frame containing both red and blue is unfinished.
@@ -148,8 +148,9 @@ def record(args):
         probe.wait_for(lambda: browser.evaluate('window.flip && flip.frames > 5'), 60, 'WebGL flips')
         identity = browser.evaluate('flip')
         result['webgl'] = identity
-        if 'Mali-G77' not in identity['renderer'] or 'SwiftShader' in identity['renderer']:
-            raise RuntimeError('WebGL is not running on Mali-G77: ' + str(identity))
+        if (not any(gpu in identity['renderer'] for gpu in ('Mali-G77', 'Adreno'))
+                or 'SwiftShader' in identity['renderer']):
+            raise RuntimeError('WebGL is not running on the phone GPU: ' + str(identity))
         size = f"{identity['width']}x{identity['height']}"
         dimensions = subprocess.check_output(['xdpyinfo'], text=True).split('dimensions:')[1].split()[0]
         if size != dimensions:
@@ -165,7 +166,7 @@ def record(args):
             try:
                 libraries = sorted({line.split()[-1] for line in
                     Path(f'/proc/{pid}/maps').read_text().splitlines()
-                    if 'libvulkan_panfrost.so' in line})
+                    if 'libvulkan_panfrost.so' in line or 'libvulkan_freedreno.so' in line})
             except OSError:
                 continue
             if libraries:

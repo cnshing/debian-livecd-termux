@@ -23,7 +23,7 @@ class Iterator(C.Structure):
     _fields_ = [('data', C.POINTER(Screen)), ('rem', C.c_int), ('index', C.c_int)]
 
 
-def present(buffer, android, display, desc, record, capture):
+def present(buffer, android, display, desc, record, capture, frames=180):
     if not re.fullmatch(r':(?:7[4-9]|[89][0-9])', display) or os.environ.get('DISPLAY') != display:
         raise RuntimeError('AHB Present requires the owned private display in :74–:99')
     if not os.environ.get('LIVECD_FULLSCREEN_TEST'):
@@ -108,7 +108,7 @@ def present(buffer, android, display, desc, record, capture):
             return int(fields[11]) + int(fields[12]), fields[19]
         ticks_before, birth = cpu_state()
         started = time.monotonic()
-        for serial in range(1, 181):
+        for serial in range(1, frames + 1):
             checked(submit(connection, window, pixmap, serial, 0, 0, 0, 0,
                            0, 0, 0, 0, 0, 0, 0, 0, None))
             deadline = time.monotonic() + 3
@@ -122,6 +122,8 @@ def present(buffer, android, display, desc, record, capture):
                         if (data[0] & 127 == 35 and struct.unpack_from('=H', data, 8)[0] == 1
                                 and struct.unpack_from('=I', data, 20)[0] == serial):
                             modes.append(data[11])
+                            if serial == 1:
+                                capture.with_suffix('.ready').write_text(str(window) + '\n')
                             break
                     finally:
                         libc.free(event)
@@ -137,7 +139,7 @@ def present(buffer, android, display, desc, record, capture):
             'complete_modes': {str(mode): modes.count(mode) for mode in set(modes)},
             'all_flipped': all(mode == 1 for mode in modes),
             'server_cpu_percent_one_core': 100 * (ticks_after - ticks_before) / os.sysconf('SC_CLK_TCK') / elapsed,
-            'android_activity_attached': False}
+            'android_activity_attached': os.environ.get('LIVECD_AHB_ANDROID_WINDOW') == '1'}
         get_image = fn(xcb, 'xcb_get_image', U32, PTR, U8, U32, I16, I16, U16, U16, U32)
         cookie = get_image(connection, 2, screen.root, 0, 0, desc.width, desc.height, 0xFFFFFFFF)
         reply = fn(xcb, 'xcb_get_image_reply', PTR, PTR, U32, PTR)(connection, cookie, None)
@@ -150,8 +152,9 @@ def present(buffer, android, display, desc, record, capture):
                 raise RuntimeError('Unexpected root image size')
             data = C.string_at(pointer, size)
             pixels = desc.width * desc.height
-            record['present']['root_pixels_verified'] = (data[0::4] == b'\x00' * pixels and
-                data[1::4] == b'\xff' * pixels and data[2::4] == b'\x00' * pixels)
+            r, g, b, _ = record['clear_rgba']
+            record['present']['root_pixels_verified'] = (data[0::4] == bytes([b]) * pixels and
+                data[1::4] == bytes([g]) * pixels and data[2::4] == bytes([r]) * pixels)
         finally:
             libc.free(reply)
         subprocess.run(['ffmpeg', '-v', 'error', '-nostdin', '-f', 'x11grab', '-video_size',

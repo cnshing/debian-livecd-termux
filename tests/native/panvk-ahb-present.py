@@ -24,6 +24,9 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--driver', type=Path, required=True)
     parser.add_argument('--out', type=Path, required=True)
+    parser.add_argument('--format', choices=('rgba', 'bgra'), default='rgba')
+    parser.add_argument('--clear', choices=('red', 'green', 'blue'), default='green')
+    parser.add_argument('--no-cpu-mapping', action='store_true')
     args = parser.parse_args()
     args.out = args.out.resolve()
     args.driver = args.driver.resolve(strict=True)
@@ -45,7 +48,8 @@ def main():
         status_before = desktop.run(status, capture_output=True, text=True).stdout
         env = os.environ.copy()
         for key in ('LD_PRELOAD', 'LD_LIBRARY_PATH', 'DISPLAY', 'XAUTHORITY',
-                    'TERMUX_X11_FORCE_FLIP', 'VK_DRIVER_FILES', 'VK_ICD_FILENAMES'):
+                    'TERMUX_X11_FORCE_FLIP', 'VK_DRIVER_FILES', 'VK_ICD_FILENAMES',
+                    'LIVECD_AHB_ANDROID_WINDOW'):
             env.pop(key, None)
         display = next(n for n in range(74, 100) if not any(p.exists() for p in
             (Path(os.environ['TMPDIR']) / f'.X11-unix/X{n}',
@@ -74,7 +78,9 @@ def main():
             desktop.run(['xrandr', '--fb', '1920x1080'], env=env)
             with (args.out / 'probe.log').open('w') as log:
                 code = subprocess.run([sys.executable, str(probe), '--driver', str(args.driver),
-                    '--out', str(args.out / 'probe.json'), '--present-display', env['DISPLAY'], '--egl'],
+                    '--out', str(args.out / 'probe.json'), '--present-display', env['DISPLAY'], '--egl',
+                    '--format', args.format, '--clear', args.clear,
+                    *(['--no-cpu-mapping'] if args.no_cpu_mapping else [])],
                     env=env, stdout=log, stderr=log, timeout=60).returncode
             imported = 'DRI3: imported AHardwareBuffer, modifier 1255, 1920x1080' in (args.out / 'server.log').read_text()
             (args.out / 'server-verification.json').write_text(json.dumps({

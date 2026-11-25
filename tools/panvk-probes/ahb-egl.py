@@ -83,7 +83,7 @@ def sample(buffer, width, height, record):
             0, 0, width, height, 0x1908, 0x1401, pixels)
         error = fn(gl, 'glGetError', U32)()
         record['android_egl']['gl_error'] = error
-        record['android_egl']['pixels_verified'] = bytes(pixels) == bytes((0, 255, 0, 255)) * (width * height)
+        record['android_egl']['pixels_verified'] = bytes(pixels) == bytes(record['clear_rgba']) * (width * height)
         if error or not record['android_egl']['pixels_verified']:
             raise RuntimeError('Android EGL sample does not match the Vulkan GPU clear')
     finally:

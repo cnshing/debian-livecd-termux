@@ -1,0 +1,735 @@
+{
+  "date": "2026-11-25",
+  "status": "Experimental AHB WSI builds and passes colour/resize and tagged Android pixels; paired video CPU gate fails; no promotion",
+  "driver_sha256": "b40b4d712a33cf6f5962eee1e1fa60d97db7adb9596521e52949f4440dd189be",
+  "benchmark_setup": {
+    "screen": [
+      1920,
+      1080
+    ],
+    "fakescreenfps": 60,
+    "warmup_seconds": 5,
+    "measurement_seconds": 30,
+    "video": "same local 1080p30 fixture as raw DRI3 qualification",
+    "decode": "software",
+    "audio": false,
+    "mutter_sync": false,
+    "android_activity_attached": false
+  },
+  "benchmark_log_results": [
+    {
+      "name": "raw-control-1",
+      "route": "raw",
+      "force_flip": false,
+      "phases": {
+        "gears": {
+          "cpu_percent_one_core": {
+            "shell": 93.02060090897919,
+            "server": 71.1235981152854,
+            "app": 10.665206840155262
+          },
+          "total_cpu_percent_one_core": 174.80940586441986,
+          "elapsed_seconds": 30.004106324049644,
+          "wall_minus_monotonic_seconds": -5.176989361643791e-07,
+          "reported_fps": [
+            32.903,
+            32.482,
+            32.754,
+            33.697,
+            33.727,
+            32.949
+          ]
+        },
+        "video": {
+          "cpu_percent_one_core": {
+            "shell": 47.21914807011005,
+            "server": 67.71299144563417,
+            "app": 75.7772355055965
+          },
+          "total_cpu_percent_one_core": 190.70937502134072,
+          "elapsed_seconds": 30.009012400987558,
+          "wall_minus_monotonic_seconds": 4.8280926421284676e-06,
+          "video_counters_delta": {
+            "frame-drop-count": 118,
+            "decoder-frame-drop-count": 0
+          }
+        }
+      },
+      "completed": true,
+      "isolation_passed": true,
+      "video_sha256": "d574c3cbf096854f82f8678c2aeb23c5a4d4c12c30ef8a06214e3bbdd651519c"
+    },
+    {
+      "name": "raw-force-1",
+      "route": "raw",
+      "force_flip": true,
+      "phases": {
+        "gears": {
+          "cpu_percent_one_core": {
+            "shell": 94.19336921697047,
+            "server": 62.72891750401218,
+            "app": 10.099289056171992
+          },
+          "total_cpu_percent_one_core": 167.02157577715465,
+          "elapsed_seconds": 30.002111862995662,
+          "wall_minus_monotonic_seconds": -2.096989192068577e-06,
+          "reported_fps": [
+            34.402,
+            33.429,
+            34.245,
+            33.054,
+            33.37,
+            33.18
+          ]
+        },
+        "video": {
+          "cpu_percent_one_core": {
+            "shell": 53.58415115312359,
+            "server": 39.155085575199145,
+            "app": 74.64458867101794
+          },
+          "total_cpu_percent_one_core": 167.38382539934068,
+          "elapsed_seconds": 30.00887324695941,
+          "wall_minus_monotonic_seconds": 6.925547495484352e-07,
+          "video_counters_delta": {
+            "frame-drop-count": 139,
+            "decoder-frame-drop-count": 0
+          }
+        }
+      },
+      "completed": true,
+      "isolation_passed": true,
+      "video_sha256": "d574c3cbf096854f82f8678c2aeb23c5a4d4c12c30ef8a06214e3bbdd651519c"
+    },
+    {
+      "name": "raw-force-2",
+      "route": "raw",
+      "force_flip": true,
+      "phases": {
+        "gears": {
+          "cpu_percent_one_core": {
+            "shell": 69.3263259137665,
+            "server": 66.32662911942082,
+            "app": 15.498433437452606
+          },
+          "total_cpu_percent_one_core": 151.15138847063992,
+          "elapsed_seconds": 30.003032363019884,
+          "wall_minus_monotonic_seconds": 5.597248673439026e-07,
+          "reported_fps": [
+            59.376,
+            60.753,
+            60.913,
+            60.993,
+            60.954,
+            60.986
+          ]
+        },
+        "video": {
+          "cpu_percent_one_core": {
+            "shell": 59.30338524254743,
+            "server": 40.246342344380494,
+            "app": 87.52246799560231
+          },
+          "total_cpu_percent_one_core": 187.07219558253024,
+          "elapsed_seconds": 30.015149939921685,
+          "wall_minus_monotonic_seconds": 6.071059033274651e-07,
+          "video_counters_delta": {
+            "frame-drop-count": 146,
+            "decoder-frame-drop-count": 0
+          }
+        }
+      },
+      "completed": true,
+      "isolation_passed": true,
+      "video_sha256": "d574c3cbf096854f82f8678c2aeb23c5a4d4c12c30ef8a06214e3bbdd651519c"
+    },
+    {
+      "name": "raw-control-2",
+      "route": "raw",
+      "force_flip": false,
+      "phases": {
+        "gears": {
+          "cpu_percent_one_core": {
+            "shell": 68.7931754143669,
+            "server": 66.62672366924392,
+            "app": 12.232119853232872
+          },
+          "total_cpu_percent_one_core": 147.6520189368437,
+          "elapsed_seconds": 30.00297613197472,
+          "wall_minus_monotonic_seconds": -9.065261110663414e-07,
+          "reported_fps": [
+            49.681,
+            49.2,
+            50.779,
+            49.168,
+            49.972,
+            50.463
+          ]
+        },
+        "video": {
+          "cpu_percent_one_core": {
+            "shell": 55.850025118622746,
+            "server": 64.78069739296102,
+            "app": 83.90833129396903
+          },
+          "total_cpu_percent_one_core": 204.53905380555278,
+          "elapsed_seconds": 30.008939054911025,
+          "wall_minus_monotonic_seconds": 1.4033867046236992e-06,
+          "video_counters_delta": {
+            "frame-drop-count": 91,
+            "decoder-frame-drop-count": 0
+          }
+        }
+      },
+      "completed": true,
+      "isolation_passed": true,
+      "video_sha256": "d574c3cbf096854f82f8678c2aeb23c5a4d4c12c30ef8a06214e3bbdd651519c"
+    },
+    {
+      "name": "shm-1",
+      "route": "shm",
+      "force_flip": false,
+      "phases": {
+        "gears": {
+          "cpu_percent_one_core": {
+            "shell": 95.97875037489557,
+            "server": 24.294621188645433,
+            "app": 42.15733306397321
+          },
+          "total_cpu_percent_one_core": 162.43070462751422,
+          "elapsed_seconds": 30.00664197804872,
+          "wall_minus_monotonic_seconds": 9.900308214128017e-06,
+          "reported_fps": [
+            58.949,
+            59.685,
+            59.218,
+            59.302,
+            59.406,
+            85.274
+          ]
+        },
+        "video": {
+          "cpu_percent_one_core": {
+            "shell": 43.41798432752649,
+            "server": 15.4945224192631,
+            "app": 89.76826537095653
+          },
+          "total_cpu_percent_one_core": 148.68077211774613,
+          "elapsed_seconds": 30.01060551707633,
+          "wall_minus_monotonic_seconds": -1.8184073269367218e-07,
+          "video_counters_delta": {
+            "frame-drop-count": 413,
+            "decoder-frame-drop-count": 0
+          }
+        }
+      },
+      "completed": true,
+      "isolation_passed": true,
+      "video_sha256": "d574c3cbf096854f82f8678c2aeb23c5a4d4c12c30ef8a06214e3bbdd651519c"
+    }
+  ],
+  "ahb": {
+    "size": [
+      1920,
+      1080
+    ],
+    "format": "R8G8B8A8_UNORM",
+    "gpu_only": {
+      "usage": 768,
+      "allocation_size": 8491008,
+      "stride_pixels": 1920,
+      "failed_call": "vkAllocateMemory",
+      "result": -1000072003
+    },
+    "cpu_usable": {
+      "usage": 819,
+      "allocation_size": 8359936,
+      "stride_pixels": 1920,
+      "plane_count": 1,
+      "pixel_stride_bytes": 4,
+      "row_stride_bytes": 7680,
+      "import_and_bind": true,
+      "cpu_to_gpu_all_pixels": true,
+      "gpu_clear_to_staging_all_pixels": true,
+      "gpu_to_cpu_all_pixels": true
+    }
+  },
+  "private_present": {
+    "run": "ahb-socket-1",
+    "modifier": 1255,
+    "server_import_logged": true,
+    "force_flip": false,
+    "frames": 180,
+    "elapsed_seconds": 3.000243035960011,
+    "complete_modes": {
+      "FLIP": 180
+    },
+    "root_pixels_verified": true,
+    "isolation_passed": true,
+    "android_activity_attached": false,
+    "reuses_one_completed_buffer": true
+  },
+  "limitations": [
+    "GPU-only usage 0x300 fails Vulkan memory import; only CPU-usable 0x333 qualifies.",
+    "BGRA public CPU mapping exposes zero strides and is rejected; BGRA checks use GPU staging, EGL and X11.",
+    "Ordinary benchmarks exclude Android activity CPU and do not establish end-to-end power savings.",
+    "Physical WSI colour checks are 608x783, not a dynamic 1080p attached-window soak.",
+    "Video total CPU is 4\u20137% higher than same-driver SHM; mode remains experimental.",
+    "AHB menu races and 30-minute soak are deferred until the performance gate passes."
+  ],
+  "pending": [
+    "Profile mpv application CPU and compare rendered-frame counts; separate remaining window-pixmap copies from the root flip.",
+    "After a focused fix, repeat paired performance tests; require total CPU below SHM for both workloads.",
+    "After performance passes, run longer menu/race checks and 30-minute AHB soak, including attached activity measurements."
+  ],
+  "installed_or_defaults_changed": false,
+  "private_present_runs": [
+    {
+      "run": "ahb-socket-egl-2",
+      "format": "rgba",
+      "size": [
+        1920,
+        1080
+      ],
+      "usage": 819,
+      "all_requested_checks_passed": true,
+      "present": {
+        "frames": 180,
+        "elapsed_seconds": 3.0009181910427287,
+        "complete_modes": {
+          "1": 180
+        },
+        "all_flipped": true,
+        "server_cpu_percent_one_core": 3.998776119861622,
+        "android_activity_attached": false,
+        "root_pixels_verified": true
+      },
+      "android_egl": {
+        "version": [
+          1,
+          4
+        ],
+        "gl_vendor": "ARM",
+        "gl_renderer": "Mali-G77",
+        "gl_version": "OpenGL ES 3.2 v1.r38p1-01bet0-mbs2v41_0.8320a750c7c9e2666df3500d139b434f",
+        "offscreen": true,
+        "gl_error": 0,
+        "pixels_verified": true
+      },
+      "isolation_passed": true,
+      "cpu_plane_roundtrip_tested": true,
+      "static_single_buffer": true
+    },
+    {
+      "run": "bgra-red-socket-egl",
+      "format": "bgra",
+      "size": [
+        1920,
+        1080
+      ],
+      "usage": 819,
+      "all_requested_checks_passed": true,
+      "present": {
+        "frames": 180,
+        "elapsed_seconds": 3.001278190058656,
+        "complete_modes": {
+          "1": 180
+        },
+        "all_flipped": true,
+        "server_cpu_percent_one_core": 3.6651050996992116,
+        "android_activity_attached": false,
+        "root_pixels_verified": true
+      },
+      "android_egl": {
+        "version": [
+          1,
+          4
+        ],
+        "gl_vendor": "ARM",
+        "gl_renderer": "Mali-G77",
+        "gl_version": "OpenGL ES 3.2 v1.r38p1-01bet0-mbs2v41_0.8320a750c7c9e2666df3500d139b434f",
+        "offscreen": true,
+        "gl_error": 0,
+        "pixels_verified": true
+      },
+      "isolation_passed": true,
+      "cpu_plane_roundtrip_tested": false,
+      "static_single_buffer": true
+    },
+    {
+      "run": "android-window-red-3",
+      "format": "bgra",
+      "size": [
+        608,
+        783
+      ],
+      "usage": 819,
+      "all_requested_checks_passed": true,
+      "present": {
+        "frames": 600,
+        "elapsed_seconds": 10.000776839093305,
+        "complete_modes": {
+          "1": 600
+        },
+        "all_flipped": true,
+        "server_cpu_percent_one_core": 4.299665985137459,
+        "android_activity_attached": true,
+        "root_pixels_verified": true
+      },
+      "android_egl": {
+        "version": [
+          1,
+          4
+        ],
+        "gl_vendor": "ARM",
+        "gl_renderer": "Mali-G77",
+        "gl_version": "OpenGL ES 3.2 v1.r38p1-01bet0-mbs2v41_0.8320a750c7c9e2666df3500d139b434f",
+        "offscreen": true,
+        "gl_error": 0,
+        "pixels_verified": true
+      },
+      "isolation_passed": true,
+      "cpu_plane_roundtrip_tested": false,
+      "static_single_buffer": true
+    }
+  ],
+  "physical_capture": {
+    "expected_screenshot_rgb_from_icc": [
+      234,
+      51,
+      35
+    ],
+    "screen_size": [
+      720,
+      1600
+    ],
+    "crop_bounds": [
+      56,
+      443,
+      664,
+      1225
+    ],
+    "exact_red_fraction": 0.9989273455377574,
+    "red_pixels": 474946,
+    "run": "android-window-red-3",
+    "visually_inspected": true,
+    "full_screen_image_deleted": true,
+    "colour_transform": "LittleCMS sRGB to embedded sRGB-transfer Display-P3 ICC; exact expected RGB, no relaxed threshold",
+    "foreground_task_restored": true
+  },
+  "forced_raw_correctness": {
+    "run": "force-correctness-1",
+    "captures": 4,
+    "maximum_channel_error": 0,
+    "stale_negative_control_rejected": true,
+    "race_frames": 300,
+    "split_frames": 0,
+    "red_frames": 142,
+    "blue_frames": 158,
+    "sample_images_visually_inspected": true,
+    "isolation_passed": true
+  },
+  "wsi_candidate": {
+    "mode": "PANVK_KBASE_DRI3=ahb",
+    "patch": "tools/panvk-probes/platform-patches/0004-wsi-x11-termux-ahb.patch",
+    "source_commit": "49ac244",
+    "ci_run": 45565008308,
+    "ci_status": "success",
+    "runtime_qualified": false,
+    "ahb_usage": 819,
+    "transport_modifier": 1255,
+    "render_completion": "existing patch 0003 CPU fence wait",
+    "present_reuse": "X11 Present idle fences",
+    "driver_sha256": "77185ee4407ecd599c4c04851d963f5adfd8fa89502574f021f42e1b7be6f3f2",
+    "mesa_tree": "bcff3960b99fba38bf0e663f941cbf923ba1f057",
+    "colour_smoke": {
+      "run": "ahb-colour-smoke",
+      "captures": 4,
+      "maximum_channel_error": 0,
+      "stale_negative_control_rejected": true,
+      "isolation_passed": true,
+      "private_driver_maps_verified": true,
+      "screenshots_visually_inspected": true,
+      "transport_import_logged": true
+    }
+  },
+  "ahb_wsi_benchmarks": [
+    {
+      "name": "ahb-shm-1",
+      "mode": "shm",
+      "driver_sha256": "77185ee4407ecd599c4c04851d963f5adfd8fa89502574f021f42e1b7be6f3f2",
+      "completed": true,
+      "isolation_passed": true,
+      "video_sha256": "d574c3cbf096854f82f8678c2aeb23c5a4d4c12c30ef8a06214e3bbdd651519c",
+      "android_activity_attached": false,
+      "phases": {
+        "idle": {
+          "cpu_percent_one_core": {
+            "shell": 1.1330893945212406,
+            "server": 2.466135741016818
+          },
+          "total_cpu_percent_one_core": 3.5992251355380587,
+          "elapsed_seconds": 30.006458593998104,
+          "wall_minus_monotonic_seconds": 3.5031698644161224e-06
+        },
+        "gears": {
+          "cpu_percent_one_core": {
+            "shell": 92.72421943890767,
+            "server": 21.697867309392134,
+            "app": 38.29623585021744
+          },
+          "total_cpu_percent_one_core": 152.71832259851723,
+          "elapsed_seconds": 30.002948709996417,
+          "wall_minus_monotonic_seconds": -1.8563587218523026e-06,
+          "reported_fps": [
+            59.575,
+            58.894,
+            58.838,
+            59.351,
+            58.879,
+            59.117
+          ]
+        },
+        "video": {
+          "cpu_percent_one_core": {
+            "shell": 44.18149478255159,
+            "server": 15.593468746782907,
+            "app": 89.22929338436886
+          },
+          "total_cpu_percent_one_core": 149.00425691370336,
+          "elapsed_seconds": 30.012565363082103,
+          "wall_minus_monotonic_seconds": -4.04182355850935e-06,
+          "video_counters_delta": {
+            "frame-drop-count": 422,
+            "decoder-frame-drop-count": 0
+          },
+          "video_seconds_advanced": 30.0
+        }
+      }
+    },
+    {
+      "name": "ahb-bench-1",
+      "mode": "ahb",
+      "driver_sha256": "77185ee4407ecd599c4c04851d963f5adfd8fa89502574f021f42e1b7be6f3f2",
+      "completed": true,
+      "isolation_passed": true,
+      "video_sha256": "d574c3cbf096854f82f8678c2aeb23c5a4d4c12c30ef8a06214e3bbdd651519c",
+      "android_activity_attached": false,
+      "phases": {
+        "idle": {
+          "cpu_percent_one_core": {
+            "shell": 1.2330826232233782,
+            "server": 2.466165246446756
+          },
+          "total_cpu_percent_one_core": 3.6992478696701343,
+          "elapsed_seconds": 30.006099593942054,
+          "wall_minus_monotonic_seconds": 5.590613000094891e-06
+        },
+        "gears": {
+          "cpu_percent_one_core": {
+            "shell": 83.72564115448765,
+            "server": 16.99843829171525,
+            "app": 23.864474150721804
+          },
+          "total_cpu_percent_one_core": 124.5885535969247,
+          "elapsed_seconds": 30.00275620899629,
+          "wall_minus_monotonic_seconds": 1.4819670468568802e-07,
+          "reported_fps": [
+            59.561,
+            60.14,
+            60.176,
+            60.126,
+            60.194,
+            60.35
+          ]
+        },
+        "video": {
+          "cpu_percent_one_core": {
+            "shell": 43.3823327994854,
+            "server": 14.294178779553938,
+            "app": 101.35872225501886
+          },
+          "total_cpu_percent_one_core": 159.0352338340582,
+          "elapsed_seconds": 30.012217323994264,
+          "wall_minus_monotonic_seconds": -2.901768311858177e-06,
+          "video_counters_delta": {
+            "frame-drop-count": 349,
+            "decoder-frame-drop-count": 0
+          },
+          "video_seconds_advanced": 29.966665999999996
+        }
+      }
+    },
+    {
+      "name": "ahb-bench-2",
+      "mode": "ahb",
+      "driver_sha256": "77185ee4407ecd599c4c04851d963f5adfd8fa89502574f021f42e1b7be6f3f2",
+      "completed": true,
+      "isolation_passed": true,
+      "video_sha256": "d574c3cbf096854f82f8678c2aeb23c5a4d4c12c30ef8a06214e3bbdd651519c",
+      "android_activity_attached": false,
+      "phases": {
+        "idle": {
+          "cpu_percent_one_core": {
+            "shell": 1.0997645017462574,
+            "server": 2.5994433677638806
+          },
+          "total_cpu_percent_one_core": 3.699207869510138,
+          "elapsed_seconds": 30.006424054969102,
+          "wall_minus_monotonic_seconds": 2.7562491595745087e-06
+        },
+        "gears": {
+          "cpu_percent_one_core": {
+            "shell": 83.75715513430482,
+            "server": 16.664774201015682,
+            "app": 22.830740655391484
+          },
+          "total_cpu_percent_one_core": 123.252669990712,
+          "elapsed_seconds": 30.003406825009733,
+          "wall_minus_monotonic_seconds": 8.917413651943207e-07,
+          "reported_fps": [
+            59.764,
+            60.286,
+            60.224,
+            60.251,
+            60.249,
+            60.251
+          ]
+        },
+        "video": {
+          "cpu_percent_one_core": {
+            "shell": 42.91873945114855,
+            "server": 14.161851138771846,
+            "app": 101.56546416700373
+          },
+          "total_cpu_percent_one_core": 158.64605475692412,
+          "elapsed_seconds": 30.010201056022197,
+          "wall_minus_monotonic_seconds": -7.939524948596954e-07,
+          "video_counters_delta": {
+            "frame-drop-count": 355,
+            "decoder-frame-drop-count": 0
+          },
+          "video_seconds_advanced": 30.033333
+        }
+      }
+    },
+    {
+      "name": "ahb-shm-2",
+      "mode": "shm",
+      "driver_sha256": "77185ee4407ecd599c4c04851d963f5adfd8fa89502574f021f42e1b7be6f3f2",
+      "completed": true,
+      "isolation_passed": true,
+      "video_sha256": "d574c3cbf096854f82f8678c2aeb23c5a4d4c12c30ef8a06214e3bbdd651519c",
+      "android_activity_attached": false,
+      "phases": {
+        "idle": {
+          "cpu_percent_one_core": {
+            "shell": 1.0664477161364623,
+            "server": 2.5661398169533642
+          },
+          "total_cpu_percent_one_core": 3.6325875330898265,
+          "elapsed_seconds": 30.006159247946925,
+          "wall_minus_monotonic_seconds": 3.1570671126246452e-06
+        },
+        "gears": {
+          "cpu_percent_one_core": {
+            "shell": 96.41905151532032,
+            "server": 22.430010947048245,
+            "app": 41.46052543555426
+          },
+          "total_cpu_percent_one_core": 160.30958789792282,
+          "elapsed_seconds": 30.00444367097225,
+          "wall_minus_monotonic_seconds": 2.8355279937386513e-06,
+          "reported_fps": [
+            60.387,
+            59.909,
+            59.447,
+            60.45,
+            60.033,
+            60.132
+          ]
+        },
+        "video": {
+          "cpu_percent_one_core": {
+            "shell": 43.78686122236321,
+            "server": 15.462027098307862,
+            "app": 92.70551592131997
+          },
+          "total_cpu_percent_one_core": 151.95440424199103,
+          "elapsed_seconds": 30.009001863072626,
+          "wall_minus_monotonic_seconds": -6.080372259020805e-07,
+          "video_counters_delta": {
+            "frame-drop-count": 423,
+            "decoder-frame-drop-count": 0
+          },
+          "video_seconds_advanced": 30.0
+        }
+      }
+    }
+  ],
+  "acceptance": {
+    "colour_resize": true,
+    "tagged_android_two_phase_pixels": true,
+    "video_cpu_below_shm_both_orders": false,
+    "gears_cpu_below_shm_both_orders": true,
+    "race_restarts": "bounded check passes: 300 race frames, 100 restarts",
+    "soak": "not run: video CPU gate failed",
+    "promoted": false
+  },
+  "physical_wsi": {
+    "run": "android-window-gtk-1",
+    "size": [
+      608,
+      783
+    ],
+    "phases": 2,
+    "quadrants_per_phase": 4,
+    "interior_pixels_per_quadrant": 97648,
+    "maximum_encoded_channel_error": 0,
+    "total_interior_pixels_checked": 781184,
+    "profile_handling": "LittleCMS sRGB to captured ICC; exact encoded RGB comparison",
+    "private_driver_maps_verified": true,
+    "visually_inspected": true,
+    "isolation_passed": true,
+    "foreground_task_restored": true,
+    "full_screen_images_deleted": true,
+    "crop_sha256": [
+      "e8341fbd127fed971ea39f904a97e1a8e1ec51a5c27d15789557e29fb1efa1fb",
+      "45f625c2ff70c9ff13b99a1a58074bed741671f3f3d829dbce4e0209fa3f2c4c"
+    ]
+  },
+  "ahb_wsi_correctness": {
+    "run": "ahb-correctness-1",
+    "cycles": 20,
+    "captures": 40,
+    "maximum_channel_error": 0,
+    "stale_negative_control_rejected": true,
+    "restart_cycles": 100,
+    "restart_return_codes": [
+      0
+    ],
+    "race": {
+      "frames": 300,
+      "split_frames": [],
+      "split_count": 0,
+      "invalid_frames": [],
+      "pixels_per_frame": 2025856,
+      "native_resolution": true,
+      "solid_red_frames": 149,
+      "solid_blue_frames": 151
+    },
+    "sample_images_visually_inspected": true,
+    "isolation_passed": true
+  },
+  "cleanup": {
+    "owned_processes_remaining": 0,
+    "displays": [
+      "X0"
+    ],
+    "wake_lock_released": true,
+    "desktop_stopped_as_found": true,
+    "shared_termux_va_preserved": true,
+    "shared_sshd_preserved": true,
+    "phone_claim": "available"
+  }
+}

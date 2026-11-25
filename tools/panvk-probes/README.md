@@ -44,8 +44,9 @@ timeout -k 15 600 python ~/gpu-x1s/panvk-desktop.py \
   --mode raw --cycles 20 --out ~/gpu-x1s/panvk/desktop-raw-new
 ```
 
-Use `--mode shm` for the default transport, or `--mode shm --server xvfb` for
-the Xvfb control. `--restart-cycles 100` adds normal vkcube start/stop cycles.
+Use `--mode ahb` for the experimental Android AHB transport (patch 0004 plus
+the `combined-ahb` metadata patch), `--mode shm` for the default transport, or
+`--mode shm --server xvfb` for the Xvfb control. `--restart-cycles 100` adds normal vkcube start/stop cycles.
 `--soak-seconds 1800` runs vkcube FIFO and glxgears concurrently with periodic
 captures and process resource audits. This tests concurrent stability, not
 individual-workload performance. Increase the outer timeout for a soak.
@@ -102,6 +103,38 @@ unchanged, and `FEATURE_DUMP=/path/file.rgba` enables its 64x64 RGBA dump.
 bytes without checking the actual allocation size. AHB import remains separate
 from WSI-owned buffers; successful presentation does not qualify app AHB import.
 
+`ahb-import.py --driver /absolute/path/libvulkan_panfrost.so --out fresh.json`
+checks public 1920×1080 RGBA AHB allocations with GPU-only usage (`0x300`) and
+CPU read/write added (`0x333`). It imports dedicated image memory, reads a CPU
+quadrant pattern with the GPU, clears with the GPU, and checks every readback
+pixel through both a Vulkan staging buffer and the public Android CPU mapping.
+The GPU-only case can fail while the CPU-usable fallback passes; the JSON keeps
+both results and the driver hash. No dma-buf layout is inferred from a public
+stride. Run from plain 64-bit Termux with `LD_LIBRARY_PATH` and `LD_PRELOAD` unset.
+Add `--egl` to sample the result through Android EGL/GLES in an offscreen pbuffer.
+`--format bgra --clear red --no-cpu-mapping` checks BGRA channel order with GPU,
+EGL and optional X11 readback; it explicitly omits CPU-plane checks, which reject
+the zero strides reported for BGRA on the S20. `--clear` also accepts green/blue.
+
+`tests/native/panvk-ahb-present.py --driver /absolute/path/libvulkan_panfrost.so
+--out fresh-directory` runs that probe on an owned private lorie, with modifier
+1255 transport and Present completion-mode checks (`ahb-x11.py`). Copy the
+`tests/` and `tools/` layout, including all three `ahb-*.py` helpers, to the phone.
+It also requests the offscreen Android EGL check (`ahb-egl.py`). The server must
+log the AHB import, all 180 paced presents must report `FLIP`, and every root
+pixel must match. It records the server CPU during those three seconds. This
+reuses one completed buffer, so it is not a swapchain race or physical scanout
+test. The harness checks shared process state and cleans only its own display.
+`python3 tools/panvk-probes/test-ahb-import.py` checks plane bounds and rejects
+the live display without loading Android or XCB libraries.
+
+The probes follow the public [NDK AHardwareBuffer API](https://developer.android.com/ndk/reference/group/a-hardware-buffer)
+and [Vulkan AHB import rules](https://docs.vulkan.org/spec/latest/chapters/memory.html#memory-external-android-hardware-buffer).
+They acquire/release imported images through `VK_QUEUE_FAMILY_FOREIGN_EXT` as
+specified by [external queue ownership](https://docs.vulkan.org/spec/latest/chapters/synchronization.html#synchronization-queue-transfers).
+Current measurements and remaining gates are in the
+[AHB presentation handoff](../../docs/native/handoff/s20-panvk-ahb-present.md).
+
 Keep builds in CI. Do not run the reference `build-glibc.sh` on an x86 host: its
 fallback dispatches to a rooted phone chroot. Do not run Firefox workloads or
 select ANGLE under this research scope.
@@ -112,9 +145,10 @@ validated short runs, the failed partial soak, and remaining acceptance.
 The `combined` variant selects the seven workgroup patches plus point size,
 process budget, ION CPU cache mode and import coherence (eleven patches).
 `combined-platform` adds the Termux hybrid ICD private-extension correction
-and measured noncoherent ION placed-map capability restriction (thirteen
-patches). It requires independent qualification and does not change package
-pins. See the current version-bump handoff for exact hashes and CTS results.
+and measured noncoherent ION placed-map capability restriction, the X11
+render-completion wait and experimental AHB WSI (fifteen patches).
+`combined-ahb` adds the legacy Mali AHB metadata import patch (sixteen patches).
+It requires independent qualification and does not change package pins. See the current version-bump handoff for exact hashes and CTS results.
 
 The desktop harness creates its private XDG runtime directory under Termux's
 short `$TMPDIR` path. Evidence directories can be too deep for Unix sockets

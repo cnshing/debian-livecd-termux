@@ -254,7 +254,7 @@ class Vulkan:
             if initial:
                 copy(command, image, 1, buffer, 1, C.byref(region))
                 barrier(0x800, 0x1000, 1, 1)
-            color = (C.c_float * 4)(0, 1, 0, 1)
+            color = (C.c_float * 4)(*(value / 255 for value in record['clear_rgba']))
             self.function('vkCmdClearColorImage', None, PTR, U64, U32, PTR, U32, PTR,
                 device=True)(command, image, 1, color, 1, C.byref(full))
             barrier(0x1000, 0x800, 1, 1)
@@ -286,7 +286,7 @@ class Vulkan:
                 record['cpu_to_gpu_verified'] = C.string_at(mapped, size) == pattern(width, height)
                 if not record['cpu_to_gpu_verified']:
                     raise ProbeError('CPU pattern differs in GPU readback')
-            record['gpu_readback_verified'] = C.string_at(mapped.value + size, size) == bytes((0, 255, 0, 255)) * (width * height)
+            record['gpu_readback_verified'] = C.string_at(mapped.value + size, size) == bytes(record['storage_clear_bytes']) * (width * height)
             if not record['gpu_readback_verified']:
                 raise ProbeError('GPU clear differs in GPU readback')
         finally:
@@ -353,6 +353,10 @@ def probe(args, report):
         vulkan.init()
         for cpu in (False, True):
             record = {'cpu_usable': cpu, 'import_bound': False, 'gpu_readback_verified': False}
+            record['clear_rgba'] = {'red': [255, 0, 0, 255], 'green': [0, 255, 0, 255],
+                                    'blue': [0, 0, 255, 255]}[args.clear]
+            r, g, b, a = record['clear_rgba']
+            record['storage_clear_bytes'] = [r, g, b, a] if args.format == 'rgba' else [b, g, r, a]
             report['cases'].append(record)
             buffer = PTR()
             allocated = False
@@ -388,7 +392,7 @@ def probe(args, report):
                                     37 if args.format == 'rgba' else 44)
                 if cpu and not args.no_cpu_mapping:
                     record['gpu_to_cpu_verified'] = locked_pixels(android, buffer, args.width,
-                        args.height) == bytes((0, 255, 0, 255)) * (args.width * args.height)
+                        args.height) == bytes(record['storage_clear_bytes']) * (args.width * args.height)
                     if not record['gpu_to_cpu_verified']:
                         raise ProbeError('GPU clear differs in public CPU mapping')
                 record['import_readback_passed'] = True
@@ -398,7 +402,8 @@ def probe(args, report):
                     module = importlib.util.module_from_spec(spec)
                     spec.loader.exec_module(module)
                     module.present(buffer, android, args.present_display, desc, record,
-                        args.out.with_name(args.out.stem + ('-cpu' if cpu else '-gpu') + '.png'))
+                        args.out.with_name(args.out.stem + ('-cpu' if cpu else '-gpu') + '.png'),
+                        args.present_frames)
                 if args.egl:
                     spec = importlib.util.spec_from_file_location('ahb_egl', Path(__file__).with_name('ahb-egl.py'))
                     module = importlib.util.module_from_spec(spec)
@@ -421,14 +426,18 @@ def main():
     parser.add_argument('--width', type=int, default=1920)
     parser.add_argument('--height', type=int, default=1080)
     parser.add_argument('--format', choices=('rgba', 'bgra'), default='rgba')
+    parser.add_argument('--clear', choices=('red', 'green', 'blue'), default='green')
     parser.add_argument('--no-cpu-mapping', action='store_true',
                         help='Test GPU readback/EGL/Present only; do not claim CPU mapping validation')
     parser.add_argument('--out', type=Path, required=True)
     parser.add_argument('--present-display', help='Private harness display; also test modifier 1255 and Present')
+    parser.add_argument('--present-frames', type=int, default=180)
     parser.add_argument('--egl', action='store_true', help='Also sample the AHB with Android EGL/GLES offscreen')
     args = parser.parse_args()
     if not 1 <= args.width <= 4096 or not 1 <= args.height <= 4096:
         parser.error('Dimensions must be between 1 and 4096')
+    if not 1 <= args.present_frames <= 1800:
+        parser.error('present-frames must be between 1 and 1800')
     args.driver = args.driver.resolve(strict=True)
     report = {'driver': str(args.driver), 'driver_sha256': hashlib.sha256(args.driver.read_bytes()).hexdigest(),
               'cases': [], 'format': args.format, 'cpu_mapping_requested': not args.no_cpu_mapping,

@@ -1,0 +1,151 @@
+diff --git a/src/panfrost/lib/kmod/kbase_kmod.c b/src/panfrost/lib/kmod/kbase_kmod.c
+index fc33d42..d09c893 100644
+--- a/src/panfrost/lib/kmod/kbase_kmod.c
++++ b/src/panfrost/lib/kmod/kbase_kmod.c
+@@ -3197,9 +3197,10 @@ kbase_kmod_bo_import(struct pan_kmod_dev *dev, uint32_t handle, uint64_t size)
+ }
+ 
+ static struct pan_kmod_bo *
+-kbase_kmod_bo_import_fd(struct pan_kmod_dev *dev, int fd, uint64_t size)
++kbase_kmod_bo_import_fd(struct pan_kmod_dev *dev, int fd, uint64_t size,
++                         uint32_t flags)
+ {
+-   return kbase_kmod_import_dmabuf(dev, NULL, fd, size, 0, true);
++   return kbase_kmod_import_dmabuf(dev, NULL, fd, size, flags, true);
+ }
+ 
+ static int
+diff --git a/src/panfrost/lib/kmod/pan_kmod.c b/src/panfrost/lib/kmod/pan_kmod.c
+index 277df8c..87cb88f 100644
+--- a/src/panfrost/lib/kmod/pan_kmod.c
++++ b/src/panfrost/lib/kmod/pan_kmod.c
+@@ -193,6 +193,15 @@ pan_kmod_bo_put(struct pan_kmod_bo *bo)
+ struct pan_kmod_bo *
+ pan_kmod_bo_import(struct pan_kmod_dev *dev, int fd)
+ {
++   return pan_kmod_bo_import_flags(dev, fd, 0);
++}
++
++struct pan_kmod_bo *
++pan_kmod_bo_import_flags(struct pan_kmod_dev *dev, int fd, uint32_t flags)
++{
++   if (flags && !dev->ops->bo_import_fd)
++      return NULL;
++
+    struct pan_kmod_bo *bo = NULL;
+    struct pan_kmod_bo **slot;
+ 
+@@ -205,7 +214,7 @@ pan_kmod_bo_import(struct pan_kmod_dev *dev, int fd)
+          goto err_unlock;
+       }
+ 
+-      bo = dev->ops->bo_import_fd(dev, fd, size);
++      bo = dev->ops->bo_import_fd(dev, fd, size, flags);
+       if (!bo)
+          goto err_unlock;
+ 
+diff --git a/src/panfrost/lib/kmod/pan_kmod.h b/src/panfrost/lib/kmod/pan_kmod.h
+index 2187d0e..7461c3a 100644
+--- a/src/panfrost/lib/kmod/pan_kmod.h
++++ b/src/panfrost/lib/kmod/pan_kmod.h
+@@ -506,7 +506,7 @@ struct pan_kmod_ops {
+     * This method is optional.
+     */
+    struct pan_kmod_bo *(*bo_import_fd)(struct pan_kmod_dev *dev, int fd,
+-                                      uint64_t size);
++                                      uint64_t size, uint32_t flags);
+ 
+    /* Export a dma-buf directly, without converting a DRM GEM handle.  Returns
+     * a new close-on-exec fd on success, -1 otherwise.  This method is
+@@ -759,6 +759,8 @@ pan_kmod_bo_get_user_priv(const struct pan_kmod_bo *bo)
+ }
+ 
+ struct pan_kmod_bo *pan_kmod_bo_import(struct pan_kmod_dev *dev, int fd);
++struct pan_kmod_bo *pan_kmod_bo_import_flags(struct pan_kmod_dev *dev, int fd,
++                                             uint32_t flags);
+ 
+ static inline int
+ pan_kmod_bo_export(struct pan_kmod_bo *bo)
+diff --git a/src/panfrost/vulkan/panvk_android.c b/src/panfrost/vulkan/panvk_android.c
+index 91fe72d..bf786f6 100644
+--- a/src/panfrost/vulkan/panvk_android.c
++++ b/src/panfrost/vulkan/panvk_android.c
+@@ -17,6 +17,7 @@
+ #include "vk_alloc.h"
+ #include "vk_android.h"
+ #include "vk_device_memory.h"
++#include "vk_internal_exts.h"
+ #include "vk_util.h"
+ 
+ bool
+@@ -359,8 +360,11 @@ panvk_android_import_ahb_memory(VkDevice device,
+    /* Always chain dedicated info for simplicity, since the spec allows both
+     * image and buffer to be VK_NULL_HANDLE.
+     */
++   const struct wsi_memory_allocate_info *wsi_info =
++      vk_find_struct_const(pAllocateInfo->pNext, WSI_MEMORY_ALLOCATE_INFO_MESA);
+    const VkMemoryDedicatedAllocateInfo local_dedicated_info = {
+       .sType = VK_STRUCTURE_TYPE_MEMORY_DEDICATED_ALLOCATE_INFO,
++      .pNext = wsi_info,
+       .image = img_handle,
+       .buffer = buf_handle,
+    };
+diff --git a/src/panfrost/vulkan/panvk_device_memory.c b/src/panfrost/vulkan/panvk_device_memory.c
+index a0594c4..24db3d3 100644
+--- a/src/panfrost/vulkan/panvk_device_memory.c
++++ b/src/panfrost/vulkan/panvk_device_memory.c
+@@ -17,6 +17,7 @@
+ #include "util/u_atomic.h"
+ #include "vk_debug_utils.h"
+ #include "vk_log.h"
++#include "vk_internal_exts.h"
+ 
+ static void
+ panvk_memory_emit_report(struct panvk_device *device,
+@@ -110,7 +111,15 @@ panvk_AllocateMemory(VkDevice _device,
+          fd_info->handleType == VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT ||
+          fd_info->handleType == VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT);
+ 
+-      mem->bo = pan_kmod_bo_import(device->kmod.dev, fd_info->fd);
++      const struct wsi_memory_allocate_info *wsi_info =
++         vk_find_struct_const(pAllocateInfo->pNext, WSI_MEMORY_ALLOCATE_INFO_MESA);
++      uint32_t import_flags = 0;
++      if (physical_device->kbase_node_path[0] && wsi_info &&
++          wsi_info->no_cpu_map &&
++          !(type->propertyFlags & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT))
++         import_flags |= PAN_KMOD_BO_FLAG_NO_MMAP;
++      mem->bo = pan_kmod_bo_import_flags(device->kmod.dev, fd_info->fd,
++                                         import_flags);
+       if (!mem->bo) {
+          result = panvk_error(device, VK_ERROR_INVALID_EXTERNAL_HANDLE);
+          goto err_destroy_mem;
+diff --git a/src/vulkan/util/vk_internal_exts.h b/src/vulkan/util/vk_internal_exts.h
+index fb16443..b35fb97 100644
+--- a/src/vulkan/util/vk_internal_exts.h
++++ b/src/vulkan/util/vk_internal_exts.h
+@@ -61,6 +61,7 @@ struct wsi_memory_allocate_info {
+      * GL driver in the X server).
+      */
+     bool dma_buf_sync_file;
++    bool no_cpu_map;
+ };
+ 
+ /* To be chained into VkSurfaceCapabilities2KHR */
+diff --git a/src/vulkan/wsi/wsi_common.c b/src/vulkan/wsi/wsi_common.c
+index a30f093..b63bf16 100644
+--- a/src/vulkan/wsi/wsi_common.c
++++ b/src/vulkan/wsi/wsi_common.c
+@@ -516,8 +516,13 @@ wsi_create_ahb_image_mem(const struct wsi_swapchain *chain,
+    if (memory_type == UINT32_MAX)
+       return VK_ERROR_OUT_OF_DEVICE_MEMORY;
+ 
++   const struct wsi_memory_allocate_info memory_wsi_info = {
++      .sType = VK_STRUCTURE_TYPE_WSI_MEMORY_ALLOCATE_INFO_MESA,
++      .no_cpu_map = true,
++   };
+    VkImportAndroidHardwareBufferInfoANDROID import = {
+       .sType = VK_STRUCTURE_TYPE_IMPORT_ANDROID_HARDWARE_BUFFER_INFO_ANDROID,
++      .pNext = &memory_wsi_info,
+       .buffer = image->ahb,
+    };
+    VkMemoryDedicatedAllocateInfo dedicated = {

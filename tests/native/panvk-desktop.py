@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Private PanVK GNOME/GTK4 presentation experiment; no installed settings change."""
+"""Private GNOME/GTK4 presentation experiment for PanVK (Mali) or Turnip (Adreno); no installed settings change."""
 import argparse
 import ctypes
 import faulthandler
@@ -94,14 +94,14 @@ def audit(pid):
     for fd in (proc / 'fd').iterdir():
         try:
             target = os.readlink(fd)
-            if target in ('/dev/mali0', '/dev/ion') or 'dmabuf' in target:
+            if target in ('/dev/mali0', '/dev/kgsl-3d0', '/dev/ion') or 'dmabuf' in target:
                 devices.append({'fd': int(fd.name), 'target': target})
         except OSError:
             pass
     fields = (proc / 'stat').read_text().rsplit(')', 1)[1].split()
     return {'pid': pid, 'cpu_ticks': int(fields[11]) + int(fields[12]),
             'libraries': sorted({s.split()[-1] for s in maps.splitlines()
-            if any(k in s for k in ('panfrost', 'gallium', 'EGL', 'GLES', 'mutter-cogl',
+            if any(k in s for k in ('panfrost', 'freedreno', 'gallium', 'EGL', 'GLES', 'mutter-cogl',
                                    'angle', 'libgtk-4', 'libX11', 'libxcb', 'libxshmfence'))}),
             'devices': devices, 'fd_count': len(list((proc / 'fd').iterdir())),
             'status': (proc / 'status').read_text()}
@@ -191,7 +191,9 @@ def benchmark(args, shell, start, check_displays):
     phases = [] if args.benchmark_video_only else [('idle', None),
         ('gears', ['stdbuf', '-oL', 'glxgears', '-fullscreen'])]
     if args.benchmark_video:
-        phases.append(('video', ['mpv', '--no-config', '--hwdec=no', '--vo=gpu',
+        # The real binary: the session's mpv on PATH is the livecd wrapper, which adds
+        # its own --gpu-context/--hwdec choices.
+        phases.append(('video', [str(Path(os.environ['PREFIX']) / 'bin/mpv'), '--no-config', '--hwdec=no', '--vo=gpu',
             '--gpu-api=opengl', '--fullscreen', '--loop-file=inf', '--audio=no',
             '--input-ipc-server=' + str(video_socket),
             *(['--vf=fps=' + str(args.benchmark_video_fps)] if args.benchmark_video_fps else []),
@@ -737,6 +739,9 @@ def parent(args):
         env['PANVK_KBASE_DRI3'] = args.mode
     if args.present_mode:
         env['MESA_VK_WSI_PRESENT_MODE'] = args.present_mode
+    if args.wsi_debug:
+        # apply_renderer strips MESA_VK_WSI_*; set it afterwards.
+        env['MESA_VK_WSI_DEBUG'] = args.wsi_debug
     if args.server == 'xvfb':
         env['LIBGL_KOPPER_DRI2'] = '1'
     for name in ('config', 'data', 'cache', 'state'):
@@ -766,6 +771,9 @@ def parent(args):
     server_env.pop('TERMUX_X11_FORCE_FLIP', None)
     if args.force_flip:
         server_env['TERMUX_X11_FORCE_FLIP'] = '1'
+    server_env.pop('TERMUX_X11_DEBUG', None)
+    if args.server_debug:
+        server_env['TERMUX_X11_DEBUG'] = '1'
     session = server = None
     runtime = None
     code = 1
@@ -833,6 +841,11 @@ def parent(args):
                 session.wait(timeout=5)
         server_exit_before_cleanup = server.poll() if server else None
         stop(server)
+        if server:
+            # The server logs DRI3 imports and errors to Android's log, not to stdout.
+            with (args.out / 'server-logcat.txt').open('w') as log:
+                subprocess.run(['/system/bin/logcat', '-d', '-v', 'time', '--pid', str(server.pid)],
+                               stdout=log, stderr=subprocess.STDOUT, timeout=20, check=False)
         cleaned = cleanup_tagged(args.out)
         if runtime:
             shutil.rmtree(runtime)
@@ -854,13 +867,17 @@ if __name__ == '__main__':
     faulthandler.register(signal.SIGUSR1)
     parser = argparse.ArgumentParser()
     parser.add_argument('--out', type=Path, required=True)
-    parser.add_argument('--mode', choices=('shm', 'raw', 'ahb', 'installed'), default='shm',
-                        help="installed keeps the integrated controller's presentation choice")
+    parser.add_argument('--mode', choices=('shm', 'raw', 'ahb', 'installed', 'default'), default='shm',
+                        help="installed keeps the integrated controller's presentation choice; "
+                             'default sets no PanVK override (Turnip)')
     parser.add_argument('--present-mode', choices=('fifo', 'relaxed', 'mailbox', 'immediate'),
                         help='Override the Vulkan present mode after controller environment setup')
     parser.add_argument('--server', choices=('lorie', 'xvfb'), default='lorie')
     parser.add_argument('--screen-size', help='Private framebuffer size, e.g. 1920x1080')
     parser.add_argument('--screen-fps', type=int, help='Private lorie refresh rate (1–600)')
+    parser.add_argument('--wsi-debug', help='Set MESA_VK_WSI_DEBUG for the session only, e.g. sw')
+    parser.add_argument('--server-debug', action='store_true',
+                        help='Set TERMUX_X11_DEBUG on the private server to log DRI3 imports')
     parser.add_argument('--force-flip', action='store_true',
                         help='Allow imported raw-fd flips on the private lorie; experimental')
     parser.add_argument('--cycles', type=int, default=20)
@@ -933,7 +950,7 @@ if __name__ == '__main__':
         parser.error('race checks require isolation and cannot use benchmark-only')
     if args.mode == 'installed' and not (args.integrated or args.worker):
         parser.error('installed mode tests the integrated controller')
-    if args.server == 'xvfb' and args.mode in ('raw', 'ahb', 'installed'):
+    if args.server == 'xvfb' and (args.mode in ('raw', 'ahb', 'installed') or args.server_debug):
         parser.error('raw/AHB DRI3 requires the private lorie server')
     if args.force_flip and (args.server != 'lorie' or args.mode != 'raw'):
         parser.error('force-flip requires raw DRI3 on the private lorie server')

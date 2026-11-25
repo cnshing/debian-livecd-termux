@@ -225,6 +225,12 @@ def benchmark(args, shell, start, check_displays):
             detailed = name == 'video' and args.benchmark_video_profile
             profile_before = video_stats(detailed=True) if detailed else None
             threads_before = thread_stats(proc.pid) if detailed else None
+            watcher = None
+            if args.present_watch and proc:
+                # How the server completes the compositor's presents over the same interval.
+                watcher = subprocess.Popen([sys.executable, str(Path(__file__).with_name('present-watch.py')),
+                    '--seconds', str(args.benchmark_seconds),
+                    '--out', str(args.out / ('present-' + name + '.json'))])
             samples = [sample(processes)]
             end = time.monotonic() + args.benchmark_seconds
             while time.monotonic() < end:
@@ -235,6 +241,11 @@ def benchmark(args, shell, start, check_displays):
                 samples.append(sample(processes))
             duration = samples[-1]['monotonic'] - samples[0]['monotonic']
             wall_duration = samples[-1]['wall_time'] - samples[0]['wall_time']
+            present_modes = None
+            if watcher:
+                if watcher.wait(timeout=30) != 0:
+                    raise RuntimeError('present-watch failed during ' + name)
+                present_modes = json.loads((args.out / ('present-' + name + '.json')).read_text())
             if abs(wall_duration - duration) > max(2, duration * .1):
                 raise RuntimeError('Phone suspended or wall clock changed; keep it awake and rerun')
             log_end = log_path.stat().st_size if proc else 0
@@ -243,6 +254,7 @@ def benchmark(args, shell, start, check_displays):
                 'processes': {key: audit(pid) for key, pid in processes.items()},
                 'cpu_percent_one_core': {key: 100 * (samples[-1]['cpu_seconds'][key] - value) / duration
                                         for key, value in samples[0]['cpu_seconds'].items()},
+                'present_modes': present_modes,
                 'samples': samples})
             if detailed:
                 threads_after = thread_stats(proc.pid)
@@ -569,7 +581,7 @@ print("GHOSTTY INPUT PASS", phase, flush=True)
                 if not full:
                     width, height = ((641, 359), (803, 451), (527, 317), (960, 541))[cycle % 4]
                     run(['xdotool', 'windowsize', '--sync', window, str(width), str(height)])
-                time.sleep(.35)
+                time.sleep(args.capture_settle)
                 state = json.loads((out / 'gtk-state.json').read_text())
                 geometry = run(['xdotool', 'getwindowgeometry', '--shell', window], capture_output=True, text=True).stdout
                 props = run(['xprop', '-id', window, '_NET_WM_STATE'], capture_output=True, text=True).stdout
@@ -813,6 +825,7 @@ def parent(args):
         (args.out / 'environment.json').write_text(json.dumps(env, indent=2))
         session = subprocess.Popen(['dbus-run-session', '--', sys.executable, __file__, '--worker',
              '--mode', args.mode, '--out', str(args.out), '--cycles', str(args.cycles),
+             '--capture-settle', str(args.capture_settle),
              '--restart-cycles', str(args.restart_cycles), '--soak-seconds', str(args.soak_seconds),
              '--benchmark-seconds', str(args.benchmark_seconds),
              '--benchmark-server-pid', str(server.pid),
@@ -822,6 +835,7 @@ def parent(args):
              *(['--vkcube', str(args.vkcube.resolve())] if args.vkcube else []),
              *(['--present-race-only'] if args.present_race_only else []),
              *(['--benchmark-only'] if args.benchmark_only else []),
+             *(['--present-watch'] if args.present_watch else []),
              *(['--benchmark-video-only'] if args.benchmark_video_only else []),
              *(['--benchmark-video-profile'] if args.benchmark_video_profile else []),
              *(['--benchmark-video-fps', str(args.benchmark_video_fps)] if args.benchmark_video_fps else []),
@@ -889,6 +903,8 @@ if __name__ == '__main__':
     parser.add_argument('--force-flip', action='store_true',
                         help='Allow imported raw-fd flips on the private lorie; experimental')
     parser.add_argument('--cycles', type=int, default=20)
+    parser.add_argument('--capture-settle', type=float, default=.35,
+                        help='Seconds between a GTK colour/resize step and its capture')
     parser.add_argument('--ghostty-launcher', type=Path, help='Private experimental Ghostty launcher')
     parser.add_argument('--ghostty-gsk', choices=('cairo', 'gl'), default='cairo')
     parser.add_argument('--ghostty-software', action='store_true', help='Software control for the Ghostty probe')
@@ -905,6 +921,8 @@ if __name__ == '__main__':
     parser.add_argument('--benchmark-video-fps', type=int,
                         help='Apply an mpv fps filter for equal-output-rate comparisons')
     parser.add_argument('--benchmark-only', action='store_true', help='Skip correctness checks after measuring')
+    parser.add_argument('--present-watch', action='store_true',
+                        help="Count copied and flipped completions of the compositor's presents")
     parser.add_argument('--benchmark-server-pid', type=int, help=argparse.SUPPRESS)
     parser.add_argument('--present-race-trials', type=int, default=0,
                         help='Record fullscreen WebGL flips for race analysis')
@@ -942,6 +960,8 @@ if __name__ == '__main__':
         parser.error('benchmark-video-fps must be between 1 and 60')
     if args.benchmark_seconds and args.allow_other_displays:
         parser.error('benchmarks require no other private displays')
+    if args.present_watch and not args.benchmark_seconds:
+        parser.error('present-watch requires benchmark-seconds')
     if args.benchmark_only and not args.benchmark_seconds:
         parser.error('benchmark-only requires benchmark-seconds')
     if args.present_race_trials < 0 or args.present_race_frames < 1:

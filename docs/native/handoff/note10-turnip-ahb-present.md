@@ -1,8 +1,17 @@
 # Handoff: Note10+ Turnip presentation with Android hardware buffers
 
-State on 2026-11-25 UTC. **Not started; nothing has been measured on the Note10+.** This page
-proposes porting the S20's AHB presentation to the Note10+'s Turnip driver and lists what to
-check first. The S20 work it builds on: [s20-panvk-ahb-present.md](s20-panvk-ahb-present.md).
+State on 2026-11-25 UTC. **Steps 1–5 done on the Note10+; the done criteria are met.
+Promotion (step 6) waits for the owner.** The Bionic Turnip presents over **raw DRI3** today,
+and Termux:X11 copies every frame on the CPU (X server 61–65% of one core). A CI-built
+Android+X11 Turnip from the S20's Zenith tree with the shared AHB WSI and an opt-in
+`TU_KGSL_DRI3=ahb` presents through AHBs instead, and the server **flips every Shell frame**
+(counted with Present events). Against the same driver on raw DRI3, in both run orders and
+repeated on the final build: **gears total CPU −13% at twice the frame rate (59 vs 30 FPS),
+30 FPS video −16%, equal-output 10 FPS video −15 to −19%**, zero drops everywhere. Race
+(2 × 300 frames, zero split), 50 restarts and a 30-minute soak pass; 199 of 200 AHB
+colour/resize captures are exact (one late fullscreen frame, not reproduced, below). Nothing
+is installed or packaged.
+The S20 work it builds on: [s20-panvk-ahb-present.md](s20-panvk-ahb-present.md).
 Shared rules: [README.md](README.md).
 
 ## Why
@@ -22,96 +31,163 @@ The saving comes from Termux:X11 (`termux/termux-x11` at `a00942e`,
   "For some reason it does not work fine with turnip", so every frame is copied by the CPU.
 - MIT-SHM readback copies on the application side instead (what the S20 replaced).
 
-Whichever of the last two the Note10+ uses today, it pays a CPU copy per frame that an AHB flip
-would avoid. How large that copy is on Adreno is unknown; measure it before porting anything.
+The Note10+ uses the raw fd path (below); its copy costs the X server 61–65% of one core.
 
-## How the Note10+ presents today
+## How the Note10+ presents today: raw DRI3
 
 The Note10+ (SM-N975U1, Snapdragon 855, Adreno 640, Android 11, kernel 4.14) has two Turnips:
 
 | Turnip | Used by | Source | Present path |
 | --- | --- | --- | --- |
-| Bionic, Termux `mesa-vulkan-icd-freedreno` 26.2.6-1xx, staged by `prebuilt/turnip/gpu-setup.py` into `~/.local/opt/livecd-native/gpu` | mutter (Zink/Kopper), GTK, Chromium, Firefox | `packages/mesa`, `-Dplatforms=x11,wayland`, `-Dfreedreno-kmds=msm,kgsl` | **unsettled**, see below |
+| Bionic, Termux `mesa-vulkan-icd-freedreno` 26.2.6-108, staged by `prebuilt/turnip/gpu-setup.py` into `~/.local/opt/livecd-native/gpu` | mutter (Zink/Kopper), GTK, Chromium, Firefox | `packages/mesa`, `-Dplatforms=x11,wayland`, `-Dfreedreno-kmds=msm,kgsl` | **raw DRI3**: linear dma-buf, modifier 0, mapped and copied by the X server |
 | glibc, `android-vaapi-glibc` (lfdevs Mesa) | Chrome | `packages/android-vaapi-glibc` | DRI3 with shared dma-bufs; present waits for the fence since revision 14 ([note10-chrome-typing.md](note10-chrome-typing.md)) |
 
-The Bionic present path needs settling first. [note10-gpu-rectangles.md](note10-gpu-rectangles.md)
-and [note10-chrome-typing.md](note10-chrome-typing.md) report that the Bionic Turnip "does not use
-DRI3 on KGSL" (empirical: Chromium was clean where Chrome tore). The source suggests otherwise:
-`tu_wsi_init` (`src/freedreno/vulkan/tu_wsi.cc`) sets `sw_device = false`, and with no DRM device
-behind KGSL `tu_wsi_can_present_on_device` reports a different GPU, which in
-`wsi_common_x11.c` selects the DRM image path with `same_gpu = false` — a prime blit into a linear
-dma-buf, still sent over DRI3. Decide it on the phone (step 1). Termux:X11 runs **without**
-`-legacy-drawing` on Turnip (`graphics.legacy_drawing`), so its root is already AHB-backed.
+Settled on the phone (runs `path-default`, `path-sw`): the private server logs
+`DRI3: imported raw fd, modifier 0, 1920x1080 stride 7680` for every swapchain image of the
+Shell and of gears, and each holds three exported dma-bufs. The `MESA_VK_WSI_DEBUG=sw` control
+logs no import and holds no dma-buf. Why: Termux:X11's DRI3 has no `open` hook, so
+`wsi_dri3_open` returns −1 and `wsi_x11_check_dri3_compatible` treats the server as the same GPU;
+Turnip then renders straight into linear exportable images. The earlier "no DRI3 on KGSL"
+reading in [note10-gpu-rectangles.md](note10-gpu-rectangles.md) was wrong about the transport;
+its fix (the CPU fence wait, `packages/mesa` 0028) is exactly what this path needs.
+Termux:X11 runs **without** `-legacy-drawing` on Turnip, so its root is AHB-backed and the
+server's copy goes from the uncached dma-buf into that root.
 
-## What carries over from the S20
+## Step 1: baseline (installed Turnip 26.2.6-108)
 
-Reusable, mostly:
+Private lorie 1920×1080 at fake 60/s, five-second warmups, 30-second intervals, the S20's
+1080p30 fixture (`d574c3cb…`) in software decode without audio, `$PREFIX/bin/mpv`. Percent of
+one core; total = Shell + X server + application; Android activity excluded. Run order raw,
+SHM, SHM, raw; every run kept isolation.
 
-- The shared Mesa parts of `tools/panvk-probes/platform-patches/0004-wsi-x11-termux-ahb.patch`:
-  the `WSI_IMAGE_TYPE_AHB` allocation in `wsi_common.c` (CPU-usable AHB, queried memory
-  properties, dedicated import) and the X11 socket transport in `wsi_common_x11.c` (modifier
-  1255, one-byte request, `AHardwareBuffer_sendHandleToUnixSocket`, three-second timeouts).
-  Only the switch in `panvk_wsi_init` is PanVK-specific; Turnip needs its own in `tu_wsi_init`.
-- The render-completion wait: KGSL attaches no implicit fences and the 4.14 kernel lacks
-  `DMA_BUF_IOCTL_IMPORT_SYNC_FILE`, so the present must wait on the CPU. `packages/mesa`
-  patch 0028 and `android-vaapi-glibc` revision 14 already do this for DRI3; the AHB path in
-  patch 0004 keeps the same wait (patch 0003 on the S20).
-- Probes: `tools/panvk-probes/ahb-import.py`, `ahb-x11.py`, `ahb-egl.py`,
-  `tests/native/panvk-ahb-present.py`, and `tests/browsers/private-lorie`. They take a
-  `--driver` path; check for PanVK-only assumptions before trusting a pass.
-- The benchmark and correctness harness `tests/native/panvk-desktop.py` (`--benchmark-video-fps`
-  for equal-output comparisons, `--benchmark-video-profile` for per-thread CPU, race, restarts,
-  soak, `--mode installed`). It is PanVK-specific today (`PAN`, Mali FD checks); generalise it
-  rather than writing a second harness.
-- The launcher hook: `graphics.session_presentation` gives only the desktop session on
-  Termux:X11 `PANVK_KBASE_DRI3=ahb`; extend it for Turnip, keeping browsers and glibc out.
+| Path | Workload | Shell | X server | App | Total | Output |
+| --- | --- | ---: | ---: | ---: | ---: | --- |
+| raw DRI3 (default) | gears | 79.8–80.0% | 65.1% | 9.6% | 154.6–154.7% | 45–49 FPS |
+| raw DRI3 | video 30 FPS | 54.9–61.1% | 61.3–64.0% | 29.2–30.0% | 145.3–155.2% | 0 drops |
+| raw DRI3 | video at 10 FPS | 23.4–24.2% | 36.0–37.4% | 23.0–23.2% | 83.2–84.0% | 0 drops |
+| SHM (`MESA_VK_WSI_DEBUG=sw`) | gears | 74.5–79.0% | 71.8–74.0% | 50.7–56.4% | 196.9–209.4% | 75–83 FPS |
+| SHM | video 30 FPS | 61.6–62.1% | 61.8–61.9% | 45.2–46.2% | 168.6–170.1% | 0 drops |
+| SHM | video at 10 FPS | 28.5–28.6% | 33.4–34.5% | 31.0–32.2% | 93.9–94.2% | 0 drops |
 
-Not reusable:
+**Decision: go.** On today's raw path the X server's copy is about 40% of total CPU.
+Captures of both paths were opened: gears and the moving fixture render correctly.
 
-- Patch 0005 removed a PanVK kbase cost (whole-buffer cache cleaning of every imported buffer on
-  every submission). Turnip/KGSL has its own import and cache handling; profile per-thread CPU
-  before assuming either the cost or its absence.
-- The PanVK packages, release and tree pins.
+## The Turnip build
 
-## What Turnip needs
+`panvk-driver.yml` variant **`turnip-ahb`** (Android ABI only) builds Turnip from the same
+Zenith `cf70e02` tree as the S20's PanVK (content tree `4a8e9a8c…`), through Zenith's
+`build-android.sh` with `-Dvulkan-drivers=freedreno -Dfreedreno-kmds=msm,kgsl` (`msm` keeps a
+static libdrm and with it the DRI3 path). Patches, from `tools/panvk-probes/`:
 
-1. **AHB import.** `VK_ANDROID_external_memory_android_hardware_buffer` support in Turnip and
-   Mesa's common Vulkan code is compiled only with `-Dplatforms=android` (and gralloc through
-   `src/util/u_gralloc`, which has a Qualcomm backend, `u_gralloc_qcom.c`). Termux's Mesa builds
-   `x11,wayland` and carries `0000-disable-android-detection.patch`. A Bionic Turnip built for
-   both Android and X11 is needed — the S20's PanVK is built that way by Zenith's
-   `scripts/build-android.sh` (`tools/panvk-probes/build-driver.sh`). On KGSL, importing the
-   AHB's dma-buf goes through `kgsl_bo_init_dmabuf` (`tu_knl_kgsl.cc`).
-2. **A switch in `tu_wsi_init`** that sets `wsi_device.x11.ahb` (and leaves `sw_device` false),
-   rejected on non-Android builds as patch 0004 does for PanVK.
-3. **AHB usage bits that import.** On the S20, GPU-only usage `0x300` failed import and
-   CPU-usable `0x333` passed. Check both on Adreno with `ahb-import.py` before choosing.
-4. **No fallback exists** in the AHB WSI when the X server lacks the socket import (for example
-   Xvfb): swapchain creation fails. Only ever enable it for Termux:X11.
+- `platform-patches/0003` (render-completion wait) and `0004` (AHB X11 WSI), shared with PanVK.
+- `turnip-patches/0101`: `TU_KGSL_DRI3=ahb` on KGSL sets `wsi_device.x11.ahb` and turns
+  modifiers off; non-Android builds refuse it.
+- `turnip-patches/0102`: Turnip imports an AHB into a dedicated image through
+  `vk_android_get_ahb_layout`. No gralloc mapper is reachable from an app namespace on
+  Android 11 (the Qualcomm `u_gralloc` backend needs the gralloc0 module; Zenith's mapper loader
+  guesses `mediatek`), so every import failed with `VK_ERROR_INVALID_EXTERNAL_HANDLE` (CI
+  45612838287). The WSI now marks the AHB it just allocated as owned around the import, so
+  Zenith's linear-layout proof (cookies written through the dma-buf, read back through
+  `AHardwareBuffer_lock`) may test it; the proof accepts B8G8R8A8 and its cookies depend only
+  on the pixel, because GTK's first swapchain is 1×1. Every 1080p buffer reads back `LINEAR`, 9/9.
 
-The glibc Turnip (Chrome) cannot use this path; leave Chrome on DRI3.
+Builds: CI 45612838287 (0101 only, import fails), 45615059345 (`80ba24ce…`, benchmarks below),
+45617186801 (`d297b4df…`, Mesa tree `432f482a…`, the 1×1 fix; correctness and soak). Staged
+only in `~/pl-tahb/driver-ahb*` with an `x11/` directory of versioned soname links, as in the
+PanVK package. Its non-AHB mode is the raw DRI3 control. The driver is Mesa 26.3-devel, slower
+than the installed 26.2.6 on raw DRI3 (gears 30 against 45–49 FPS), so compare AHB only against
+the same build.
+
+## Step 5: paired benchmark, same driver (CI 45615059345)
+
+Same conditions as the baseline; run order raw, AHB, AHB, raw. Zero VO and decoder drops in
+every video run; isolation kept in all.
+
+| Workload | Mode | Shell | X server | App | Total | Output |
+| --- | --- | ---: | ---: | ---: | ---: | --- |
+| gears | raw DRI3 | 85.0% | 61.5–61.8% | 6.9–7.0% | 153.4–153.7% | 30–33 FPS |
+| gears | AHB | 86.4% | 32.5–32.9% | 14.6% | 133.5–133.9% | 59.1–59.4 FPS |
+| video 30 FPS | raw DRI3 | 48.9% | 60.8–61.1% | 30.7–30.8% | 140.5–140.7% | 0 drops |
+| video 30 FPS | AHB | 55.7–56.1% | 26.4–26.7% | 35.5–35.7% | 118.0–118.1% | 0 drops |
+| video at 10 FPS | raw DRI3 | 21.4–23.0% | 38.0–38.2% | 22.4–22.6% | 81.8–83.9% | 0 drops |
+| video at 10 FPS | AHB | 25.8–27.4% | 15.6–16.0% | 25.8–26.5% | 67.6–69.5% | 0 drops |
+
+AHB is below raw DRI3 in every workload and both orders: gears −13% while doing twice the
+frames, video −16% at source rate and −15 to −19% at equal output. The X server's share
+halves or better; Shell and mpv rise a little (each frame now goes through the WSI's CPU fence
+wait and AHB import). The smoke run logged `imported AHardwareBuffer, modifier 1255,
+1920x1080 stride 1920`; captures were opened.
+
+## Flips
+
+`tests/native/present-watch.py` (harness `--present-watch`) selects Present `CompleteNotify` on
+every window and counts completion modes over each 15-second phase (CI 45617186801,
+`pw4-*`):
+
+| Mode | Phase | Shell window (`0x200004`) | Application window |
+| --- | --- | --- | --- |
+| AHB | gears | **479 flip** | 890 copy |
+| AHB | video | **441 flip** | 450 copy |
+| raw DRI3 | gears | 444 copy | 451 copy |
+| raw DRI3 | video | 440 copy | 450 copy |
+
+Every Shell frame flips on AHB and is copied on raw DRI3. Application windows are redirected,
+so their presents are copies on both paths (from an AHB or from a raw dma-buf); those copies
+are the X server's remaining 25–31% on AHB. As on the S20, removing them needs GPU compositing
+in Termux:X11.
+
+## Correctness and stability
+
+- **Race**, `--present-race-trials 1 --present-race-frames 300` (WebGL in Chromium on Turnip,
+  composited by the Shell): CI 45615059345 153 red / 147 blue, CI 45617186801 154 red /
+  146 blue, **zero split or invalid**. Consecutive frames were opened; they alternate.
+- **Restarts:** 50/50 vkcube starts return zero with the same Shell (CI 45617186801).
+- **Soak** (`q3-soak-ahb`, CI 45617186801): 20 colour cycles (40/40 exact, stale control
+  rejected), then vkcube FIFO and glxgears for 1800.0 s; `check-panvk-soak.py` passes:
+  60 samples, the same Shell, vkcube and gears throughout, gears 57.6–59.9 FPS, MemAvailable
+  4.8–5.1 GB. First, middle and last captures opened: both keep moving, no corruption.
+- **Colour/resize** (`check-panvk-desktop.py`, 20 cycles, 40 captures each): CI 45615059345
+  failed at GTK's first 1×1 swapchain (fixed in 0102). CI 45617186801:
+
+  | Run | Mode | Settle | Exact |
+  | --- | --- | ---: | ---: |
+  | `q3-correct-ahb` | AHB | 0.35 s | 39/40 |
+  | `q3-soak-ahb` | AHB | 0.35 s | 40/40 |
+  | `c-ahb-1`, `c-ahb-2` | AHB | 0.35 s | 40/40, 40/40 |
+  | `c-raw-1`, `c-raw-2` | raw DRI3 | 0.35 s | 40/40, 40/40 |
+  | `c-ahb-settle` | AHB | 1.5 s | 40/40 |
+
+  The one miss, `q3-correct-ahb/gtk-04-full`, shows the previous frame: the phase-10 colours
+  at the old 641×359 size in the bottom-left of a white fullscreen surface, 0.35 s after the
+  app had rendered frame 21 at 1920×1080. It did not recur in the next 160 AHB captures, so
+  it is not shown to be AHB-specific; a likely cause is the slower swapchain recreation on AHB
+  (four new 8 MB AHBs, each with the linear proof and a socket handshake) on a fullscreen
+  resize. The stale-phase negative control was rejected in every run. Samples opened.
+- Confirmation benchmark on CI 45617186801 (order AHB, raw): gears 133.0% vs 155.1%, video
+  118.0% vs 141.1%, 10 FPS video 70.8% vs 85.0%, zero drops — the same as CI 45615059345.
+
+Evidence: phone `~/pl-tahb/` (`base-*`, `v10-*`, `q-*`, `q3-*`, `c-*`, `pw4-*`); retrieved
+summaries and captures in the ignored `temp/note10-turnip-ahb/evidence/`.
 
 ## Next steps, in order
 
-1. **Measure the baseline and settle the present path.** On a private lorie (`private-lorie`,
-   1920×1080, fake 60/s, the same 1080p30 fixture with software decode, five-second warmups,
-   30-second intervals), record Shell, X server and application CPU for gears, 30 FPS video and
-   10 FPS equal-output video, plus VO drops. Identify the Bionic path from the server's DRI3
-   import log, the application's mapped buffers and a `MESA_VK_WSI_DEBUG=sw` control.
-   `graphics.apply_renderer` strips `MESA_VK_WSI_*`; set it afterwards and check
-   `/proc/<pid>/environ`.
-2. **Decide go/no-go** from the X server and readback share of CPU. If the copy is small on
-   Adreno, record that and stop.
-3. **Build a private Android+X11 Bionic Turnip** in CI with the shared WSI parts of patch 0004
-   and a Turnip switch. Turnip has no source-build workflow here yet; `panvk-driver.yml` is the
-   model. Stage it privately; install nothing.
-4. **Probes:** AHB import with both usages, CPU↔GPU pattern checks, the socket client with 180
-   paced presents completing as `FLIP`, exact root pixels, Android EGL sampling.
-5. **Paired qualification against the same Turnip without AHB**, both run orders: gears and
-   equal-output video total CPU (the owner's gate is CPU for equal work), FPS, drops; then
-   colour/resize, restarts, a 300-frame race and a 30-minute soak. Open the captures.
-6. **Promotion, only on the owner's go-ahead:** package the driver, extend
-   `session_presentation`, install through the local repo, recheck with `--mode installed`.
+1. **Promotion, only on the owner's go-ahead:** package the Android Turnip as its own package
+   (built by `turnip-ahb`, staged beside the Termux Turnip, never replacing
+   `~/.local/opt/livecd-native/gpu`), with the `x11/` soname links the PanVK package ships;
+   extend `graphics.session_presentation` to set `TU_KGSL_DRI3=ahb` only for the desktop
+   session on Termux:X11 and point that session at the new ICD (browsers and Chrome's glibc
+   Turnip stay as they are; Xvfb never gets it, because the AHB WSI has no fallback); install
+   through the local repo; recheck with `--mode installed`.
+2. Before or with promotion: measure the attached Android activity's sampling cost on the
+   live desktop, and watch for the late fullscreen frame on resize (repeat the colour suite
+   at 0.35 s settle a few more times).
+3. The CI Turnip is Mesa 26.3-devel and slower than the installed 26.2.6 on raw DRI3 (gears
+   30 vs 45–49 FPS). Compare the promoted session against today's installed stack, not only
+   against the same build, before calling it a net win; AHB at 59 FPS / 133% already beats
+   the installed raw path's 47 FPS / 155%.
+4. Foreign AHB import (`tools/panvk-probes/ahb-import.py`, which allocates its own buffer)
+   fails on this Turnip by design: only driver-owned buffers may be probed. The swapchain
+   does not need it; a Qualcomm handle parser would.
 
 ## Gotchas
 
@@ -126,10 +202,21 @@ The glibc Turnip (Chrome) cannot use this path; leave Chrome on DRI3.
   drop counters (see the S20 page).
 - `gpu-setup.py` matches Turnip to the installed `mesa` version; a private Turnip must not
   replace the staged one in `~/.local/opt/livecd-native/gpu`.
+- `mpv` on the session's PATH is the livecd wrapper, which adds its own `--gpu-context` and
+  `--hwdec`; benchmarks call `$PREFIX/bin/mpv` (the wrapper made mpv fail "Suspected software
+  renderer").
+- Zenith-built drivers dlopen versioned X11 sonames (`libxcb.so.1`, …); stage them with an
+  `x11/` directory of links, which the harness puts on `LD_LIBRARY_PATH`.
+- The driver explains AHB import failures only in Android's log (`logcat`, tag `MESA`), for
+  example `u_gralloc_get_buffer_basic_info failed` and the `cpu-linear-probe` result.
+- Stale `.X11-unix/X*` sockets of dead servers make the harness refuse to start; remove one
+  only after `xdpyinfo` fails on it and its lock file's pid is gone.
 
 ## What counts as done
 
-- The baseline is measured and the Bionic present path is identified, with evidence.
+- The baseline is measured and the Bionic present path is identified, with evidence. **Met:**
+  raw DRI3.
 - Either a recorded no-go, or an AHB Turnip whose total CPU for gears and equal-output video is
   clearly below the current path in both run orders, with no split frames in the race test, a
-  completed soak, and captures opened and looked at.
+  completed soak, and captures opened and looked at. **Met** with CI 45615059345/45617186801;
+  promotion is the owner's call.

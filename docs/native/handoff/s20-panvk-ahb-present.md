@@ -459,8 +459,8 @@ Next work, in order:
 2. Done: the owner chose equal-work CPU as the video gate; AHB passes it.
 3. Done: promoted to default on the S20 (below).
 4. Still open: measure the attached Android activity's sampling cost with the live desktop,
-   and longer AHB race/menu checks. The Note10+ is unaffected: its Adreno GPU uses Turnip,
-   which has no equivalent of this WSI mode.
+   and longer AHB race/menu checks. The Note10+ port (Turnip, `TU_KGSL_DRI3=ahb`) is in
+   [note10-turnip-ahb-present.md](note10-turnip-ahb-present.md).
 
 ### Promotion to default
 

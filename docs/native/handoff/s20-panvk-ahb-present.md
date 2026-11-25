@@ -2,11 +2,15 @@
 
 State on 2026-11-25 UTC. Experimental `PANVK_KBASE_DRI3=ahb` builds in CI and passes
 private colour/resize checks and two changing quadrant images in a tagged Android window.
-**The performance gate fails:** gears CPU falls 18–23%, but video CPU rises 4–7% against
-same-driver SHM in both run orders. Keep SHM as default; nothing is installed or promoted.
-GPU-only AHB import still fails; CPU-usable allocations pass.
-The follow-up investigation identifies per-submission whole-buffer cache cleaning as a CPU
-penalty; matched-rate diagnostic controls confirm it. A scoped coherence fix is still pending.
+Patch 0005 (CI 45577255552, driver `2567638e…`) stops the per-submission cache clean of
+AHB swapchain imports. Against same-driver SHM in both run orders, **gears total CPU falls
+28%** and **video at an equal 10 FPS output falls 11–17%**, with zero drops in either mode.
+At the full 30 FPS source rate AHB shows about 740 of 900 frames against SHM's 400–490,
+so its raw total CPU is 9–27% *higher* while CPU per frame shown is about 29% lower.
+Whether that meets the "total CPU below SHM" gate is the owner's call; see
+[the patch 0005 qualification](#patch-0005-qualification). Colour/resize, 100 restarts,
+the 300-frame race and a 30-minute soak pass on the new driver. Keep SHM as default; nothing is installed or
+promoted. GPU-only AHB import still fails; CPU-usable allocations pass.
 Follows [s20-panvk-raw-dri3.md](s20-panvk-raw-dri3.md).
 Shared rules: [README.md](README.md).
 
@@ -333,6 +337,96 @@ does not open an Android window or qualify scanout.
 
 ## Implementation and remaining gates
 
+Patch `0005-wsi-ahb-gpu-only-import.patch` implements the scoped cache-clean change;
+CI [45577255552](https://github.com/cnshing/debian-livecd-termux/actions/runs/45577255552)
+builds source commit `df753f7`; its runtime results are in
+[the patch 0005 qualification](#patch-0005-qualification).
+The AHB WSI allocator marks its internal memory as never CPU-mapped by Vulkan. PanVK forwards
+that marker through AHB→fd import and requests `PAN_KMOD_BO_FLAG_NO_MMAP` only on kbase
+when the selected memory type is not HOST_VISIBLE. kbase keeps the GPU VA reservation but
+omits its separate CPU dma-buf alias. Its existing `cpu_ptr` condition consequently excludes
+these buffers from the noncoherent import-clean list. All ordinary imports and host-visible
+memory allocations keep the earlier path. The global cache-clean option remains enabled;
+render/idle fence handling is unchanged. The AHB allocation still uses CPU-capable `0x333`,
+so the `0x300` image-import failure remains a separate issue.
+
+The new `imported-host-coherent.py` regression probe imports a public AHB BLOB into a
+HOST_VISIBLE|HOST_COHERENT VkBuffer allocation. It keeps the Vulkan mapping alive across
+eight 4 MiB writes, uses no explicit flush calls, copies on the GPU and verifies every byte.
+The earlier ICD passes all eight iterations. Its deliberate `PANVK_KBASE_IMPORT_SYNC=0`
+control fails GPU readback, demonstrating that the probe catches lost CPU-write coherence.
+
+### Patch 0005 qualification
+
+CI 45577255552 selects `0005-wsi-ahb-gpu-only-import.patch` (listed in `PATCHES.txt`).
+Use its `out/patched/libvulkan_panfrost.so`, SHA-256
+`2567638e3600c5e1495a20abe40ff7843e04f2fb7956fb99f665ae87228b9e54`, staged only in
+`~/s20-ahb-present/driver-ahb-0005/`. Every run below uses this one ICD for both SHM and
+AHB, the same private 1920×1080 lorie at fake 60/s, the same fixture
+(`d574c3cb…`), five-second warmups and 30-second intervals; every process except the X server
+maps the staged ICD, isolation passes in all runs, and wall/monotonic intervals agree within
+ten microseconds. Android activity CPU is excluded, as before.
+
+Probes: `imported-host-coherent.py` passes all eight persistent HOST_COHERENT write/readback
+iterations, and its `PANVK_KBASE_IMPORT_SYNC=0` control still fails, so ordinary CPU-written
+imports keep their cache clean. `ahb-import.py` passes the CPU-usable `0x333` checks; `0x300`
+still fails as before.
+
+Full benchmark, run order SHM, AHB, AHB, SHM (percent of one core; total = Shell + X server +
+app):
+
+| Run | Mode | Gears total | Video (30 FPS source) total | VO drops / 900 | CPU ms per frame shown |
+| --- | --- | ---: | ---: | ---: | ---: |
+| `q0005-bench-shm-1` | SHM | 160.5% | 154.7% | 418 | 95.9 |
+| `q0005-bench-ahb-1` | AHB | 114.9% | 168.1% | 163 | 68.4 |
+| `q0005-bench-ahb-2` | AHB | 114.9% | 168.5% | 163 | 68.7 |
+| `q0005-bench-shm-2` | SHM | 160.4% | 132.3% | 497 | 98.5 |
+
+Gears reports 59.3–60.8 FPS in every interval. Decoder drops are zero throughout. Per-frame
+CPU assumes each undropped source frame was shown once (30 × 30 s − VO drops).
+At source rate AHB's Shell (58.5–59.2% vs 36.4–44.9%) and server (20.8–21.0% vs
+13.9–15.8%) rise because more frames reach them; mpv stays within SHM's range
+(88.5–88.6% vs 81.9–94.0%) while presenting more frames. One profiled pair at source rate repeats this: AHB 167.6% with 158 drops,
+SHM 152.7% with 413 drops, and mpv's submission thread kernel time 10.1% vs 6.5%.
+
+Equal-output video (`--benchmark-video-fps 10`, all runs report 10 FPS and zero VO/decoder
+drops), run order SHM, AHB, AHB, SHM, plus the first single AHB check:
+
+| Run | Mode | Shell | X server | mpv | Total | mpv submit thread kernel | WSI present thread |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| `q0005-v10-shm-1` | SHM | 33.2% | 11.2% | 72.2% | 116.6% | 5.5% | 8.4% |
+| `q0005-v10-ahb-2` | AHB | 21.6% | 11.9% | 68.8% | 102.3% | 5.7% | 0.6% |
+| `q0005-v10-ahb-3` | AHB | 21.2% | 12.1% | 70.8% | 104.1% | 5.9% | 0.5% |
+| `q0005-v10-shm-2` | SHM | 33.8% | 11.6% | 78.3% | 123.8% | 5.2% | 9.7% |
+| `q0005-video-10fps-ahb-1` | AHB | 21.4% | 11.9% | 75.3% | 108.6% | 5.4% | 0.5% |
+
+The old AHB driver spent 18.3–18.4% in that submission thread at this rate; patch 0005 brings
+it to SHM's level, and total CPU to or below the earlier `PANVK_KBASE_IMPORT_SYNC=0`
+diagnostic (110.0–110.8%) without disabling the clean for any CPU-written import.
+
+**Gate reading.** Gears passes clearly in both orders. Equal-work video passes in both orders.
+Source-rate video fails on raw totals because AHB does about 50% more presentation work; per
+frame shown it is cheaper. The handoff's criterion was written before this tradeoff was known;
+deciding whether equal-output CPU (or CPU per frame) is the right gate belongs to the owner.
+
+`q0005-correctness-1` repeats the correctness suite on this ICD: 20 colour/resize cycles,
+all 40 captures maximum channel error zero, stale-phase control rejected
+(`check-panvk-desktop.py`); Nautilus and Settings windows found; Shell and GTK map the ICD
+with Mali FDs and the same Shell survives; 100/100 vkcube starts return zero; the
+300-frame race contains 149 solid red and 151 solid blue frames, zero split and zero invalid.
+First/middle/last race frames, a resized GTK capture, the Shell capture and the benchmark
+gears/video captures were opened and inspected.
+
+`q0005-soak-30m` runs the 20-cycle colour suite (40 captures, maximum error zero, stale
+control rejected), then vkcube FIFO and glxgears together for 1800.0 seconds on the AHB path.
+`check-panvk-soak.py` passes: 60 samples, the same Shell, vkcube and gears processes
+throughout, gears 57.9–60.4 FPS, MemAvailable 5.26–5.36 GB, no stall, isolation preserved.
+The first, middle and last soak captures were opened: the cube and gears keep moving, with no
+corruption. This is a stability check, not a benchmark.
+
+Evidence: `~/s20-ahb-present/q0005-*` on the phone, retrieved to the ignored
+`temp/s20-ahb-present/q0005/` in this worktree.
+
 Patch `0004-wsi-x11-termux-ahb.patch` adds Android-only `PANVK_KBASE_DRI3=ahb` for kbase.
 It advertises BGRA UNORM/SRGB X11 formats, allocates CPU-usable AHBs, validates the public
 descriptor and queried Vulkan memory properties, and imports dedicated image memory. It does
@@ -352,22 +446,18 @@ error zero, and a stale-phase negative control is rejected. All 100 vkcube start
 return zero, with the same compositor surviving. The 300-frame 1080p race recording contains
 149 solid red frames and 151 solid blue frames, zero invalid frames and zero split frames.
 First/middle/last recording images were opened and inspected. Isolation passes. This is a
-bounded check, not a long race or soak. The performance gate fails; no 30-minute AHB soak
-has been run.
+bounded check, not a long race or soak; patch 0005's repeat and 30-minute soak are above.
 The earlier raw soak and static single-buffer flips do not substitute for AHB qualification.
 
 Next work, in order:
 
-1. Implement a scoped imported-buffer cache-clean policy that preserves actual Vulkan CPU
-   writes and external ownership transitions. Avoid cleaning never-CPU-written AHB swapchain
-   contents on every submission. Keep `PANVK_KBASE_IMPORT_SYNC=0` confined to diagnostics.
-   Preserve ordinary CPU-written import coverage and the CPU↔GPU AHB pattern controls.
-2. Build that change in CI, then repeat paired total-CPU, FPS and drop measurements at both
-   the original source rate and a matched output rate. Keep the earlier failing result and
-   same-driver SHM controls. Attribute remaining window-pixmap CPU copies separately from
-   Shell's root flip; the current server has no GPU window compositing.
-3. Once total CPU passes both workloads in both orders, complete longer AHB race/menu checks
-   and a 30-minute soak, inspect recordings and separately measure the attached activity.
+1. Done: patch 0005 scopes the clean (CI 45577255552) and is qualified above.
+2. Owner decision: accept equal-output (or per-frame) CPU as the video gate, or require raw
+   source-rate totals below SHM. If the latter, the remaining source-rate cost is Shell and
+   X-server work on the extra frames, not the driver; attribute window-pixmap CPU copies
+   separately from Shell's root flip (the server has no GPU window compositing).
+3. Measure the attached Android activity's sampling cost in a tagged window, and run longer
+   AHB race/menu checks before any promotion.
 
 ## Gotchas
 

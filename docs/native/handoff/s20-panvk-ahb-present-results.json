@@ -1,6 +1,6 @@
 {
   "date": "2026-11-25",
-  "status": "Experimental AHB WSI builds and passes colour/resize and tagged Android pixels; paired video CPU gate fails; no promotion",
+  "status": "Patch 0005 removes per-submission cache cleaning of AHB swapchain imports. Same-driver paired runs: gears total CPU 28% below SHM and equal-output 10 FPS video 11-17% below SHM in both orders; source-rate video presents ~50% more frames with 9-27% higher total CPU (about 29% lower CPU per frame shown). Correctness, restarts, race and 30-minute soak pass. Video gate interpretation pending owner; SHM default retained, nothing installed.",
   "driver_sha256": "b40b4d712a33cf6f5962eee1e1fa60d97db7adb9596521e52949f4440dd189be",
   "benchmark_setup": {
     "screen": [
@@ -274,13 +274,13 @@
     "BGRA public CPU mapping exposes zero strides and is rejected; BGRA checks use GPU staging, EGL and X11.",
     "Ordinary benchmarks exclude Android activity CPU and do not establish end-to-end power savings.",
     "Physical WSI colour checks are 608x783, not a dynamic 1080p attached-window soak.",
-    "Video total CPU is 4\u20137% higher than same-driver SHM; mode remains experimental.",
+    "Pre-0005 driver (77185ee4...): video total CPU 4–7% higher than same-driver SHM. Patch 0005: below SHM at equal 10 FPS output, higher raw total at source rate where AHB presents ~50% more frames.",
     "AHB menu races and 30-minute soak are deferred until the performance gate passes."
   ],
   "pending": [
-    "Implement a scoped imported-buffer clean policy that preserves genuine Vulkan CPU writes and external ownership transitions.",
-    "Build the focused change in CI and repeat original-rate and matched-output-rate performance tests with SHM controls.",
-    "After performance qualifies, run longer menu/race checks and 30-minute AHB soak, including attached activity measurements."
+    "Owner decision: accept equal-output/per-frame video CPU as the gate, or require raw source-rate totals below SHM.",
+    "Measure the attached Android activity's sampling cost in a tagged window.",
+    "Longer AHB race/menu checks before any promotion."
   ],
   "installed_or_defaults_changed": false,
   "private_present_runs": [
@@ -670,11 +670,12 @@
   "acceptance": {
     "colour_resize": true,
     "tagged_android_two_phase_pixels": true,
-    "video_cpu_below_shm_both_orders": false,
+    "video_cpu_below_shm_both_orders": "equal-output 10 FPS: yes; source rate raw total: no (AHB presents ~50% more frames, ~29% lower CPU per frame)",
     "gears_cpu_below_shm_both_orders": true,
-    "race_restarts": "bounded check passes: 300 race frames, 100 restarts",
-    "soak": "not run: video CPU gate failed",
-    "promoted": false
+    "race_restarts": "patch 0005: 300 race frames 0 split, 100 restarts",
+    "soak": "patch 0005: 30-minute soak passes",
+    "promoted": false,
+    "video_gate_decision": "pending owner"
   },
   "physical_wsi": {
     "run": "android-window-gtk-1",
@@ -1514,5 +1515,935 @@
       "shared_state_preserved": true
     },
     "default_import_sync_on_v9": true
+  },
+  "scoped_cache_fix": {
+    "source_commit": "df753f7",
+    "ci_run": 45577255552,
+    "status": "CI success; runtime qualified on S20 (private lorie)",
+    "patch": "tools/panvk-probes/platform-patches/0005-wsi-ahb-gpu-only-import.patch",
+    "scope": "marked WSI allocation, kbase, selected Vulkan memory type lacks HOST_VISIBLE",
+    "mechanism": "NO_MMAP skips CPU dma-buf alias; GPU VA mapping retained; existing cpu_ptr condition skips list registration",
+    "ahb_usage_unchanged": 819,
+    "global_import_cache_clean_default_retained": true,
+    "baseline_host_coherent_probe": {
+      "driver": "/data/data/com.termux/files/home/s20-ahb-present/driver-ahb/libvulkan_panfrost.so",
+      "driver_sha256": "77185ee4407ecd599c4c04851d963f5adfd8fa89502574f021f42e1b7be6f3f2",
+      "bytes_per_iteration": 4194304,
+      "persistent_mapping": true,
+      "explicit_flush_calls": 0,
+      "passed": true,
+      "calls": [
+        {
+          "stage": "AHardwareBuffer_allocate.BLOB",
+          "result": 0
+        },
+        {
+          "stage": "vkCreateInstance",
+          "result": 0
+        },
+        {
+          "stage": "vkEnumeratePhysicalDevices.count",
+          "result": 0
+        },
+        {
+          "stage": "vkEnumeratePhysicalDevices",
+          "result": 0
+        },
+        {
+          "stage": "vkCreateDevice",
+          "result": 0
+        },
+        {
+          "stage": "vkGetAndroidHardwareBufferPropertiesANDROID",
+          "result": 0
+        },
+        {
+          "stage": "vkCreateBuffer",
+          "result": 0
+        },
+        {
+          "stage": "vkAllocateMemory.import",
+          "result": 0
+        },
+        {
+          "stage": "vkBindBufferMemory",
+          "result": 0
+        },
+        {
+          "stage": "vkMapMemory",
+          "result": 0
+        },
+        {
+          "stage": "vkCreateBuffer",
+          "result": 0
+        },
+        {
+          "stage": "vkAllocateMemory.readback",
+          "result": 0
+        },
+        {
+          "stage": "vkBindBufferMemory",
+          "result": 0
+        },
+        {
+          "stage": "vkMapMemory",
+          "result": 0
+        },
+        {
+          "stage": "vkCreateCommandPool",
+          "result": 0
+        },
+        {
+          "stage": "vkAllocateCommandBuffers",
+          "result": 0
+        },
+        {
+          "stage": "vkBeginCommandBuffer",
+          "result": 0
+        },
+        {
+          "stage": "vkEndCommandBuffer",
+          "result": 0
+        },
+        {
+          "stage": "vkCreateFence",
+          "result": 0
+        },
+        {
+          "stage": "vkResetFences",
+          "result": 0
+        },
+        {
+          "stage": "vkQueueSubmit",
+          "result": 0
+        },
+        {
+          "stage": "vkWaitForFences",
+          "result": 0
+        },
+        {
+          "stage": "vkResetFences",
+          "result": 0
+        },
+        {
+          "stage": "vkQueueSubmit",
+          "result": 0
+        },
+        {
+          "stage": "vkWaitForFences",
+          "result": 0
+        },
+        {
+          "stage": "vkResetFences",
+          "result": 0
+        },
+        {
+          "stage": "vkQueueSubmit",
+          "result": 0
+        },
+        {
+          "stage": "vkWaitForFences",
+          "result": 0
+        },
+        {
+          "stage": "vkResetFences",
+          "result": 0
+        },
+        {
+          "stage": "vkQueueSubmit",
+          "result": 0
+        },
+        {
+          "stage": "vkWaitForFences",
+          "result": 0
+        },
+        {
+          "stage": "vkResetFences",
+          "result": 0
+        },
+        {
+          "stage": "vkQueueSubmit",
+          "result": 0
+        },
+        {
+          "stage": "vkWaitForFences",
+          "result": 0
+        },
+        {
+          "stage": "vkResetFences",
+          "result": 0
+        },
+        {
+          "stage": "vkQueueSubmit",
+          "result": 0
+        },
+        {
+          "stage": "vkWaitForFences",
+          "result": 0
+        },
+        {
+          "stage": "vkResetFences",
+          "result": 0
+        },
+        {
+          "stage": "vkQueueSubmit",
+          "result": 0
+        },
+        {
+          "stage": "vkWaitForFences",
+          "result": 0
+        },
+        {
+          "stage": "vkResetFences",
+          "result": 0
+        },
+        {
+          "stage": "vkQueueSubmit",
+          "result": 0
+        },
+        {
+          "stage": "vkWaitForFences",
+          "result": 0
+        }
+      ],
+      "memory_types": [
+        {
+          "imported": true,
+          "index": 1,
+          "flags": 7
+        },
+        {
+          "imported": false,
+          "index": 1,
+          "flags": 7
+        }
+      ],
+      "iterations": [
+        {
+          "index": 0,
+          "all_bytes_match": true,
+          "expected_sha256": "2b07811057df887086f06a67edc6ebf911de8b6741156e7a2eb1416a4b8b1b2e",
+          "actual_sha256": "2b07811057df887086f06a67edc6ebf911de8b6741156e7a2eb1416a4b8b1b2e"
+        },
+        {
+          "index": 1,
+          "all_bytes_match": true,
+          "expected_sha256": "4cc2048154b650d4830509a75f80efde80d31bea7a5e55a6b5542b936a2f3211",
+          "actual_sha256": "4cc2048154b650d4830509a75f80efde80d31bea7a5e55a6b5542b936a2f3211"
+        },
+        {
+          "index": 2,
+          "all_bytes_match": true,
+          "expected_sha256": "208b78c685d54fec8a92843e6bd9c582e2a17da3fe31b705cd5fd053ff3cf5d7",
+          "actual_sha256": "208b78c685d54fec8a92843e6bd9c582e2a17da3fe31b705cd5fd053ff3cf5d7"
+        },
+        {
+          "index": 3,
+          "all_bytes_match": true,
+          "expected_sha256": "d3f0a92c1145a41334bdab8ec569c3ea7772acf0c5accba25fec0ec60b6c9aa5",
+          "actual_sha256": "d3f0a92c1145a41334bdab8ec569c3ea7772acf0c5accba25fec0ec60b6c9aa5"
+        },
+        {
+          "index": 4,
+          "all_bytes_match": true,
+          "expected_sha256": "a517fc3bd9ddabccb3ca92c74b54aa6ab7c4811a23527a3b35b99b3b6cb34a7b",
+          "actual_sha256": "a517fc3bd9ddabccb3ca92c74b54aa6ab7c4811a23527a3b35b99b3b6cb34a7b"
+        },
+        {
+          "index": 5,
+          "all_bytes_match": true,
+          "expected_sha256": "60dd15bba21b73b72daad42ed00eb777c2555e936fa93a86413d0ef69a7eea8f",
+          "actual_sha256": "60dd15bba21b73b72daad42ed00eb777c2555e936fa93a86413d0ef69a7eea8f"
+        },
+        {
+          "index": 6,
+          "all_bytes_match": true,
+          "expected_sha256": "e02364cc9b8155a87c35dbd8e448a1853e43fd21a7a89bf715f0d5dd64c961b6",
+          "actual_sha256": "e02364cc9b8155a87c35dbd8e448a1853e43fd21a7a89bf715f0d5dd64c961b6"
+        },
+        {
+          "index": 7,
+          "all_bytes_match": true,
+          "expected_sha256": "0e138e7a0d0e1bbbaa952d759926f9dd8c96a09654035b58eb48a296db9f0bcb",
+          "actual_sha256": "0e138e7a0d0e1bbbaa952d759926f9dd8c96a09654035b58eb48a296db9f0bcb"
+        }
+      ]
+    },
+    "baseline_global_disable_negative": {
+      "driver": "/data/data/com.termux/files/home/s20-ahb-present/driver-ahb/libvulkan_panfrost.so",
+      "driver_sha256": "77185ee4407ecd599c4c04851d963f5adfd8fa89502574f021f42e1b7be6f3f2",
+      "bytes_per_iteration": 4194304,
+      "persistent_mapping": true,
+      "explicit_flush_calls": 0,
+      "passed": false,
+      "calls": [
+        {
+          "stage": "AHardwareBuffer_allocate.BLOB",
+          "result": 0
+        },
+        {
+          "stage": "vkCreateInstance",
+          "result": 0
+        },
+        {
+          "stage": "vkEnumeratePhysicalDevices.count",
+          "result": 0
+        },
+        {
+          "stage": "vkEnumeratePhysicalDevices",
+          "result": 0
+        },
+        {
+          "stage": "vkCreateDevice",
+          "result": 0
+        },
+        {
+          "stage": "vkGetAndroidHardwareBufferPropertiesANDROID",
+          "result": 0
+        },
+        {
+          "stage": "vkCreateBuffer",
+          "result": 0
+        },
+        {
+          "stage": "vkAllocateMemory.import",
+          "result": 0
+        },
+        {
+          "stage": "vkBindBufferMemory",
+          "result": 0
+        },
+        {
+          "stage": "vkMapMemory",
+          "result": 0
+        },
+        {
+          "stage": "vkCreateBuffer",
+          "result": 0
+        },
+        {
+          "stage": "vkAllocateMemory.readback",
+          "result": 0
+        },
+        {
+          "stage": "vkBindBufferMemory",
+          "result": 0
+        },
+        {
+          "stage": "vkMapMemory",
+          "result": 0
+        },
+        {
+          "stage": "vkCreateCommandPool",
+          "result": 0
+        },
+        {
+          "stage": "vkAllocateCommandBuffers",
+          "result": 0
+        },
+        {
+          "stage": "vkBeginCommandBuffer",
+          "result": 0
+        },
+        {
+          "stage": "vkEndCommandBuffer",
+          "result": 0
+        },
+        {
+          "stage": "vkCreateFence",
+          "result": 0
+        },
+        {
+          "stage": "vkResetFences",
+          "result": 0
+        },
+        {
+          "stage": "vkQueueSubmit",
+          "result": 0
+        },
+        {
+          "stage": "vkWaitForFences",
+          "result": 0
+        }
+      ],
+      "memory_types": [
+        {
+          "imported": true,
+          "index": 1,
+          "flags": 7
+        },
+        {
+          "imported": false,
+          "index": 1,
+          "flags": 7
+        }
+      ],
+      "iterations": [
+        {
+          "index": 0,
+          "all_bytes_match": false,
+          "expected_sha256": "2b07811057df887086f06a67edc6ebf911de8b6741156e7a2eb1416a4b8b1b2e",
+          "actual_sha256": "84d6fca628436560ff68691bf8aebb891edb58ab7b384afc84743b21736b03a8"
+        }
+      ],
+      "error": "Persistent HOST_COHERENT CPU writes differ in GPU readback"
+    },
+    "driver_sha256": "2567638e3600c5e1495a20abe40ff7843e04f2fb7956fb99f665ae87228b9e54",
+    "driver_staged": "~/s20-ahb-present/driver-ahb-0005/libvulkan_panfrost.so",
+    "patch_listed_in_PATCHES_txt": true,
+    "probes": {
+      "imported_host_coherent": {
+        "run": "q0005-imported-host",
+        "passed": true,
+        "iterations": 8
+      },
+      "imported_host_coherent_import_sync_0_negative": {
+        "run": "q0005-imported-host-negative",
+        "passed": false,
+        "error": "Persistent HOST_COHERENT CPU writes differ in GPU readback",
+        "expected_failure": true
+      },
+      "ahb_import": {
+        "run": "q0005-ahb-import",
+        "cpu_usable_0x333_passed": true,
+        "gpu_only_0x300_still_fails": true
+      }
+    },
+    "benchmark_setup": "same ICD for SHM and AHB; private 1920x1080 lorie, fakescreenfps 60; 5 s warmup, 30 s phases; fixture d574c3cb...; software decode, no audio; MUTTER_SYNC and force-flip unset; Android activity excluded",
+    "run_order": {
+      "full_benchmark": [
+        "shm",
+        "ahb",
+        "ahb",
+        "shm"
+      ],
+      "video_10fps": [
+        "shm",
+        "ahb",
+        "ahb",
+        "shm"
+      ]
+    },
+    "runs": [
+      {
+        "run": "q0005-bench-shm-1",
+        "mode": "shm",
+        "fps_filter": null,
+        "completed": true,
+        "isolation_passed": true,
+        "video_sha256": "d574c3cbf096854f82f8678c2aeb23c5a4d4c12c30ef8a06214e3bbdd651519c",
+        "phases": {
+          "idle": {
+            "cpu_percent_one_core": {
+              "shell": 1.2,
+              "server": 2.6
+            },
+            "total": 3.8,
+            "wall_minus_monotonic_seconds": 4.2e-06,
+            "driver_mapped": true
+          },
+          "gears": {
+            "cpu_percent_one_core": {
+              "shell": 97.1,
+              "server": 22.3,
+              "gears": 41.1
+            },
+            "total": 160.5,
+            "wall_minus_monotonic_seconds": -2.9e-06,
+            "driver_mapped": true,
+            "reported_fps_range": [
+              59.314,
+              60.686
+            ]
+          },
+          "video": {
+            "cpu_percent_one_core": {
+              "shell": 44.9,
+              "server": 15.8,
+              "video": 94.0
+            },
+            "total": 154.7,
+            "wall_minus_monotonic_seconds": -5e-06,
+            "driver_mapped": true,
+            "vo_drops": 418,
+            "decoder_drops": 0,
+            "frames_shown_estimate": 484,
+            "cpu_ms_per_shown_frame": 95.9
+          }
+        }
+      },
+      {
+        "run": "q0005-bench-ahb-1",
+        "mode": "ahb",
+        "fps_filter": null,
+        "completed": true,
+        "isolation_passed": true,
+        "video_sha256": "d574c3cbf096854f82f8678c2aeb23c5a4d4c12c30ef8a06214e3bbdd651519c",
+        "phases": {
+          "idle": {
+            "cpu_percent_one_core": {
+              "shell": 1.3,
+              "server": 2.3
+            },
+            "total": 3.6,
+            "wall_minus_monotonic_seconds": 1e-06,
+            "driver_mapped": true
+          },
+          "gears": {
+            "cpu_percent_one_core": {
+              "shell": 84.3,
+              "server": 16.7,
+              "gears": 13.9
+            },
+            "total": 114.9,
+            "wall_minus_monotonic_seconds": -3e-07,
+            "driver_mapped": true,
+            "reported_fps_range": [
+              59.572,
+              60.258
+            ]
+          },
+          "video": {
+            "cpu_percent_one_core": {
+              "shell": 58.5,
+              "server": 21.0,
+              "video": 88.6
+            },
+            "total": 168.1,
+            "wall_minus_monotonic_seconds": -7e-07,
+            "driver_mapped": true,
+            "vo_drops": 163,
+            "decoder_drops": 0,
+            "frames_shown_estimate": 738,
+            "cpu_ms_per_shown_frame": 68.4
+          }
+        }
+      },
+      {
+        "run": "q0005-bench-ahb-2",
+        "mode": "ahb",
+        "fps_filter": null,
+        "completed": true,
+        "isolation_passed": true,
+        "video_sha256": "d574c3cbf096854f82f8678c2aeb23c5a4d4c12c30ef8a06214e3bbdd651519c",
+        "phases": {
+          "idle": {
+            "cpu_percent_one_core": {
+              "shell": 1.1,
+              "server": 2.5
+            },
+            "total": 3.6,
+            "wall_minus_monotonic_seconds": 6.1e-06,
+            "driver_mapped": true
+          },
+          "gears": {
+            "cpu_percent_one_core": {
+              "shell": 84.2,
+              "server": 16.8,
+              "gears": 13.9
+            },
+            "total": 114.9,
+            "wall_minus_monotonic_seconds": -5e-07,
+            "driver_mapped": true,
+            "reported_fps_range": [
+              59.716,
+              60.192
+            ]
+          },
+          "video": {
+            "cpu_percent_one_core": {
+              "shell": 59.2,
+              "server": 20.8,
+              "video": 88.5
+            },
+            "total": 168.5,
+            "wall_minus_monotonic_seconds": -1.3e-06,
+            "driver_mapped": true,
+            "vo_drops": 163,
+            "decoder_drops": 0,
+            "frames_shown_estimate": 736,
+            "cpu_ms_per_shown_frame": 68.7
+          }
+        }
+      },
+      {
+        "run": "q0005-bench-shm-2",
+        "mode": "shm",
+        "fps_filter": null,
+        "completed": true,
+        "isolation_passed": true,
+        "video_sha256": "d574c3cbf096854f82f8678c2aeb23c5a4d4c12c30ef8a06214e3bbdd651519c",
+        "phases": {
+          "idle": {
+            "cpu_percent_one_core": {
+              "shell": 1.3,
+              "server": 2.5
+            },
+            "total": 3.8,
+            "wall_minus_monotonic_seconds": 6.1e-06,
+            "driver_mapped": true
+          },
+          "gears": {
+            "cpu_percent_one_core": {
+              "shell": 96.5,
+              "server": 22.5,
+              "gears": 41.5
+            },
+            "total": 160.4,
+            "wall_minus_monotonic_seconds": -3e-06,
+            "driver_mapped": true,
+            "reported_fps_range": [
+              59.669,
+              60.847
+            ]
+          },
+          "video": {
+            "cpu_percent_one_core": {
+              "shell": 36.4,
+              "server": 13.9,
+              "video": 81.9
+            },
+            "total": 132.3,
+            "wall_minus_monotonic_seconds": -1.3e-06,
+            "driver_mapped": true,
+            "vo_drops": 497,
+            "decoder_drops": 0,
+            "frames_shown_estimate": 403,
+            "cpu_ms_per_shown_frame": 98.5
+          }
+        }
+      },
+      {
+        "run": "q0005-v10-shm-1",
+        "mode": "shm",
+        "fps_filter": 10,
+        "completed": true,
+        "isolation_passed": true,
+        "video_sha256": "d574c3cbf096854f82f8678c2aeb23c5a4d4c12c30ef8a06214e3bbdd651519c",
+        "phases": {
+          "video": {
+            "cpu_percent_one_core": {
+              "shell": 33.2,
+              "server": 11.2,
+              "video": 72.2
+            },
+            "total": 116.6,
+            "wall_minus_monotonic_seconds": 2.5e-06,
+            "driver_mapped": true,
+            "vo_drops": 0,
+            "decoder_drops": 0,
+            "threads": {
+              "decode_total": 41.6,
+              "submit_mpv_zfq0_system": 5.5,
+              "wsi_present_thread": 8.5
+            }
+          }
+        }
+      },
+      {
+        "run": "q0005-v10-ahb-2",
+        "mode": "ahb",
+        "fps_filter": 10,
+        "completed": true,
+        "isolation_passed": true,
+        "video_sha256": "d574c3cbf096854f82f8678c2aeb23c5a4d4c12c30ef8a06214e3bbdd651519c",
+        "phases": {
+          "video": {
+            "cpu_percent_one_core": {
+              "shell": 21.6,
+              "server": 11.9,
+              "video": 68.8
+            },
+            "total": 102.3,
+            "wall_minus_monotonic_seconds": 4e-07,
+            "driver_mapped": true,
+            "vo_drops": 0,
+            "decoder_drops": 0,
+            "threads": {
+              "decode_total": 41.4,
+              "submit_mpv_zfq0_system": 5.7,
+              "wsi_present_thread": 0.6
+            }
+          }
+        }
+      },
+      {
+        "run": "q0005-v10-ahb-3",
+        "mode": "ahb",
+        "fps_filter": 10,
+        "completed": true,
+        "isolation_passed": true,
+        "video_sha256": "d574c3cbf096854f82f8678c2aeb23c5a4d4c12c30ef8a06214e3bbdd651519c",
+        "phases": {
+          "video": {
+            "cpu_percent_one_core": {
+              "shell": 21.2,
+              "server": 12.1,
+              "video": 70.8
+            },
+            "total": 104.1,
+            "wall_minus_monotonic_seconds": 9e-07,
+            "driver_mapped": true,
+            "vo_drops": 0,
+            "decoder_drops": 0,
+            "threads": {
+              "decode_total": 42.6,
+              "submit_mpv_zfq0_system": 5.9,
+              "wsi_present_thread": 0.6
+            }
+          }
+        }
+      },
+      {
+        "run": "q0005-v10-shm-2",
+        "mode": "shm",
+        "fps_filter": 10,
+        "completed": true,
+        "isolation_passed": true,
+        "video_sha256": "d574c3cbf096854f82f8678c2aeb23c5a4d4c12c30ef8a06214e3bbdd651519c",
+        "phases": {
+          "video": {
+            "cpu_percent_one_core": {
+              "shell": 33.8,
+              "server": 11.6,
+              "video": 78.3
+            },
+            "total": 123.8,
+            "wall_minus_monotonic_seconds": 9e-07,
+            "driver_mapped": true,
+            "vo_drops": 0,
+            "decoder_drops": 0,
+            "threads": {
+              "decode_total": 45.0,
+              "submit_mpv_zfq0_system": 5.2,
+              "wsi_present_thread": 9.7
+            }
+          }
+        }
+      },
+      {
+        "run": "q0005-video-10fps-ahb-1",
+        "mode": "ahb",
+        "fps_filter": 10,
+        "completed": true,
+        "isolation_passed": true,
+        "video_sha256": "d574c3cbf096854f82f8678c2aeb23c5a4d4c12c30ef8a06214e3bbdd651519c",
+        "phases": {
+          "video": {
+            "cpu_percent_one_core": {
+              "shell": 21.4,
+              "server": 11.9,
+              "video": 75.3
+            },
+            "total": 108.6,
+            "wall_minus_monotonic_seconds": 2.1e-06,
+            "driver_mapped": true,
+            "vo_drops": 0,
+            "decoder_drops": 0,
+            "threads": {
+              "decode_total": 46.5,
+              "submit_mpv_zfq0_system": 5.4,
+              "wsi_present_thread": 0.5
+            }
+          }
+        }
+      },
+      {
+        "run": "q0005-vprof-ahb-1",
+        "mode": "ahb",
+        "fps_filter": null,
+        "completed": true,
+        "isolation_passed": true,
+        "video_sha256": "d574c3cbf096854f82f8678c2aeb23c5a4d4c12c30ef8a06214e3bbdd651519c",
+        "phases": {
+          "video": {
+            "cpu_percent_one_core": {
+              "shell": 59.5,
+              "server": 20.5,
+              "video": 87.6
+            },
+            "total": 167.6,
+            "wall_minus_monotonic_seconds": 9.9e-06,
+            "driver_mapped": true,
+            "vo_drops": 158,
+            "decoder_drops": 0,
+            "frames_shown_estimate": 742,
+            "cpu_ms_per_shown_frame": 67.8,
+            "threads": {
+              "decode_total": 43.3,
+              "submit_mpv_zfq0_system": 10.1,
+              "wsi_present_thread": 0.9
+            }
+          }
+        }
+      },
+      {
+        "run": "q0005-vprof-shm-1",
+        "mode": "shm",
+        "fps_filter": null,
+        "completed": true,
+        "isolation_passed": true,
+        "video_sha256": "d574c3cbf096854f82f8678c2aeb23c5a4d4c12c30ef8a06214e3bbdd651519c",
+        "phases": {
+          "video": {
+            "cpu_percent_one_core": {
+              "shell": 48.6,
+              "server": 15.6,
+              "video": 88.5
+            },
+            "total": 152.7,
+            "wall_minus_monotonic_seconds": 5e-06,
+            "driver_mapped": true,
+            "vo_drops": 413,
+            "decoder_drops": 0,
+            "frames_shown_estimate": 486,
+            "cpu_ms_per_shown_frame": 94.3,
+            "threads": {
+              "decode_total": 42.0,
+              "submit_mpv_zfq0_system": 6.5,
+              "wsi_present_thread": 11.4
+            }
+          }
+        }
+      }
+    ],
+    "summary": {
+      "gears_total_cpu": {
+        "shm": [
+          160.5,
+          160.4
+        ],
+        "ahb": [
+          114.9,
+          114.9
+        ],
+        "change_percent": -28,
+        "fps_range": [
+          59.3,
+          60.8
+        ]
+      },
+      "video_10fps_total_cpu": {
+        "shm": [
+          116.6,
+          123.8
+        ],
+        "ahb": [
+          102.3,
+          104.1,
+          108.6
+        ],
+        "change_percent_paired": [
+          -17,
+          -11
+        ],
+        "drops": 0
+      },
+      "video_10fps_submit_thread_kernel_percent": {
+        "old_ahb": [
+          18.3,
+          18.4
+        ],
+        "patch0005_ahb": [
+          5.4,
+          5.7,
+          5.9
+        ],
+        "shm": [
+          5.2,
+          5.5
+        ]
+      },
+      "video_source_rate_total_cpu": {
+        "shm": [
+          154.7,
+          132.3
+        ],
+        "ahb": [
+          168.1,
+          168.5
+        ],
+        "vo_drops_shm": [
+          418,
+          497
+        ],
+        "vo_drops_ahb": [
+          163,
+          163
+        ],
+        "cpu_ms_per_shown_frame_shm": [
+          95.9,
+          98.5
+        ],
+        "cpu_ms_per_shown_frame_ahb": [
+          68.4,
+          68.7
+        ],
+        "shown_frames_method": "30 fps x 30 s minus VO drops"
+      },
+      "profiled_source_rate_pair": {
+        "ahb": {
+          "total": 167.6,
+          "vo_drops": 158
+        },
+        "shm": {
+          "total": 152.7,
+          "vo_drops": 413
+        }
+      }
+    },
+    "correctness": {
+      "run": "q0005-correctness-1",
+      "cycles": 20,
+      "captures": 40,
+      "maximum_channel_error": 0,
+      "stale_negative_control_rejected": true,
+      "restart_cycles": 100,
+      "restart_return_codes": [
+        0
+      ],
+      "same_shell": true,
+      "race": {
+        "frames": 300,
+        "split_count": 0,
+        "invalid_count": 0,
+        "solid_red_frames": 149,
+        "solid_blue_frames": 151,
+        "native_resolution": true
+      },
+      "isolation_passed": true,
+      "images_visually_inspected": true
+    },
+    "soak": {
+      "run": "q0005-soak-30m",
+      "seconds_completed": 1800.0,
+      "samples": 60,
+      "workloads": "vkcube FIFO + glxgears",
+      "checker": "tests/native/check-panvk-soak.py PASS",
+      "gears_fps_range": [
+        57.89,
+        60.398
+      ],
+      "memavailable_mb_range": [
+        5259,
+        5364
+      ],
+      "process_pids_stable": true,
+      "stalled_sample": null,
+      "colour_captures": 40,
+      "maximum_channel_error": 0,
+      "isolation_passed": true,
+      "first_middle_last_captures_inspected": true
+    },
+    "cleanup": {
+      "owned_processes_remaining": 0,
+      "displays": [
+        "X0"
+      ],
+      "wake_lock_released": true,
+      "shared_termux_va_preserved": true,
+      "shared_sshd_preserved": true,
+      "phone_claim": "available"
+    }
   }
 }

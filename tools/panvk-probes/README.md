@@ -134,6 +134,16 @@ test. The harness checks shared process state and cleans only its own display.
 `python3 tools/panvk-probes/test-ahb-import.py` checks plane bounds and rejects
 the live display without loading Android or XCB libraries.
 
+`imported-host-coherent.py --driver /absolute/path/libvulkan_panfrost.so
+--out fresh.json` imports a public AHB BLOB into HOST_VISIBLE|HOST_COHERENT
+buffer memory, keeps it mapped, and writes eight different 4 MiB patterns without
+explicit flushes. Each submission copies every byte with the GPU and checks a
+separate readback buffer after a bounded fence wait. Default cache cleaning must
+pass; `PANVK_KBASE_IMPORT_SYNC=0` is the deliberate failing control on the S20.
+This covers CPU-written ordinary imports while patch 0005 omits CPU aliases only
+for marked, non-host-visible WSI allocations. The AHB allocation usage remains
+`0x333`; the GPU-only `0x300` image-import failure is separate.
+
 The probes follow the public [NDK AHardwareBuffer API](https://developer.android.com/ndk/reference/group/a-hardware-buffer)
 and [Vulkan AHB import rules](https://docs.vulkan.org/spec/latest/chapters/memory.html#memory-external-android-hardware-buffer).
 They acquire/release imported images through `VK_QUEUE_FAMILY_FOREIGN_EXT` as
@@ -152,8 +162,9 @@ The `combined` variant selects the seven workgroup patches plus point size,
 process budget, ION CPU cache mode and import coherence (eleven patches).
 `combined-platform` adds the Termux hybrid ICD private-extension correction
 and measured noncoherent ION placed-map capability restriction, the X11
-render-completion wait and experimental AHB WSI (fifteen patches).
-`combined-ahb` adds the legacy Mali AHB metadata import patch (sixteen patches).
+render-completion wait, experimental AHB WSI and its CPU-alias restriction
+(sixteen patches).
+`combined-ahb` adds the legacy Mali AHB metadata import patch (seventeen patches).
 It requires independent qualification and does not change package pins. See the current version-bump handoff for exact hashes and CTS results.
 
 The desktop harness creates its private XDG runtime directory under Termux's

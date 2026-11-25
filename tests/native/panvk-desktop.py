@@ -134,14 +134,19 @@ def benchmark(args, shell, start, check_displays):
     ticks = os.sysconf('SC_CLK_TCK')
     video_socket = Path(os.environ['XDG_RUNTIME_DIR']) / 'benchmark-mpv.sock'
 
-    def video_stats():
+    def video_stats(detailed=False):
         with socket.socket(socket.AF_UNIX) as client:
             client.settimeout(2)
             client.connect(str(video_socket))
             with client.makefile('rwb') as stream:
                 values = {}
-                for request_id, name in enumerate(('time-pos', 'estimated-vf-fps',
-                        'frame-drop-count', 'decoder-frame-drop-count')):
+                names = ['time-pos', 'estimated-vf-fps', 'frame-drop-count', 'decoder-frame-drop-count']
+                if detailed:
+                    names += ['vo-passes', 'video-out-params', 'current-vo', 'current-gpu-context',
+                              'video-sync', 'display-sync-active', 'display-fps',
+                              'estimated-display-fps', 'vsync-ratio', 'vo-delayed-frame-count',
+                              'mistimed-frame-count', 'avsync']
+                for request_id, name in enumerate(names):
                     stream.write((json.dumps({'command': ['get_property', name],
                                               'request_id': request_id}) + '\n').encode())
                     stream.flush()
@@ -151,7 +156,7 @@ def benchmark(args, shell, start, check_displays):
                             raise RuntimeError('mpv IPC closed during benchmark')
                         reply = json.loads(line)
                         if reply.get('request_id') == request_id:
-                            if reply.get('error') != 'success' or reply.get('data') is None:
+                            if name in names[:4] and (reply.get('error') != 'success' or reply.get('data') is None):
                                 raise RuntimeError('mpv property unavailable: ' + name + ': ' + str(reply))
                             values[name] = reply
                             break
@@ -170,11 +175,26 @@ def benchmark(args, shell, start, check_displays):
             result['video'] = video_stats()
         return result
 
-    phases = [('idle', None), ('gears', ['stdbuf', '-oL', 'glxgears', '-fullscreen'])]
+    def thread_stats(pid):
+        values = {}
+        for task in (Path('/proc') / str(pid) / 'task').iterdir():
+            try:
+                stat = (task / 'stat').read_text()
+                fields = stat.rsplit(')', 1)[1].split()
+                values[task.name] = {'name': stat.split('(', 1)[1].rsplit(')', 1)[0],
+                    'start_ticks': fields[19], 'user_seconds': int(fields[11]) / ticks,
+                    'system_seconds': int(fields[12]) / ticks}
+            except FileNotFoundError:
+                continue
+        return values
+
+    phases = [] if args.benchmark_video_only else [('idle', None),
+        ('gears', ['stdbuf', '-oL', 'glxgears', '-fullscreen'])]
     if args.benchmark_video:
         phases.append(('video', ['mpv', '--no-config', '--hwdec=no', '--vo=gpu',
             '--gpu-api=opengl', '--fullscreen', '--loop-file=inf', '--audio=no',
             '--input-ipc-server=' + str(video_socket),
+            *(['--vf=fps=' + str(args.benchmark_video_fps)] if args.benchmark_video_fps else []),
             '--term-status-msg=BENCH fps=${estimated-vf-fps} dropped=${frame-drop-count} '
             'decoder_dropped=${decoder-frame-drop-count} avsync=${avsync}',
             str(args.benchmark_video)]))
@@ -183,7 +203,8 @@ def benchmark(args, shell, start, check_displays):
                'video': str(args.benchmark_video) if args.benchmark_video else None,
                'display': run(['xdpyinfo'], capture_output=True, text=True).stdout,
                'randr': run(['xrandr'], capture_output=True, text=True).stdout,
-               'phases': []}
+               'video_filter_fps': args.benchmark_video_fps,
+               'video_profile_requested': args.benchmark_video_profile, 'phases': []}
     if args.benchmark_video:
         digest = hashlib.sha256()
         with args.benchmark_video.open('rb') as fixture:
@@ -199,6 +220,9 @@ def benchmark(args, shell, start, check_displays):
             processes = {'shell': shell.pid, 'server': args.benchmark_server_pid}
             if proc:
                 processes[name] = proc.pid
+            detailed = name == 'video' and args.benchmark_video_profile
+            profile_before = video_stats(detailed=True) if detailed else None
+            threads_before = thread_stats(proc.pid) if detailed else None
             samples = [sample(processes)]
             end = time.monotonic() + args.benchmark_seconds
             while time.monotonic() < end:
@@ -218,6 +242,20 @@ def benchmark(args, shell, start, check_displays):
                 'cpu_percent_one_core': {key: 100 * (samples[-1]['cpu_seconds'][key] - value) / duration
                                         for key, value in samples[0]['cpu_seconds'].items()},
                 'samples': samples})
+            if detailed:
+                threads_after = thread_stats(proc.pid)
+                thread_cpu = []
+                for tid, after in threads_after.items():
+                    before = threads_before.get(tid)
+                    if before and before['start_ticks'] == after['start_ticks']:
+                        thread_cpu.append({'tid': int(tid), 'name': after['name'],
+                            **{key.replace('_seconds', '_percent'): 100 * (after[key] - before[key]) / duration
+                               for key in ('user_seconds', 'system_seconds')}})
+                results['phases'][-1]['video_profile'] = {
+                    'before': profile_before, 'after': video_stats(detailed=True),
+                    'threads_before': threads_before, 'threads_after': threads_after,
+                    'thread_cpu_percent_one_core': thread_cpu,
+                    'thread_scope': 'threads alive at both snapshots with matching start ticks'}
             if name == 'video':
                 first, last = samples[0]['video'], samples[-1]['video']
                 advanced = last['time-pos']['data'] - first['time-pos']['data']
@@ -763,6 +801,9 @@ def parent(args):
              *(['--vkcube', str(args.vkcube.resolve())] if args.vkcube else []),
              *(['--present-race-only'] if args.present_race_only else []),
              *(['--benchmark-only'] if args.benchmark_only else []),
+             *(['--benchmark-video-only'] if args.benchmark_video_only else []),
+             *(['--benchmark-video-profile'] if args.benchmark_video_profile else []),
+             *(['--benchmark-video-fps', str(args.benchmark_video_fps)] if args.benchmark_video_fps else []),
              *(['--benchmark-video', str(args.benchmark_video.resolve())] if args.benchmark_video else []),
              *(['--allow-other-displays'] if args.allow_other_displays else []),
              *(['--ghostty-probe'] if args.ghostty_probe else []),
@@ -827,6 +868,11 @@ if __name__ == '__main__':
     parser.add_argument('--benchmark-seconds', type=int, default=0,
                         help='Measure idle, fullscreen gears and optional video before correctness checks')
     parser.add_argument('--benchmark-video', type=Path, help='Local video fixture for the presentation benchmark')
+    parser.add_argument('--benchmark-video-only', action='store_true', help='Measure only the video phase')
+    parser.add_argument('--benchmark-video-profile', action='store_true',
+                        help='Record mpv render timings and per-thread CPU snapshots')
+    parser.add_argument('--benchmark-video-fps', type=int,
+                        help='Apply an mpv fps filter for equal-output-rate comparisons')
     parser.add_argument('--benchmark-only', action='store_true', help='Skip correctness checks after measuring')
     parser.add_argument('--benchmark-server-pid', type=int, help=argparse.SUPPRESS)
     parser.add_argument('--present-race-trials', type=int, default=0,
@@ -858,6 +904,11 @@ if __name__ == '__main__':
         parser.error('benchmark-seconds must be zero or at least 10')
     if args.benchmark_video and (not args.benchmark_seconds or not args.benchmark_video.is_file()):
         parser.error('benchmark-video requires a benchmark and an existing file')
+    if (args.benchmark_video_only or args.benchmark_video_profile or
+            args.benchmark_video_fps is not None) and not args.benchmark_video:
+        parser.error('video-only/profile/fps requires benchmark-video')
+    if args.benchmark_video_fps is not None and not 1 <= args.benchmark_video_fps <= 60:
+        parser.error('benchmark-video-fps must be between 1 and 60')
     if args.benchmark_seconds and args.allow_other_displays:
         parser.error('benchmarks require no other private displays')
     if args.benchmark_only and not args.benchmark_seconds:

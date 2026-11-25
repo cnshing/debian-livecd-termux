@@ -50,6 +50,12 @@ the `combined-ahb` metadata patch), `--mode shm` for the default transport, or
 `--soak-seconds 1800` runs vkcube FIFO and glxgears concurrently with periodic
 captures and process resource audits. This tests concurrent stability, not
 individual-workload performance. Increase the outer timeout for a soak.
+`--benchmark-video-only` skips idle/gears during a video investigation.
+`--benchmark-video-profile` records mpv VO passes/context and matching per-thread
+user/system CPU snapshots. Optional property errors remain visible in the JSON.
+`--benchmark-video-fps 10` filters the same decoded input to 10 output FPS for
+comparisons with equal output rates; check the reported FPS and VO/decoder drops.
+These options require `--benchmark-video` and leave ordinary benchmarks unchanged.
 `--driver /absolute/path/libvulkan_panfrost.so` selects a private rebuilt ICD;
 `--mesa-lib-dir /private/extraction/lib` selects a privately extracted Mesa.
 `--no-xlibs` removes the private X11 soname symlink directory to check the

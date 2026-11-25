@@ -5,6 +5,8 @@ private colour/resize checks and two changing quadrant images in a tagged Androi
 **The performance gate fails:** gears CPU falls 18–23%, but video CPU rises 4–7% against
 same-driver SHM in both run orders. Keep SHM as default; nothing is installed or promoted.
 GPU-only AHB import still fails; CPU-usable allocations pass.
+The follow-up investigation identifies per-submission whole-buffer cache cleaning as a CPU
+penalty; matched-rate diagnostic controls confirm it. A scoped coherence fix is still pending.
 Follows [s20-panvk-raw-dri3.md](s20-panvk-raw-dri3.md).
 Shared rules: [README.md](README.md).
 
@@ -102,6 +104,76 @@ mpv CPU rises enough to outweigh the modest server saving. This is a repeatable 
 not acceptance under this handoff's total-CPU criterion. Benchmark captures were opened and
 show the expected gears and video fixture. The numbers do not establish end-to-end power
 savings or include the Android activity; thermal-zone readings remain unavailable.
+
+### Why video CPU rises: cache-clean investigation
+
+Ten focused video runs use the same CI ICD and fixture. The added harness options
+`--benchmark-video-only --benchmark-video-profile` record mpv's render passes, GPU context
+and per-thread user/system CPU at the measurement boundaries. These fresh-session video-only
+runs have a different preceding warmup from the idle/gears/video sequence above; compare
+within each experiment, rather than mixing their totals.
+
+The ordinary 30 FPS source reproduces the component change. SHM spends 15.2% of one core in
+mpv's WSI present thread and 6.4% in kernel time in `mpv:zfq0`; AHB spends 0.6% in the present
+thread but **30.1% in submission thread kernel time**. Decoding threads total 41.6% and 43.7%,
+respectively. Both use `gpu` / `x11egl`, map the private PanVK driver with a Mali FD, and report
+the same render-pass sequence. This does not indicate a software rendering fallback.
+
+The pinned source explains the costly path:
+
+- `src/panfrost/lib/kmod/kbase_kmod.c:kbase_kmod_import_dmabuf()` places noncoherent,
+  CPU-mapped imports on `nc_bos` by default on v9. The backend makes a CPU mapping even for
+  allocations the Vulkan application never maps for CPU access.
+- `src/panfrost/vulkan/jm/panvk_vX_gpu_queue.c:panvk_per_arch(gpu_queue_submit)` calls
+  `kbase_kmod_jm_clean_imports()` for each submission containing command buffers.
+- That function walks **every listed import** and issues `DMA_BUF_IOCTL_SYNC` with
+  `END | WRITE` for the whole buffer, independently of whether this submission uses that
+  image or whether its contents were CPU-written. AHB swapchain imports add large buffers
+  to that work. The existing `PANVK_KBASE_IMPORT_SYNC=0` diagnostic prevents their listing.
+
+An experiment with the same output rate adds `--benchmark-video-fps 10`, which applies `--vf=fps=10`
+while decoding the same 30 FPS input. All seven filtered runs report 10 FPS and **zero VO or
+decoder drops** throughout the measured intervals. Two default runs per mode and two diagnostic
+AHB runs separate the cache-clean cost from the cost of displaying more frames:
+
+| Mode / cache-clean policy | mpv CPU | Submission thread kernel CPU | WSI present thread CPU | Total CPU |
+| --- | ---: | ---: | ---: | ---: |
+| SHM, default | 76.9–78.7% | 5.2–5.3% | 9.4–9.5% | 122.0–124.4% |
+| AHB, default | 87.2–87.7% | 18.3–18.4% | 0.6% | 122.4–122.8% |
+| AHB, cache-clean diagnostic off | 76.2–76.8% | 5.6–6.0% | 0.6% | 110.0–110.8% |
+| SHM, diagnostic off control | 77.1% | 5.3% | 9.3% | 122.0% |
+
+The AHB repeats reduce total CPU by 9.5–10.4% when that cache clean is disabled, at the same
+output rate and with unchanged drop counts. SHM's control is essentially unchanged. This
+isolates the imported-buffer cleaning as a substantial avoidable cost in this workload.
+
+There is also an effect from the workload rate. On the ordinary source, the diagnostic AHB run cuts
+VO drops from 335 to 151 in 30 seconds and mpv CPU from 100.7% to 87.6%. Shell/server CPU
+then rises as more updates get through, taking total CPU from 160.2% to 167.4%. Raw CPU
+percentages alone therefore conflate per-frame cost with how much video is actually presented;
+retain both drop counters and matched-rate comparisons in subsequent qualification.
+
+The diagnostic run passes four exact changing-colour captures and rejects the stale-phase
+negative control. A separate `cache-off-interop-1` passes public CPU→GPU and GPU→CPU patterns,
+Android EGL sampling, 180/180 flips and exact root pixels. Captures were opened and inspected.
+All ten video runs and the interop run preserve shared state. The flag is confined to private
+test processes; no driver code, installed environment or default was changed.
+
+A production change must retain coherency for imports written through Vulkan CPU mappings.
+The focused fix is to distinguish those mappings from AHB swapchain memory used only by the
+GPU in this process, and maintain the external CPU-access/ownership contract. The global
+switch also removes the guard for genuinely CPU-written imports, so it remains a diagnostic.
+Cache coherency and GPU completion are separate requirements in the
+[kernel dma-buf API](https://www.kernel.org/doc/html/latest/driver-api/dma-buf.html#cpu-access-to-dma-buffer-objects);
+this test retains patch 0003's render-completion fence wait and Present idle fences.
+
+Evidence runs are `video-profile-{shm,ahb}-1`, `video-10fps-{shm,ahb}-{1,2}`,
+`video-nosync-ahb-1`, `video-10fps-nosync-ahb-{1,2}` and
+`video-10fps-nosync-shm-1` under the existing private evidence tree. `nosync` in these names
+means the import-cache diagnostic only. mpv's
+[VO pass timings](https://mpv.io/manual/stable/#property-list) describe GPU passes; the CPU
+attribution above comes from `/proc/<pid>/task/<tid>/stat`, matching thread start times.
+Android `simpleperf` was blocked by `security.perf_harden=1`; that setting was preserved.
 
 `ahb-colour-smoke` passes four alternating-colour captures with maximum channel error zero,
 including odd-sized window resizes and 1920×1080 fullscreen transitions. Its stale-phase
@@ -238,6 +310,21 @@ python tests/native/panvk-desktop.py --integrated --mode raw --force-flip \
   --out "$HOME/s20-ahb-present/force-new"
 ```
 
+For the focused video experiment, use fresh output paths for each mode and policy:
+
+```sh
+python tests/native/panvk-desktop.py --integrated --mode ahb \
+  --driver "$HOME/s20-ahb-present/driver-ahb/libvulkan_panfrost.so" \
+  --screen-size 1920x1080 --screen-fps 60 --benchmark-seconds 30 --benchmark-only \
+  --benchmark-video-only --benchmark-video-profile --benchmark-video-fps 10 \
+  --benchmark-video "$HOME/s20-raw-dri3/video-long-1080p30.mp4" \
+  --out "$HOME/s20-ahb-present/video-profile-new"
+```
+
+Repeat with `--mode shm`. The diagnostic comparison prefixes just this test command with
+`PANVK_KBASE_IMPORT_SYNC=0`; it leaves the global environment and render/idle fence waits
+unchanged. Omit `--benchmark-video-fps` to measure the original output workload.
+
 The standalone probe exits zero if at least one usage passes all requested checks; its JSON
 retains the GPU-only failure separately. The private presentation harness additionally requires
 the server's AHB import log, `FLIP` completions, exact root pixels and unchanged shared state.
@@ -271,12 +358,14 @@ The earlier raw soak and static single-buffer flips do not substitute for AHB qu
 
 Next work, in order:
 
-1. Profile mpv's application CPU with the same fixture and comparable rendered-frame counts.
-   Determine whether extra work from fewer drops explains the increase or whether AHB/linear
-   swapchain handling adds avoidable work. Separate the remaining window-pixmap CPU copy from
+1. Implement a scoped imported-buffer cache-clean policy that preserves actual Vulkan CPU
+   writes and external ownership transitions. Avoid cleaning never-CPU-written AHB swapchain
+   contents on every submission. Keep `PANVK_KBASE_IMPORT_SYNC=0` confined to diagnostics.
+   Preserve ordinary CPU-written import coverage and the CPU↔GPU AHB pattern controls.
+2. Build that change in CI, then repeat paired total-CPU, FPS and drop measurements at both
+   the original source rate and a matched output rate. Keep the earlier failing result and
+   same-driver SHM controls. Attribute remaining window-pixmap CPU copies separately from
    Shell's root flip; the current server has no GPU window compositing.
-2. Repeat paired total-CPU, FPS and drop measurements after any focused change. Keep the
-   failing result and same-driver SHM controls. Do not promote on X-server CPU alone.
 3. Once total CPU passes both workloads in both orders, complete longer AHB race/menu checks
    and a 30-minute soak, inspect recordings and separately measure the attached activity.
 

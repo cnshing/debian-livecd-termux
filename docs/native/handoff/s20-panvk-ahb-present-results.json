@@ -278,9 +278,9 @@
     "AHB menu races and 30-minute soak are deferred until the performance gate passes."
   ],
   "pending": [
-    "Profile mpv application CPU and compare rendered-frame counts; separate remaining window-pixmap copies from the root flip.",
-    "After a focused fix, repeat paired performance tests; require total CPU below SHM for both workloads.",
-    "After performance passes, run longer menu/race checks and 30-minute AHB soak, including attached activity measurements."
+    "Implement a scoped imported-buffer clean policy that preserves genuine Vulkan CPU writes and external ownership transitions.",
+    "Build the focused change in CI and repeat original-rate and matched-output-rate performance tests with SHM controls.",
+    "After performance qualifies, run longer menu/race checks and 30-minute AHB soak, including attached activity measurements."
   ],
   "installed_or_defaults_changed": false,
   "private_present_runs": [
@@ -731,5 +731,788 @@
     "shared_termux_va_preserved": true,
     "shared_sshd_preserved": true,
     "phone_claim": "available"
+  },
+  "cpu_investigation": {
+    "date": "2026-11-25",
+    "status": "Repeated matched-rate diagnostic controls identify per-submission whole-import cache cleaning as a CPU penalty; production fix pending",
+    "driver_sha256": "77185ee4407ecd599c4c04851d963f5adfd8fa89502574f021f42e1b7be6f3f2",
+    "runs": [
+      {
+        "run": "video-profile-shm-1",
+        "mode": "shm",
+        "fps_filter": null,
+        "import_sync_env": null,
+        "cpu_percent_one_core": {
+          "shell": 52.85510742898194,
+          "server": 15.329980717106992,
+          "video": 91.91323221256758
+        },
+        "total_cpu_percent_one_core": 160.0983203586565,
+        "video_counters_delta": {
+          "frame-drop-count": 410,
+          "decoder-frame-drop-count": 0
+        },
+        "elapsed_seconds": 30.006560901063494,
+        "video_seconds_advanced": 30.0,
+        "reported_output_fps": 30.0,
+        "thread_cpu_percent_one_core": {
+          "decode": {
+            "user": 41.157665620928555,
+            "system": 0.39991254044626934
+          },
+          "zink_submit": {
+            "user": 2.6660836029751294,
+            "system": 6.4319266921775
+          },
+          "wsi_present": {
+            "user": 14.196895185842564,
+            "system": 0.9664553060784844
+          },
+          "video_output": {
+            "user": 14.130243095768185,
+            "system": 3.232626368607344
+          }
+        },
+        "vo_context": {
+          "data": "x11egl",
+          "request_id": 7,
+          "error": "success"
+        },
+        "render_passes_ms": [
+          {
+            "name": "upload frame (naive)",
+            "average": 0.072434
+          },
+          {
+            "name": "merging planes",
+            "average": 2.441014
+          },
+          {
+            "name": "cscale=lanczos (chroma)",
+            "average": 3.246991
+          },
+          {
+            "name": "lanczos second pass",
+            "average": 4.460029
+          },
+          {
+            "name": "combining planes + color conversion",
+            "average": 5.772672
+          },
+          {
+            "name": "scale=bilinear (rgb) + output to screen",
+            "average": 5.241007
+          },
+          {
+            "name": "drawing osd",
+            "average": 0.001515
+          }
+        ],
+        "isolation_passed": true,
+        "completed": true
+      },
+      {
+        "run": "video-profile-ahb-1",
+        "mode": "ahb",
+        "fps_filter": null,
+        "import_sync_env": null,
+        "cpu_percent_one_core": {
+          "shell": 45.02317521350085,
+          "server": 14.430077622091682,
+          "video": 100.74393683968398
+        },
+        "total_cpu_percent_one_core": 160.19718967527652,
+        "video_counters_delta": {
+          "frame-drop-count": 335,
+          "decoder-frame-drop-count": 0
+        },
+        "elapsed_seconds": 30.00676859403029,
+        "video_seconds_advanced": 29.999999999999996,
+        "reported_output_fps": 30.0,
+        "thread_cpu_percent_one_core": {
+          "decode": {
+            "user": 43.2235812375356,
+            "system": 0.49988721554590126
+          },
+          "zink_submit": {
+            "user": 1.5996390897468842,
+            "system": 30.093210375863258
+          },
+          "wsi_present": {
+            "user": 0.23328070058808728,
+            "system": 0.3332581436972675
+          },
+          "video_output": {
+            "user": 13.197022490411793,
+            "system": 2.7327167783175934
+          }
+        },
+        "vo_context": {
+          "data": "x11egl",
+          "request_id": 7,
+          "error": "success"
+        },
+        "render_passes_ms": [
+          {
+            "name": "upload frame (naive)",
+            "average": 0.092261
+          },
+          {
+            "name": "merging planes",
+            "average": 2.98918
+          },
+          {
+            "name": "cscale=lanczos (chroma)",
+            "average": 3.08273
+          },
+          {
+            "name": "lanczos second pass",
+            "average": 5.621145
+          },
+          {
+            "name": "combining planes + color conversion",
+            "average": 5.542527
+          },
+          {
+            "name": "scale=bilinear (rgb) + output to screen",
+            "average": 5.177604
+          },
+          {
+            "name": "drawing osd",
+            "average": 0.001862
+          }
+        ],
+        "isolation_passed": true,
+        "completed": true
+      },
+      {
+        "run": "video-10fps-ahb-1",
+        "mode": "ahb",
+        "fps_filter": 10,
+        "import_sync_env": null,
+        "cpu_percent_one_core": {
+          "shell": 22.459898824632035,
+          "server": 12.796144137475817,
+          "video": 87.173731936554
+        },
+        "total_cpu_percent_one_core": 122.42977489866186,
+        "video_counters_delta": {
+          "frame-drop-count": 0,
+          "decoder-frame-drop-count": 0
+        },
+        "elapsed_seconds": 30.009039900964126,
+        "video_seconds_advanced": 30.1,
+        "reported_output_fps": 10.0,
+        "thread_cpu_percent_one_core": {
+          "decode": {
+            "user": 45.48629361368357,
+            "system": 1.6328413092091538
+          },
+          "zink_submit": {
+            "user": 1.6661646012338305,
+            "system": 18.26116402952278
+          },
+          "wsi_present": {
+            "user": 0.09996987607402982,
+            "system": 0.49984938037014914
+          },
+          "video_output": {
+            "user": 8.797349094514622,
+            "system": 2.132690689579303
+          }
+        },
+        "vo_context": {
+          "data": "x11egl",
+          "request_id": 7,
+          "error": "success"
+        },
+        "render_passes_ms": [
+          {
+            "name": "upload frame (naive)",
+            "average": 0.097507
+          },
+          {
+            "name": "merging planes",
+            "average": 3.406857
+          },
+          {
+            "name": "cscale=lanczos (chroma)",
+            "average": 3.033809
+          },
+          {
+            "name": "lanczos second pass",
+            "average": 5.417824
+          },
+          {
+            "name": "combining planes + color conversion",
+            "average": 6.484489
+          },
+          {
+            "name": "scale=bilinear (rgb) + output to screen",
+            "average": 5.860562
+          },
+          {
+            "name": "drawing osd",
+            "average": 0.001793
+          }
+        ],
+        "isolation_passed": true,
+        "completed": true
+      },
+      {
+        "run": "video-10fps-shm-1",
+        "mode": "shm",
+        "fps_filter": 10,
+        "import_sync_env": null,
+        "cpu_percent_one_core": {
+          "shell": 33.356327427165276,
+          "server": 11.729697556805371,
+          "video": 76.9428172121125
+        },
+        "total_cpu_percent_one_core": 122.02884219608315,
+        "video_counters_delta": {
+          "frame-drop-count": 0,
+          "decoder-frame-drop-count": 0
+        },
+        "elapsed_seconds": 30.00929890095722,
+        "video_seconds_advanced": 30.0,
+        "reported_output_fps": 10.0,
+        "thread_cpu_percent_one_core": {
+          "decode": {
+            "user": 42.72009166995593,
+            "system": 1.5995042122916414
+          },
+          "zink_submit": {
+            "user": 1.6661502211371266,
+            "system": 5.198388689947834
+          },
+          "wsi_present": {
+            "user": 8.630658145490317,
+            "system": 0.8997211194140483
+          },
+          "video_output": {
+            "user": 7.630968012808039,
+            "system": 2.4659023272829472
+          }
+        },
+        "vo_context": {
+          "data": "x11egl",
+          "request_id": 7,
+          "error": "success"
+        },
+        "render_passes_ms": [
+          {
+            "name": "upload frame (naive)",
+            "average": 0.11489
+          },
+          {
+            "name": "merging planes",
+            "average": 2.50532
+          },
+          {
+            "name": "cscale=lanczos (chroma)",
+            "average": 3.448659
+          },
+          {
+            "name": "lanczos second pass",
+            "average": 5.633626
+          },
+          {
+            "name": "combining planes + color conversion",
+            "average": 7.970192
+          },
+          {
+            "name": "scale=bilinear (rgb) + output to screen",
+            "average": 6.357041
+          },
+          {
+            "name": "drawing osd",
+            "average": 0.001435
+          }
+        ],
+        "isolation_passed": true,
+        "completed": true
+      },
+      {
+        "run": "video-nosync-ahb-1",
+        "mode": "ahb",
+        "fps_filter": null,
+        "import_sync_env": "0",
+        "cpu_percent_one_core": {
+          "shell": 59.25056430467638,
+          "server": 20.561078839136854,
+          "video": 87.57619965843055
+        },
+        "total_cpu_percent_one_core": 167.3878428022438,
+        "video_counters_delta": {
+          "frame-drop-count": 151,
+          "decoder-frame-drop-count": 0
+        },
+        "elapsed_seconds": 30.008153017028235,
+        "video_seconds_advanced": 29.999999999999996,
+        "reported_output_fps": 30.0,
+        "thread_cpu_percent_one_core": {
+          "decode": {
+            "user": 42.78837152261219,
+            "system": 0.5331884301883139
+          },
+          "zink_submit": {
+            "user": 3.065833473582805,
+            "system": 10.797065711313357
+          },
+          "wsi_present": {
+            "user": 0.2665942150941569,
+            "system": 0.5998369839618531
+          },
+          "video_output": {
+            "user": 17.761839580648207,
+            "system": 3.3324276886769617
+          }
+        },
+        "vo_context": {
+          "data": "x11egl",
+          "request_id": 7,
+          "error": "success"
+        },
+        "render_passes_ms": [
+          {
+            "name": "upload frame (naive)",
+            "average": 0.111332
+          },
+          {
+            "name": "merging planes",
+            "average": 2.984853
+          },
+          {
+            "name": "cscale=lanczos (chroma)",
+            "average": 3.404787
+          },
+          {
+            "name": "lanczos second pass",
+            "average": 5.611104
+          },
+          {
+            "name": "combining planes + color conversion",
+            "average": 5.463417
+          },
+          {
+            "name": "scale=bilinear (rgb) + output to screen",
+            "average": 5.285931
+          },
+          {
+            "name": "drawing osd",
+            "average": 0.001905
+          }
+        ],
+        "isolation_passed": true,
+        "completed": true
+      },
+      {
+        "run": "video-10fps-nosync-ahb-1",
+        "mode": "ahb",
+        "fps_filter": 10,
+        "import_sync_env": "0",
+        "cpu_percent_one_core": {
+          "shell": 21.72668684943923,
+          "server": 12.196268998304843,
+          "video": 76.84315931718844
+        },
+        "total_cpu_percent_one_core": 110.76611516493251,
+        "video_counters_delta": {
+          "frame-drop-count": 0,
+          "decoder-frame-drop-count": 0
+        },
+        "elapsed_seconds": 30.00917740096338,
+        "video_seconds_advanced": 30.0,
+        "reported_output_fps": 10.0,
+        "thread_cpu_percent_one_core": {
+          "decode": {
+            "user": 45.25282322321852,
+            "system": 1.9660652210382126
+          },
+          "zink_submit": {
+            "user": 1.766126385000428,
+            "system": 5.9981650811335285
+          },
+          "wsi_present": {
+            "user": 0.13329255735852288,
+            "system": 0.43320081141519934
+          },
+          "video_output": {
+            "user": 10.496788891983678,
+            "system": 1.7994495243400588
+          }
+        },
+        "vo_context": {
+          "data": "x11egl",
+          "request_id": 7,
+          "error": "success"
+        },
+        "render_passes_ms": [
+          {
+            "name": "upload frame (naive)",
+            "average": 0.11109
+          },
+          {
+            "name": "merging planes",
+            "average": 3.365277
+          },
+          {
+            "name": "cscale=lanczos (chroma)",
+            "average": 3.054334
+          },
+          {
+            "name": "lanczos second pass",
+            "average": 5.456083
+          },
+          {
+            "name": "combining planes + color conversion",
+            "average": 6.355142
+          },
+          {
+            "name": "scale=bilinear (rgb) + output to screen",
+            "average": 5.798214
+          },
+          {
+            "name": "drawing osd",
+            "average": 0.001713
+          }
+        ],
+        "isolation_passed": true,
+        "completed": true
+      },
+      {
+        "run": "video-10fps-shm-2",
+        "mode": "shm",
+        "fps_filter": 10,
+        "import_sync_env": "1",
+        "cpu_percent_one_core": {
+          "shell": 33.95874006736851,
+          "server": 11.730595195008554,
+          "video": 78.7149598028699
+        },
+        "total_cpu_percent_one_core": 124.40429506524697,
+        "video_counters_delta": {
+          "frame-drop-count": 0,
+          "decoder-frame-drop-count": 0
+        },
+        "elapsed_seconds": 30.007002555998042,
+        "video_seconds_advanced": 30.0,
+        "reported_output_fps": 10.0,
+        "thread_cpu_percent_one_core": {
+          "decode": {
+            "user": 43.92308087221952,
+            "system": 1.799579944688812
+          },
+          "zink_submit": {
+            "user": 1.6996032810949893,
+            "system": 5.298763170472613
+          },
+          "wsi_present": {
+            "user": 8.431365296412396,
+            "system": 0.9664410814069545
+          },
+          "video_output": {
+            "user": 8.298063078287301,
+            "system": 1.932882162813909
+          }
+        },
+        "vo_context": {
+          "data": "x11egl",
+          "request_id": 7,
+          "error": "success"
+        },
+        "render_passes_ms": [
+          {
+            "name": "upload frame (naive)",
+            "average": 0.104009
+          },
+          {
+            "name": "merging planes",
+            "average": 2.278699
+          },
+          {
+            "name": "cscale=lanczos (chroma)",
+            "average": 3.386963
+          },
+          {
+            "name": "lanczos second pass",
+            "average": 6.133475
+          },
+          {
+            "name": "combining planes + color conversion",
+            "average": 7.371229
+          },
+          {
+            "name": "scale=bilinear (rgb) + output to screen",
+            "average": 6.534308
+          },
+          {
+            "name": "drawing osd",
+            "average": 0.001522
+          }
+        ],
+        "isolation_passed": true,
+        "completed": true
+      },
+      {
+        "run": "video-10fps-ahb-2",
+        "mode": "ahb",
+        "fps_filter": 10,
+        "import_sync_env": "1",
+        "cpu_percent_one_core": {
+          "shell": 22.492317159032464,
+          "server": 12.66234151175161,
+          "video": 87.67005399320654
+        },
+        "total_cpu_percent_one_core": 122.82471266399061,
+        "video_counters_delta": {
+          "frame-drop-count": 0,
+          "decoder-frame-drop-count": 0
+        },
+        "elapsed_seconds": 30.010247286991216,
+        "video_seconds_advanced": 30.1,
+        "reported_output_fps": 10.0,
+        "thread_cpu_percent_one_core": {
+          "decode": {
+            "user": 44.98463431806493,
+            "system": 1.9326731781094564
+          },
+          "zink_submit": {
+            "user": 2.0326390321496004,
+            "system": 18.39371714338655
+          },
+          "wsi_present": {
+            "user": 0.2665756107737181,
+            "system": 0.3332195134671476
+          },
+          "video_output": {
+            "user": 8.996926863612986,
+            "system": 1.866029275416027
+          }
+        },
+        "vo_context": {
+          "data": "x11egl",
+          "request_id": 7,
+          "error": "success"
+        },
+        "render_passes_ms": [
+          {
+            "name": "upload frame (naive)",
+            "average": 0.101214
+          },
+          {
+            "name": "merging planes",
+            "average": 3.362785
+          },
+          {
+            "name": "cscale=lanczos (chroma)",
+            "average": 2.994424
+          },
+          {
+            "name": "lanczos second pass",
+            "average": 5.40961
+          },
+          {
+            "name": "combining planes + color conversion",
+            "average": 6.195557
+          },
+          {
+            "name": "scale=bilinear (rgb) + output to screen",
+            "average": 5.85919
+          },
+          {
+            "name": "drawing osd",
+            "average": 0.001752
+          }
+        ],
+        "isolation_passed": true,
+        "completed": true
+      },
+      {
+        "run": "video-10fps-nosync-ahb-2",
+        "mode": "ahb",
+        "fps_filter": 10,
+        "import_sync_env": "0",
+        "cpu_percent_one_core": {
+          "shell": 21.460313274473297,
+          "server": 12.3630065602944,
+          "video": 76.17744743081671
+        },
+        "total_cpu_percent_one_core": 110.00076726558441,
+        "video_counters_delta": {
+          "frame-drop-count": 0,
+          "decoder-frame-drop-count": 0
+        },
+        "elapsed_seconds": 30.008881592890248,
+        "video_seconds_advanced": 30.1,
+        "reported_output_fps": 10.0,
+        "thread_cpu_percent_one_core": {
+          "decode": {
+            "user": 44.653446875456865,
+            "system": 1.9327611334152972
+          },
+          "zink_submit": {
+            "user": 2.2659958115903485,
+            "system": 5.5983425933408615
+          },
+          "wsi_present": {
+            "user": 0.1666173390875256,
+            "system": 0.4332050816275666
+          },
+          "video_output": {
+            "user": 9.63048219925898,
+            "system": 2.699200893217915
+          }
+        },
+        "vo_context": {
+          "data": "x11egl",
+          "request_id": 7,
+          "error": "success"
+        },
+        "render_passes_ms": [
+          {
+            "name": "upload frame (naive)",
+            "average": 0.128518
+          },
+          {
+            "name": "merging planes",
+            "average": 3.392194
+          },
+          {
+            "name": "cscale=lanczos (chroma)",
+            "average": 3.036303
+          },
+          {
+            "name": "lanczos second pass",
+            "average": 5.424684
+          },
+          {
+            "name": "combining planes + color conversion",
+            "average": 6.384666
+          },
+          {
+            "name": "scale=bilinear (rgb) + output to screen",
+            "average": 5.774392
+          },
+          {
+            "name": "drawing osd",
+            "average": 0.001688
+          }
+        ],
+        "isolation_passed": true,
+        "completed": true
+      },
+      {
+        "run": "video-10fps-nosync-shm-1",
+        "mode": "shm",
+        "fps_filter": 10,
+        "import_sync_env": "0",
+        "cpu_percent_one_core": {
+          "shell": 33.32528999906642,
+          "server": 11.563875629676048,
+          "video": 77.08139576784062
+        },
+        "total_cpu_percent_one_core": 121.9705613965831,
+        "video_counters_delta": {
+          "frame-drop-count": 0,
+          "decoder-frame-drop-count": 0
+        },
+        "elapsed_seconds": 30.007240748032928,
+        "video_seconds_advanced": 30.0,
+        "reported_output_fps": 10.0,
+        "thread_cpu_percent_one_core": {
+          "decode": {
+            "user": 42.98962409879568,
+            "system": 1.6995897899523873
+          },
+          "zink_submit": {
+            "user": 1.5329633399570552,
+            "system": 5.3320463998506265
+          },
+          "wsi_present": {
+            "user": 8.16469604977127,
+            "system": 1.1330598599682582
+          },
+          "video_output": {
+            "user": 7.731467279783408,
+            "system": 2.332770299934649
+          }
+        },
+        "vo_context": {
+          "data": "x11egl",
+          "request_id": 7,
+          "error": "success"
+        },
+        "render_passes_ms": [
+          {
+            "name": "upload frame (naive)",
+            "average": 0.095737
+          },
+          {
+            "name": "merging planes",
+            "average": 2.635989
+          },
+          {
+            "name": "cscale=lanczos (chroma)",
+            "average": 3.201149
+          },
+          {
+            "name": "lanczos second pass",
+            "average": 5.175605
+          },
+          {
+            "name": "combining planes + color conversion",
+            "average": 7.788186
+          },
+          {
+            "name": "scale=bilinear (rgb) + output to screen",
+            "average": 5.956706
+          },
+          {
+            "name": "drawing osd",
+            "average": 0.001574
+          }
+        ],
+        "isolation_passed": true,
+        "completed": true
+      }
+    ],
+    "source_path": "src/panfrost/lib/kmod/kbase_kmod.c:kbase_kmod_jm_clean_imports",
+    "source_call_site": "src/panfrost/vulkan/jm/panvk_vX_gpu_queue.c:panvk_per_arch(gpu_queue_submit)",
+    "mechanism": "DMA_BUF_IOCTL_SYNC END|WRITE for every listed noncoherent import on every command-buffer submission",
+    "diagnostic_env": "PANVK_KBASE_IMPORT_SYNC=0",
+    "diagnostic_only": true,
+    "render_and_idle_fence_waits_retained": true,
+    "fixed_output_fps": 10,
+    "fixed_output_runs": 7,
+    "fixed_output_drops_each": 0,
+    "hardware_maps_verified": true,
+    "all_isolation_passed": true,
+    "profiling": "per-thread proc user/system counters and mpv VO timings; simpleperf restricted",
+    "security_perf_harden_unchanged": "1",
+    "diagnostic_correctness": {
+      "run": "video-nosync-ahb-1",
+      "colour_captures": 4,
+      "maximum_channel_error": 0,
+      "stale_negative_control_rejected": true
+    },
+    "diagnostic_interop": {
+      "run": "cache-off-interop-1",
+      "public_cpu_to_gpu": true,
+      "gpu_to_public_cpu": true,
+      "android_egl": true,
+      "flip_frames": 180,
+      "root_pixels_verified": true,
+      "isolation_passed": true
+    },
+    "default_or_driver_code_changed": false,
+    "cleanup": {
+      "owned_processes_remaining": 0,
+      "wake_lock_released": true,
+      "phone_claim": "available",
+      "shared_state_preserved": true
+    },
+    "default_import_sync_on_v9": true
   }
 }

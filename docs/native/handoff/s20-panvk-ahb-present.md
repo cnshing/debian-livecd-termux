@@ -7,10 +7,12 @@ AHB swapchain imports. Against same-driver SHM in both run orders, **gears total
 28%** and **video at an equal 10 FPS output falls 11–17%**, with zero drops in either mode.
 At the full 30 FPS source rate AHB shows about 740 of 900 frames against SHM's 400–490,
 so its raw total CPU is 9–27% *higher* while CPU per frame shown is about 29% lower.
-Whether that meets the "total CPU below SHM" gate is the owner's call; see
-[the patch 0005 qualification](#patch-0005-qualification). Colour/resize, 100 restarts,
-the 300-frame race and a 30-minute soak pass on the new driver. Keep SHM as default; nothing is installed or
-promoted. GPU-only AHB import still fails; CPU-usable allocations pass.
+**The owner chose equal work as the video gate (2026-11-25), so the performance gate
+passes**; see [the patch 0005 qualification](#patch-0005-qualification). Colour/resize,
+100 restarts, the 300-frame race and a 30-minute soak pass on the new driver, so the
+done criteria below are met. Promotion to default is a separate, unstarted step: SHM is still
+the default and nothing is installed. GPU-only AHB import still fails; CPU-usable
+allocations pass.
 Follows [s20-panvk-raw-dri3.md](s20-panvk-raw-dri3.md).
 Shared rules: [README.md](README.md).
 
@@ -406,8 +408,9 @@ diagnostic (110.0–110.8%) without disabling the clean for any CPU-written impo
 
 **Gate reading.** Gears passes clearly in both orders. Equal-work video passes in both orders.
 Source-rate video fails on raw totals because AHB does about 50% more presentation work; per
-frame shown it is cheaper. The handoff's criterion was written before this tradeoff was known;
-deciding whether equal-output CPU (or CPU per frame) is the right gate belongs to the owner.
+frame shown it is cheaper. The handoff's criterion was written before this tradeoff was known.
+On 2026-11-25 the owner chose CPU for equal work as the gate, so AHB passes; the source-rate
+totals stay recorded as the cost of showing more frames.
 
 `q0005-correctness-1` repeats the correctness suite on this ICD: 20 colour/resize cycles,
 all 40 captures maximum channel error zero, stale-phase control rejected
@@ -452,12 +455,11 @@ The earlier raw soak and static single-buffer flips do not substitute for AHB qu
 Next work, in order:
 
 1. Done: patch 0005 scopes the clean (CI 45577255552) and is qualified above.
-2. Owner decision: accept equal-output (or per-frame) CPU as the video gate, or require raw
-   source-rate totals below SHM. If the latter, the remaining source-rate cost is Shell and
-   X-server work on the extra frames, not the driver; attribute window-pixmap CPU copies
-   separately from Shell's root flip (the server has no GPU window compositing).
-3. Measure the attached Android activity's sampling cost in a tagged window, and run longer
-   AHB race/menu checks before any promotion.
+2. Done: the owner chose equal-work CPU as the video gate; AHB passes it.
+3. Before promoting to default (needs owner go-ahead; changes package pins and the installed
+   environment): measure the attached Android activity's sampling cost in a tagged window, run
+   longer AHB race/menu checks, then package the patch-0005 driver and opt the S20 into
+   `PANVK_KBASE_DRI3=ahb` through the controller.
 
 ## Gotchas
 
@@ -477,6 +479,7 @@ Next work, in order:
 ## What counts as done
 
 - With AHB presentation, total CPU (shell + X server + app) during the 1080p video and gears
-  phases is clearly below MIT-SHM, in both run orders.
-- No split or cut frames in the race tests; the soak completes.
-- Recordings opened and looked at.
+  phases is clearly below MIT-SHM, in both run orders. Video is compared at equal output
+  (owner decision, 2026-11-25). **Met with patch 0005.**
+- No split or cut frames in the race tests; the soak completes. **Met with patch 0005.**
+- Recordings opened and looked at. **Met.**

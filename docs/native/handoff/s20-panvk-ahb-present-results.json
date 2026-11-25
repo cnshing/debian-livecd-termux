@@ -1,6 +1,6 @@
 {
   "date": "2026-11-25",
-  "status": "Patch 0005 removes per-submission cache cleaning of AHB swapchain imports. Same-driver paired runs: gears total CPU 28% below SHM and equal-output 10 FPS video 11-17% below SHM in both orders; source-rate video presents ~50% more frames with 9-27% higher total CPU (about 29% lower CPU per frame shown). Correctness, restarts, race and 30-minute soak pass. Video gate interpretation pending owner; SHM default retained, nothing installed.",
+  "status": "Patch 0005 removes per-submission cache cleaning of AHB swapchain imports. Same-driver paired runs: gears total CPU 28% below SHM and equal-output 10 FPS video 11-17% below SHM in both orders; source-rate video presents ~50% more frames with 9-27% higher total CPU (about 29% lower CPU per frame shown). Correctness, restarts, race and 30-minute soak pass. Owner chose equal-work CPU as the video gate (2026-11-25): performance gate passes. Not promoted; SHM default retained, nothing installed.",
   "driver_sha256": "b40b4d712a33cf6f5962eee1e1fa60d97db7adb9596521e52949f4440dd189be",
   "benchmark_setup": {
     "screen": [
@@ -278,9 +278,7 @@
     "AHB menu races and 30-minute soak are deferred until the performance gate passes."
   ],
   "pending": [
-    "Owner decision: accept equal-output/per-frame video CPU as the gate, or require raw source-rate totals below SHM.",
-    "Measure the attached Android activity's sampling cost in a tagged window.",
-    "Longer AHB race/menu checks before any promotion."
+    "Promotion needs owner go-ahead: measure attached Android activity cost, longer race/menu checks, package the patch-0005 driver and opt the S20 into PANVK_KBASE_DRI3=ahb."
   ],
   "installed_or_defaults_changed": false,
   "private_present_runs": [
@@ -670,12 +668,14 @@
   "acceptance": {
     "colour_resize": true,
     "tagged_android_two_phase_pixels": true,
-    "video_cpu_below_shm_both_orders": "equal-output 10 FPS: yes; source rate raw total: no (AHB presents ~50% more frames, ~29% lower CPU per frame)",
+    "video_cpu_below_shm_both_orders": true,
     "gears_cpu_below_shm_both_orders": true,
     "race_restarts": "patch 0005: 300 race frames 0 split, 100 restarts",
     "soak": "patch 0005: 30-minute soak passes",
     "promoted": false,
-    "video_gate_decision": "pending owner"
+    "video_gate_decision": "owner 2026-11-25: compare at equal work (equal output rate); passes",
+    "video_source_rate_note": "raw total higher at 30 FPS source because AHB presents ~50% more frames; ~29% lower CPU per frame shown",
+    "done_criteria_met": true
   },
   "physical_wsi": {
     "run": "android-window-gtk-1",

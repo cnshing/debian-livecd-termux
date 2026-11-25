@@ -1,3 +1,20 @@
+diff --git a/src/android_stub/nativewindow_stub.cpp b/src/android_stub/nativewindow_stub.cpp
+index 75198bd..c0a2348 100644
+--- a/src/android_stub/nativewindow_stub.cpp
++++ b/src/android_stub/nativewindow_stub.cpp
+@@ -38,6 +38,12 @@ AHardwareBuffer_isSupported(const AHardwareBuffer_Desc* desc)
+    return 0;
+ }
+ 
++int
++AHardwareBuffer_sendHandleToUnixSocket(const AHardwareBuffer *buffer, int socketFd)
++{
++   return -1;
++}
++
+ const native_handle_t *
+ AHardwareBuffer_getNativeHandle(const AHardwareBuffer *buffer)
+ {
 diff --git a/src/panfrost/vulkan/panvk_wsi.c b/src/panfrost/vulkan/panvk_wsi.c
 index f7ff544..e9d67e8 100644
 --- a/src/panfrost/vulkan/panvk_wsi.c

@@ -1,0 +1,168 @@
+diff -ruN a/netwerk/protocol/http/WebTransportCertificateVerifier.cpp b/netwerk/protocol/http/WebTransportCertificateVerifier.cpp
+--- a/netwerk/protocol/http/WebTransportCertificateVerifier.cpp
++++ b/netwerk/protocol/http/WebTransportCertificateVerifier.cpp
+@@ -57,6 +57,17 @@
+       mozilla::pkix::Input item, mozilla::pkix::DigestAlgorithm digestAlg,
+       /*out*/ uint8_t* digestBuf, size_t digestBufLen) override;
+ 
++  // NSS 3.134 added ML-DSA to mozilla::pkix::TrustDomain. Firefox 159 predates
++  // ML-DSA certificate support (bug 2092696), so such keys stay unsupported.
++  virtual mozilla::pkix::Result CheckMLDSAParameterSetIsAcceptable(
++      mozilla::pkix::EndEntityOrCA, mozilla::pkix::MLDSAParameterSet) override {
++    return mozilla::pkix::Result::ERROR_UNSUPPORTED_KEYALG;
++  }
++  virtual mozilla::pkix::Result VerifyMLDSASignedData(
++      mozilla::pkix::Input, mozilla::pkix::MLDSAParameterSet,
++      mozilla::pkix::Input, mozilla::pkix::Input) override {
++    return mozilla::pkix::Result::FATAL_ERROR_LIBRARY_FAILURE;
++  }
+   virtual mozilla::pkix::Result CheckValidityIsAcceptable(
+       mozilla::pkix::Time notBefore, mozilla::pkix::Time notAfter,
+       mozilla::pkix::EndEntityOrCA endEntityOrCA,
+diff -ruN a/security/certverifier/NSSCertDBTrustDomain.h b/security/certverifier/NSSCertDBTrustDomain.h
+--- a/security/certverifier/NSSCertDBTrustDomain.h
++++ b/security/certverifier/NSSCertDBTrustDomain.h
+@@ -187,6 +187,17 @@
+                            /*out*/ uint8_t* digestBuf,
+                            size_t digestBufLen) override;
+ 
++  // NSS 3.134 added ML-DSA to mozilla::pkix::TrustDomain. Firefox 159 predates
++  // ML-DSA certificate support (bug 2092696), so such keys stay unsupported.
++  virtual mozilla::pkix::Result CheckMLDSAParameterSetIsAcceptable(
++      mozilla::pkix::EndEntityOrCA, mozilla::pkix::MLDSAParameterSet) override {
++    return mozilla::pkix::Result::ERROR_UNSUPPORTED_KEYALG;
++  }
++  virtual mozilla::pkix::Result VerifyMLDSASignedData(
++      mozilla::pkix::Input, mozilla::pkix::MLDSAParameterSet,
++      mozilla::pkix::Input, mozilla::pkix::Input) override {
++    return mozilla::pkix::Result::FATAL_ERROR_LIBRARY_FAILURE;
++  }
+   virtual Result CheckValidityIsAcceptable(
+       mozilla::pkix::Time notBefore, mozilla::pkix::Time notAfter,
+       mozilla::pkix::EndEntityOrCA endEntityOrCA,
+diff -ruN a/security/ct/CTLogVerifier.cpp b/security/ct/CTLogVerifier.cpp
+--- a/security/ct/CTLogVerifier.cpp
++++ b/security/ct/CTLogVerifier.cpp
+@@ -96,6 +96,17 @@
+     return pkix::Result::FATAL_ERROR_LIBRARY_FAILURE;
+   }
+ 
++  // NSS 3.134 added ML-DSA to mozilla::pkix::TrustDomain. Firefox 159 predates
++  // ML-DSA certificate support (bug 2092696), so such keys stay unsupported.
++  virtual mozilla::pkix::Result CheckMLDSAParameterSetIsAcceptable(
++      mozilla::pkix::EndEntityOrCA, mozilla::pkix::MLDSAParameterSet) override {
++    return mozilla::pkix::Result::ERROR_UNSUPPORTED_KEYALG;
++  }
++  virtual mozilla::pkix::Result VerifyMLDSASignedData(
++      mozilla::pkix::Input, mozilla::pkix::MLDSAParameterSet,
++      mozilla::pkix::Input, mozilla::pkix::Input) override {
++    return mozilla::pkix::Result::FATAL_ERROR_LIBRARY_FAILURE;
++  }
+   pkix::Result CheckValidityIsAcceptable(Time, Time, EndEntityOrCA,
+                                          KeyPurposeId) override {
+     return pkix::Result::FATAL_ERROR_LIBRARY_FAILURE;
+diff -ruN a/security/ct/tests/gtest/CTTestUtils.cpp b/security/ct/tests/gtest/CTTestUtils.cpp
+--- a/security/ct/tests/gtest/CTTestUtils.cpp
++++ b/security/ct/tests/gtest/CTTestUtils.cpp
+@@ -805,6 +805,17 @@
+                                      subjectPublicKeyInfo, nullptr);
+   }
+ 
++  // NSS 3.134 added ML-DSA to mozilla::pkix::TrustDomain. Firefox 159 predates
++  // ML-DSA certificate support (bug 2092696), so such keys stay unsupported.
++  virtual mozilla::pkix::Result CheckMLDSAParameterSetIsAcceptable(
++      mozilla::pkix::EndEntityOrCA, mozilla::pkix::MLDSAParameterSet) override {
++    return mozilla::pkix::Result::ERROR_UNSUPPORTED_KEYALG;
++  }
++  virtual mozilla::pkix::Result VerifyMLDSASignedData(
++      mozilla::pkix::Input, mozilla::pkix::MLDSAParameterSet,
++      mozilla::pkix::Input, mozilla::pkix::Input) override {
++    return mozilla::pkix::Result::FATAL_ERROR_LIBRARY_FAILURE;
++  }
+   pkix::Result CheckValidityIsAcceptable(Time, Time, EndEntityOrCA,
+                                          KeyPurposeId) override {
+     ADD_FAILURE();
+diff -ruN a/security/manager/ssl/AppTrustDomain.h b/security/manager/ssl/AppTrustDomain.h
+--- a/security/manager/ssl/AppTrustDomain.h
++++ b/security/manager/ssl/AppTrustDomain.h
+@@ -63,6 +63,17 @@
+       mozilla::pkix::Input data, mozilla::pkix::DigestAlgorithm digestAlgorithm,
+       mozilla::pkix::Input signature,
+       mozilla::pkix::Input subjectPublicKeyInfo) override;
++  // NSS 3.134 added ML-DSA to mozilla::pkix::TrustDomain. Firefox 159 predates
++  // ML-DSA certificate support (bug 2092696), so such keys stay unsupported.
++  virtual mozilla::pkix::Result CheckMLDSAParameterSetIsAcceptable(
++      mozilla::pkix::EndEntityOrCA, mozilla::pkix::MLDSAParameterSet) override {
++    return mozilla::pkix::Result::ERROR_UNSUPPORTED_KEYALG;
++  }
++  virtual mozilla::pkix::Result VerifyMLDSASignedData(
++      mozilla::pkix::Input, mozilla::pkix::MLDSAParameterSet,
++      mozilla::pkix::Input, mozilla::pkix::Input) override {
++    return mozilla::pkix::Result::FATAL_ERROR_LIBRARY_FAILURE;
++  }
+   virtual Result CheckValidityIsAcceptable(
+       mozilla::pkix::Time notBefore, mozilla::pkix::Time notAfter,
+       mozilla::pkix::EndEntityOrCA endEntityOrCA,
+diff -ruN a/security/manager/ssl/PDFTrustDomain.h b/security/manager/ssl/PDFTrustDomain.h
+--- a/security/manager/ssl/PDFTrustDomain.h
++++ b/security/manager/ssl/PDFTrustDomain.h
+@@ -59,6 +59,17 @@
+       mozilla::pkix::Input data, mozilla::pkix::DigestAlgorithm digestAlgorithm,
+       mozilla::pkix::Input signature,
+       mozilla::pkix::Input subjectPublicKeyInfo) override;
++  // NSS 3.134 added ML-DSA to mozilla::pkix::TrustDomain. Firefox 159 predates
++  // ML-DSA certificate support (bug 2092696), so such keys stay unsupported.
++  virtual mozilla::pkix::Result CheckMLDSAParameterSetIsAcceptable(
++      mozilla::pkix::EndEntityOrCA, mozilla::pkix::MLDSAParameterSet) override {
++    return mozilla::pkix::Result::ERROR_UNSUPPORTED_KEYALG;
++  }
++  virtual mozilla::pkix::Result VerifyMLDSASignedData(
++      mozilla::pkix::Input, mozilla::pkix::MLDSAParameterSet,
++      mozilla::pkix::Input, mozilla::pkix::Input) override {
++    return mozilla::pkix::Result::FATAL_ERROR_LIBRARY_FAILURE;
++  }
+   virtual Result CheckValidityIsAcceptable(
+       mozilla::pkix::Time notBefore, mozilla::pkix::Time notAfter,
+       mozilla::pkix::EndEntityOrCA endEntityOrCA,
+diff -ruN a/security/manager/ssl/QWACTrustDomain.h b/security/manager/ssl/QWACTrustDomain.h
+--- a/security/manager/ssl/QWACTrustDomain.h
++++ b/security/manager/ssl/QWACTrustDomain.h
+@@ -57,6 +57,17 @@
+       mozilla::pkix::Input data, mozilla::pkix::DigestAlgorithm digestAlgorithm,
+       mozilla::pkix::Input signature,
+       mozilla::pkix::Input subjectPublicKeyInfo) override;
++  // NSS 3.134 added ML-DSA to mozilla::pkix::TrustDomain. Firefox 159 predates
++  // ML-DSA certificate support (bug 2092696), so such keys stay unsupported.
++  virtual mozilla::pkix::Result CheckMLDSAParameterSetIsAcceptable(
++      mozilla::pkix::EndEntityOrCA, mozilla::pkix::MLDSAParameterSet) override {
++    return mozilla::pkix::Result::ERROR_UNSUPPORTED_KEYALG;
++  }
++  virtual mozilla::pkix::Result VerifyMLDSASignedData(
++      mozilla::pkix::Input, mozilla::pkix::MLDSAParameterSet,
++      mozilla::pkix::Input, mozilla::pkix::Input) override {
++    return mozilla::pkix::Result::FATAL_ERROR_LIBRARY_FAILURE;
++  }
+   virtual Result CheckValidityIsAcceptable(
+       mozilla::pkix::Time notBefore, mozilla::pkix::Time notAfter,
+       mozilla::pkix::EndEntityOrCA endEntityOrCA,
+diff -ruN a/security/manager/ssl/TLSClientAuthCertSelection.cpp b/security/manager/ssl/TLSClientAuthCertSelection.cpp
+--- a/security/manager/ssl/TLSClientAuthCertSelection.cpp
++++ b/security/manager/ssl/TLSClientAuthCertSelection.cpp
+@@ -225,6 +225,17 @@
+       pkix::Input subjectPublicKeyInfo) override {
+     return pkix::Success;
+   }
++  // NSS 3.134 added ML-DSA to mozilla::pkix::TrustDomain. Like the other
++  // checks of this nonverifying domain, accept (as upstream bug 2092696 does).
++  virtual mozilla::pkix::Result CheckMLDSAParameterSetIsAcceptable(
++      mozilla::pkix::EndEntityOrCA, mozilla::pkix::MLDSAParameterSet) override {
++    return mozilla::pkix::Success;
++  }
++  virtual mozilla::pkix::Result VerifyMLDSASignedData(
++      mozilla::pkix::Input, mozilla::pkix::MLDSAParameterSet,
++      mozilla::pkix::Input, mozilla::pkix::Input) override {
++    return mozilla::pkix::Success;
++  }
+   virtual mozilla::pkix::Result CheckValidityIsAcceptable(
+       pkix::Time notBefore, pkix::Time notAfter,
+       pkix::EndEntityOrCA endEntityOrCA,

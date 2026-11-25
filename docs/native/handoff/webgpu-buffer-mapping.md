@@ -148,6 +148,21 @@ there, so the mapping failure cannot occur yet. Details are in
 `docs/native/X1S-BROWSER-VERIFICATION.md`. If a later PanVK or Chromium
 version offers an adapter, run the stress and its opt-out control on the x1s.
 
+Note10+ regression (2026-11-25), with android-webgpu 0.1.0-2 and livecd-desktop
+50 installed, through the installed launcher modules on private displays:
+
+| `test-web-graphics.py --map-stress` | Chromium | Chrome |
+|---|---|---|
+| Helper preloaded | 10/10 pass | 10/10 pass |
+| `LIVECD_WEBGPU_MAP=0` (control) | 1/5 fail | 2/5 fail |
+
+Every control failure is the original "Failed to allocate memory for buffer
+mapping". The screenshots show all three canvases with the helper and no
+WebGPU canvas in a failed control run. The ten failures right after the
+install were a harness problem: copying the tests from shared storage drops
+the execute bit of `tests/browsers/private-lorie/private-lorie`, so no
+browser started.
+
 Maintenance: the helper recognises Chromium's memfd by the exact name
 `shared-memory-region` and V8's reservation by its size (at least 12 GiB minus
 a page, with size + page − 4 GiB a power of two). A browser update that changes

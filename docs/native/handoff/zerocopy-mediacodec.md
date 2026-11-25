@@ -531,3 +531,20 @@ Hardware limit: the Snapdragon 855 VP9 decoder rejects pictures under 96 lines
 therefore 161x97, and the gap test checks that VP9 161x95 gives the same frame
 count through both transports instead of requiring frames.
 
+termux-va 13 on the Note10+ (2026-11-25): the running desktop's APT guard
+refuses to replace termux-va, so these runs use the daemon extracted from the
+CI deb (sha256 `40b7186a…`) as a private daemon, on the installed android-vaapi
+24 stack. The installed package follows at the next desktop restart.
+
+- `test-surface-fallback.py`: 10/10, including untagged High on copy and
+  BT.709-tagged High on dma-buf.
+- `test-surface-gaps.py`: 30/30. Padded H.264 160x90, VP9 161x97 and VP8
+  161x95 and the 640x360 control are bit-exact; VP9 161x95 matches copy; all
+  untagged and full-range sessions stay on copy; BT.709 limited sessions use
+  dma-buf with the same RGB error as copy. The control caught all ten
+  known-bad sessions and nothing else.
+- `test-surface-transport.py`: H.264 63.4 fps and HEVC 63.1 fps for 120
+  frames; minimum plane PSNR 42.11 and 44.38 dB as before; swapped chroma
+  rejected on every frame.
+- `test-encoder-failure.py`: 4/4, FFmpeg exits with status 251 and no signal.
+

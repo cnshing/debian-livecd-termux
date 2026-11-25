@@ -276,6 +276,11 @@ Main10/VP8 encoding, full-range encoding and untagged constrained-baseline
 encoding use copy input. Installed browser checks found surface colour errors
 for the latter two combinations; their copy controls pass. Those combinations
 are deliberately excluded from the limited-range startup qualification.
+From termux-va 13 every untagged encoder uses copy input, not only
+constrained Baseline: on the Note10+, untagged High, Main and HEVC Main surface
+input decoded as wrong as Baseline (`tests/video-encode/test-surface-gaps.py`).
+Untagged encodes, such as FFmpeg without colour options, therefore lose the
+zero-copy speedup; BT.709 limited-range sessions keep it.
 The final decoder retains a GPU copy, and mpv's separate default MediaCodec
 route is unchanged. Direct decoder-to-Turnip/Zink consumer export and new
 GStreamer integrations were not added; existing VA destinations remain usable.

@@ -727,7 +727,12 @@ def parent(args):
         libraries = args.mesa_lib_dir.resolve(strict=True)
         env['LD_LIBRARY_PATH'] = str(libraries) + ':' + env['LD_LIBRARY_PATH']
         env['LIBGL_DRIVERS_PATH'] = str(libraries / 'dri')
-    env.pop('PANVK_KBASE_DRI3', None)
+    if args.mode == 'installed':
+        # Keep the installed controller's own presentation choice and record it.
+        (args.out / 'presentation.json').write_text(json.dumps(
+            {'PANVK_KBASE_DRI3': env.get('PANVK_KBASE_DRI3')}) + '\n')
+    else:
+        env.pop('PANVK_KBASE_DRI3', None)
     if args.mode in ('raw', 'ahb'):
         env['PANVK_KBASE_DRI3'] = args.mode
     if args.present_mode:
@@ -849,7 +854,8 @@ if __name__ == '__main__':
     faulthandler.register(signal.SIGUSR1)
     parser = argparse.ArgumentParser()
     parser.add_argument('--out', type=Path, required=True)
-    parser.add_argument('--mode', choices=('shm', 'raw', 'ahb'), default='shm')
+    parser.add_argument('--mode', choices=('shm', 'raw', 'ahb', 'installed'), default='shm',
+                        help="installed keeps the integrated controller's presentation choice")
     parser.add_argument('--present-mode', choices=('fifo', 'relaxed', 'mailbox', 'immediate'),
                         help='Override the Vulkan present mode after controller environment setup')
     parser.add_argument('--server', choices=('lorie', 'xvfb'), default='lorie')
@@ -925,7 +931,9 @@ if __name__ == '__main__':
         parser.error('present-race-only requires present-race-trials')
     if args.present_race_trials and (args.allow_other_displays or args.benchmark_only):
         parser.error('race checks require isolation and cannot use benchmark-only')
-    if args.server == 'xvfb' and args.mode in ('raw', 'ahb'):
+    if args.mode == 'installed' and not (args.integrated or args.worker):
+        parser.error('installed mode tests the integrated controller')
+    if args.server == 'xvfb' and args.mode in ('raw', 'ahb', 'installed'):
         parser.error('raw/AHB DRI3 requires the private lorie server')
     if args.force_flip and (args.server != 'lorie' or args.mode != 'raw'):
         parser.error('force-flip requires raw DRI3 on the private lorie server')

@@ -1,6 +1,6 @@
 {
   "date": "2026-11-25",
-  "status": "Patch 0005 removes per-submission cache cleaning of AHB swapchain imports. Same-driver paired runs: gears total CPU 28% below SHM and equal-output 10 FPS video 11-17% below SHM in both orders; source-rate video presents ~50% more frames with 9-27% higher total CPU (about 29% lower CPU per frame shown). Correctness, restarts, race and 30-minute soak pass. Owner chose equal-work CPU as the video gate (2026-11-25): performance gate passes. Not promoted; SHM default retained, nothing installed.",
+  "status": "Promoted 2026-11-25: PanVK 26.3.1-2 + livecd-desktop 0.2.0-51 make AHB the S20 desktop session default; installed on the S20 and verified on private displays.",
   "driver_sha256": "b40b4d712a33cf6f5962eee1e1fa60d97db7adb9596521e52949f4440dd189be",
   "benchmark_setup": {
     "screen": [
@@ -278,7 +278,8 @@
     "AHB menu races and 30-minute soak are deferred until the performance gate passes."
   ],
   "pending": [
-    "Promotion needs owner go-ahead: measure attached Android activity cost, longer race/menu checks, package the patch-0005 driver and opt the S20 into PANVK_KBASE_DRI3=ahb."
+    "Measure the attached Android activity's sampling cost on the live desktop.",
+    "Longer AHB race/menu checks."
   ],
   "installed_or_defaults_changed": false,
   "private_present_runs": [
@@ -672,7 +673,7 @@
     "gears_cpu_below_shm_both_orders": true,
     "race_restarts": "patch 0005: 300 race frames 0 split, 100 restarts",
     "soak": "patch 0005: 30-minute soak passes",
-    "promoted": false,
+    "promoted": true,
     "video_gate_decision": "owner 2026-11-25: compare at equal work (equal output rate); passes",
     "video_source_rate_note": "raw total higher at 30 FPS source because AHB presents ~50% more frames; ~29% lower CPU per frame shown",
     "done_criteria_met": true
@@ -2445,5 +2446,71 @@
       "shared_sshd_preserved": true,
       "phone_claim": "available"
     }
+  },
+  "promotion": {
+    "driver_ci": 45600751232,
+    "packages_ci": 45603195349,
+    "release": "panvk-desktop-26.3.1-2",
+    "mesa_tree": "7c6284194b4a6a5df1575848aeeb7ec771fc82f7",
+    "bionic_sha256": "0d83ff81440666c7896b2239a32544171c569d014262496010706ca49a0ab881",
+    "glibc_sha256": "0251cd6478e9f77448d5aa089d383af15bf022d209dd43200d2113bb3abc2aad",
+    "packages": {
+      "mesa-vulkan-icd-panvk-kbase": "26.3.1-2",
+      "livecd-desktop": "0.2.0-51",
+      "android-webgpu": "0.1.0-2 (dependency)"
+    },
+    "scope": "Bionic desktop session on Termux:X11 only; browsers and glibc keep MIT-SHM; opt-out panvk_presentation=shm",
+    "installed_checks": {
+      "gears_total": {
+        "shm": [
+          160.1,
+          216.2
+        ],
+        "ahb": [
+          114.9,
+          114.9
+        ]
+      },
+      "video_10fps_total": {
+        "shm": [
+          123.9,
+          124.2
+        ],
+        "ahb": [
+          110.4,
+          110.2
+        ]
+      },
+      "video_30fps_total": {
+        "shm": [
+          149.9,
+          149.7
+        ],
+        "ahb": [
+          165.5,
+          161.0
+        ],
+        "vo_drops_shm": [
+          424,
+          421
+        ],
+        "vo_drops_ahb": [
+          151,
+          161
+        ]
+      },
+      "correctness": {
+        "run": "inst-correctness-2",
+        "captures": 40,
+        "maximum_channel_error": 0,
+        "restarts": 50,
+        "race_frames": 300,
+        "split": 0,
+        "invalid": 0
+      },
+      "isolation_passed": true,
+      "images_inspected": true
+    },
+    "live_desktop_started": false
   }
 }

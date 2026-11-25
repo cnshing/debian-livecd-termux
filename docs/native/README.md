@@ -314,7 +314,11 @@ livecd start
 ```
 
 The desktop uses Mutter's GLES compositor and GTK's GL renderer over Zink,
-with MIT-SHM presentation and Termux:X11's legacy drawing mode. The packaged
+presenting through Android hardware buffers (`PANVK_KBASE_DRI3=ahb`, from PanVK
+26.3.1-2 and `livecd-desktop` 0.2.0-51) and Termux:X11's legacy drawing mode, which still
+samples flipped AHB frames on the GPU. Browsers and glibc programs keep MIT-SHM;
+`"panvk_presentation": "shm"` in `~/.local/lib/livecd/config.json` returns the session
+to MIT-SHM. The packaged
 X11 soname aliases are scoped to PanVK's library lookup. Explicit `$PREFIX/lib`
 entries are removed from that lookup to avoid shadowing Android's Binder
 library. Raw DRI3 remains experimental. `livecd validate` checks the actual

@@ -2,16 +2,16 @@
 
 Current integration: `install.sh` selects PanVK/Zink by default for a fresh
 qualified x1s installation, preserving any saved renderer preference. The
-normal `mesa-vulkan-icd-panvk-kbase` 26.3.1-1 package carries the fourteen-patch
-source-built desktop/AHB candidate for both Bionic and glibc. Controller
-`livecd-desktop` 0.2.0-21 verifies the device profile and source manifest before
+normal `mesa-vulkan-icd-panvk-kbase` 26.3.1-2 package carries the seventeen-patch
+source-built desktop/AHB build for both Bionic and glibc. Controller
+`livecd-desktop` 0.2.0-51 verifies the device profile and source manifest before
 defaulting to `PANVK_G77_LWG=1` and `PANVK_G77_NESTED=1`. Explicit mode settings
 are preserved. Software and `--safe` recovery remain available.
 
-- Bionic SHA-256: `134b668a988626a64f01ce8f1c93307a439cf208e47d775a17a42b60358c5758`.
-- glibc SHA-256: `64f5516f608fa31db503e8c45f5442790d0afe1cf28ba2aa6a334030dd608b04`.
-- Source tree: `b28956ffc095bda26bf8241badba014be178536b`.
-- Assets and provenance: [panvk-desktop-26.3.1-1](https://github.com/cnshing/debian-livecd-termux/releases/tag/panvk-desktop-26.3.1-1).
+- Bionic SHA-256: `0d83ff81440666c7896b2239a32544171c569d014262496010706ca49a0ab881`.
+- glibc SHA-256: `0251cd6478e9f77448d5aa089d383af15bf022d209dd43200d2113bb3abc2aad`.
+- Source tree: `7c6284194b4a6a5df1575848aeeb7ec771fc82f7`.
+- Assets and provenance: [panvk-desktop-26.3.1-2](https://github.com/cnshing/debian-livecd-termux/releases/tag/panvk-desktop-26.3.1-2).
 
 The installer and browser installation path ensure the pinned driver/controller
 versions, using the local APT repository when available or verified immutable
@@ -24,7 +24,10 @@ qualification-directory path is used by the installed configuration.
 
 The automatic profile is limited to x1s/aarch64/Linux 4.19.87/kbase JM 11.35.
 Other Mali devices retain manual renderer selection; Qualcomm retains Turnip.
-Presentation stays on the accepted MIT-SHM transport. The dedicated qualified
+The desktop session presents through Android hardware buffers (`PANVK_KBASE_DRI3=ahb`);
+browsers and glibc programs keep MIT-SHM, and `"panvk_presentation": "shm"` in
+`~/.local/lib/livecd/config.json` opts the session out. See
+[the AHB handoff](handoff/s20-panvk-ahb-present.md) for qualification. The dedicated qualified
 Ghostty GTK GL DMA-BUF launcher remains the default where its guard passes.
 Full CTS coverage and further timed soaks are not daily-desktop requirements.
 See [the version handoff](PANVK-VERSION-BUMP-HANDOFF.md) for current results and

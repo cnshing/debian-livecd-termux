@@ -10,9 +10,10 @@ so its raw total CPU is 9–27% *higher* while CPU per frame shown is about 29% 
 **The owner chose equal work as the video gate (2026-11-25), so the performance gate
 passes**; see [the patch 0005 qualification](#patch-0005-qualification). Colour/resize,
 100 restarts, the 300-frame race and a 30-minute soak pass on the new driver, so the
-done criteria below are met. Promotion to default is a separate, unstarted step: SHM is still
-the default and nothing is installed. GPU-only AHB import still fails; CPU-usable
-allocations pass.
+done criteria below are met. **Promoted on 2026-11-25:** `mesa-vulkan-icd-panvk-kbase`
+26.3.1-2 and `livecd-desktop` 0.2.0-51 make AHB the S20 desktop session's default and are
+installed on the S20; see [promotion](#promotion-to-default). GPU-only AHB import still
+fails; CPU-usable allocations pass.
 Follows [s20-panvk-raw-dri3.md](s20-panvk-raw-dri3.md).
 Shared rules: [README.md](README.md).
 
@@ -456,10 +457,54 @@ Next work, in order:
 
 1. Done: patch 0005 scopes the clean (CI 45577255552) and is qualified above.
 2. Done: the owner chose equal-work CPU as the video gate; AHB passes it.
-3. Before promoting to default (needs owner go-ahead; changes package pins and the installed
-   environment): measure the attached Android activity's sampling cost in a tagged window, run
-   longer AHB race/menu checks, then package the patch-0005 driver and opt the S20 into
-   `PANVK_KBASE_DRI3=ahb` through the controller.
+3. Done: promoted to default on the S20 (below).
+4. Still open: measure the attached Android activity's sampling cost with the live desktop,
+   and longer AHB race/menu checks. The Note10+ is unaffected: its Adreno GPU uses Turnip,
+   which has no equivalent of this WSI mode.
+
+### Promotion to default
+
+The owner asked for the promotion on 2026-11-25. CI
+[45600751232](https://github.com/cnshing/debian-livecd-termux/actions/runs/45600751232)
+builds both ABIs from `feat/s20-ahb-present` with the seventeen-patch `combined-ahb` series;
+both report Mesa tree `7c6284194b4a6a5df1575848aeeb7ec771fc82f7`, the same tree as the
+qualified CI 45577255552 build. The prerelease
+[panvk-desktop-26.3.1-2](https://github.com/cnshing/debian-livecd-termux/releases/tag/panvk-desktop-26.3.1-2)
+carries both drivers (Bionic `0d83ff81…`, glibc `0251cd64…`), the prepared source, provenance,
+and the packages built by CI
+[45603195349](https://github.com/cnshing/debian-livecd-termux/actions/runs/45603195349).
+`install.lock.json` pins them for the installer.
+
+`livecd-desktop` 0.2.0-51 (`src/native/graphics.py`) treats the new tree as a qualified
+desktop stack, keeping the G77 workgroup defaults, and `session_presentation` sets
+`PANVK_KBASE_DRI3=ahb` only for the desktop session on Termux:X11 (`desktop.environment` and
+renderer-specific terminals). `use_panvk` clears the variable, so browsers keep MIT-SHM and
+the glibc build, which refuses the mode, never sees it. Other X servers such as Xvfb never
+get it either; that matters because the AHB WSI has no fallback when the server lacks the
+socket import. `"panvk_presentation": "shm"` in `~/.local/lib/livecd/config.json` opts out.
+Termux:X11 keeps `-legacy-drawing`: its renderer still samples a flipped AHB through EGL and
+uploads only an fd-backed root (`renderer.cpp`).
+
+Installed on the S20 through the installer helper's local PanVK repository: `android-webgpu`
+0.1.0-2 (new dependency of controller 51, from the v0.12.0 repository tarball, checksum
+verified), then `mesa-vulkan-icd-panvk-kbase` 26.3.1-2 and `livecd-desktop` 0.2.0-51 from the
+release with pinned checksums. No other package changed. The installed controller reports the
+AHB tree, `PANVK_KBASE_DRI3=ahb` and `PANVK_G77_LWG=1`/`NESTED=1` for the session, and no AHB
+variable for a glibc process; installed driver hashes match the release.
+
+Private checks of the installed stack (new harness mode `--mode installed` keeps the
+controller's own choice and records it; every AHB run recorded `ahb`; isolation passed in all):
+
+| Check | SHM | Installed AHB |
+| --- | ---: | ---: |
+| Gears total CPU | 160.1%, 216.2% (outlier) | 114.9%, 114.9% |
+| Video at 10 FPS total CPU, zero drops | 123.9%, 124.2% | 110.4%, 110.2% |
+| Video at 30 FPS total CPU (VO drops) | 149.9% (424), 149.7% (421) | 165.5% (151), 161.0% (161) |
+
+`inst-correctness-2`: 40 captures maximum error zero, stale control rejected, Nautilus and
+Settings found, 50/50 restarts with the same Shell, 300 race frames (146 red, 154 blue),
+zero split or invalid. GTK, Nautilus, video and race images were opened. The live desktop
+was stopped before the install and was not started; it uses AHB on its next start.
 
 ## Gotchas
 

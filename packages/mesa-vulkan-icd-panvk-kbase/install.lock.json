@@ -1,21 +1,21 @@
 {
-  "release": "https://github.com/cnshing/debian-livecd-termux/releases/download/panvk-desktop-26.3.1-1",
+  "release": "https://github.com/cnshing/debian-livecd-termux/releases/download/panvk-desktop-26.3.1-2",
   "packages": [
     {
       "name": "mesa-vulkan-icd-panvk-kbase",
-      "version": "26.3.1-1",
-      "file": "mesa-vulkan-icd-panvk-kbase_26.3.1-1_aarch64.deb",
-      "sha256": "b51417755fb276ac8c47e6c3f6e30529aaf2239d013f814bfc8f76716b14cc94"
+      "version": "26.3.1-2",
+      "file": "mesa-vulkan-icd-panvk-kbase_26.3.1-2_aarch64.deb",
+      "sha256": "ae9326febc931a9b7a4bbfa42b8f7ad267f5d8884bbfb3614254744c53a95815"
     },
     {
       "name": "livecd-desktop",
-      "version": "0.2.0-21",
-      "file": "livecd-desktop_0.2.0-21_all.deb",
-      "sha256": "ceb6757fe0f06d6ab98ad36e4c6b827566967c7c528fea900030a8da4ec87daa"
+      "version": "0.2.0-51",
+      "file": "livecd-desktop_0.2.0-51_all.deb",
+      "sha256": "0fdbb9d4a07b5138c866cc30824cbaac7520a84823ee1ab04e42d5e3d90d1aef"
     }
   ],
   "package_runs": {
-    "mesa-vulkan-icd-panvk-kbase": 43696544730,
-    "livecd-desktop": 43789503859
+    "mesa-vulkan-icd-panvk-kbase": 45603195349,
+    "livecd-desktop": 45603195349
   }
 }

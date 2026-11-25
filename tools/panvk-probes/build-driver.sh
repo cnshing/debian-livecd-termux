@@ -105,7 +105,7 @@ for patch in "$patch_dir"/*.patch; do
   git -C "$mesa" apply --check "$patch"
   git -C "$mesa" apply "$patch"
   git -C "$mesa" add -u
-  git -C "$mesa" commit -q -m "livecd: $(basename "$patch")"
+  git -C "$mesa" commit -q -m "livecd: $(basename "$patch")" -m 'Generated-by: LLM'
 done
 if [ "$kind" = android ]; then
   MESA="$mesa" BDIR="$zenith/build/android-ci" DDIR="$out/patched" \

@@ -690,8 +690,8 @@ def parent(args):
         env['LD_LIBRARY_PATH'] = str(libraries) + ':' + env['LD_LIBRARY_PATH']
         env['LIBGL_DRIVERS_PATH'] = str(libraries / 'dri')
     env.pop('PANVK_KBASE_DRI3', None)
-    if args.mode == 'raw':
-        env['PANVK_KBASE_DRI3'] = 'raw'
+    if args.mode in ('raw', 'ahb'):
+        env['PANVK_KBASE_DRI3'] = args.mode
     if args.present_mode:
         env['MESA_VK_WSI_PRESENT_MODE'] = args.present_mode
     if args.server == 'xvfb':
@@ -718,6 +718,11 @@ def parent(args):
     env['DISPLAY'] = ':' + str(display)
     server_env = apply_renderer(env.copy(), 'software')
     server_env.pop('PANVK_KBASE_DRI3', None)
+    # Keep the control independent of the caller's environment.
+    env.pop('TERMUX_X11_FORCE_FLIP', None)
+    server_env.pop('TERMUX_X11_FORCE_FLIP', None)
+    if args.force_flip:
+        server_env['TERMUX_X11_FORCE_FLIP'] = '1'
     session = server = None
     runtime = None
     code = 1
@@ -733,6 +738,14 @@ def parent(args):
             server = subprocess.Popen(command, env=server_env, stdout=log, stderr=log)
         wait(lambda: subprocess.run(['xdpyinfo'], env=env, stdout=subprocess.DEVNULL,
                                     stderr=subprocess.DEVNULL, timeout=5).returncode == 0)
+        actual_server_env = dict(entry.split('=', 1) for entry in
+            (Path('/proc') / str(server.pid) / 'environ').read_text().split('\0') if '=' in entry)
+        actual_force_flip = actual_server_env.get('TERMUX_X11_FORCE_FLIP')
+        (args.out / 'server-environment.json').write_text(json.dumps({
+            'pid': server.pid, 'command': command, 'force_flip_requested': args.force_flip,
+            'TERMUX_X11_FORCE_FLIP': actual_force_flip}, indent=2) + '\n')
+        if actual_force_flip != ('1' if args.force_flip else None):
+            raise RuntimeError('Private server force-flip environment does not match the request')
         if args.screen_size:
             run(['xrandr', '--fb', args.screen_size], env=env)
             dimensions = run(['xdpyinfo'], env=env, capture_output=True, text=True).stdout
@@ -795,12 +808,14 @@ if __name__ == '__main__':
     faulthandler.register(signal.SIGUSR1)
     parser = argparse.ArgumentParser()
     parser.add_argument('--out', type=Path, required=True)
-    parser.add_argument('--mode', choices=('shm', 'raw'), default='shm')
+    parser.add_argument('--mode', choices=('shm', 'raw', 'ahb'), default='shm')
     parser.add_argument('--present-mode', choices=('fifo', 'relaxed', 'mailbox', 'immediate'),
                         help='Override the Vulkan present mode after controller environment setup')
     parser.add_argument('--server', choices=('lorie', 'xvfb'), default='lorie')
     parser.add_argument('--screen-size', help='Private framebuffer size, e.g. 1920x1080')
     parser.add_argument('--screen-fps', type=int, help='Private lorie refresh rate (1–600)')
+    parser.add_argument('--force-flip', action='store_true',
+                        help='Allow imported raw-fd flips on the private lorie; experimental')
     parser.add_argument('--cycles', type=int, default=20)
     parser.add_argument('--ghostty-launcher', type=Path, help='Private experimental Ghostty launcher')
     parser.add_argument('--ghostty-gsk', choices=('cairo', 'gl'), default='cairo')
@@ -859,8 +874,10 @@ if __name__ == '__main__':
         parser.error('present-race-only requires present-race-trials')
     if args.present_race_trials and (args.allow_other_displays or args.benchmark_only):
         parser.error('race checks require isolation and cannot use benchmark-only')
-    if args.server == 'xvfb' and args.mode == 'raw':
-        parser.error('raw DRI3 requires the private lorie server')
+    if args.server == 'xvfb' and args.mode in ('raw', 'ahb'):
+        parser.error('raw/AHB DRI3 requires the private lorie server')
+    if args.force_flip and (args.server != 'lorie' or args.mode != 'raw'):
+        parser.error('force-flip requires raw DRI3 on the private lorie server')
     if args.allow_other_displays and args.soak_seconds:
         parser.error('overlapping displays are supported only for short correctness checks')
     if args.controller_dir:

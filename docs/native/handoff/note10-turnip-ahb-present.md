@@ -3,7 +3,7 @@
 State on 2026-11-25 UTC. **Steps 1–5 done on the Note10+; the done criteria are met. Promoted
 at the owner's request: the default install now presents the Adreno desktop session through
 AHBs** (`mesa-vulkan-icd-freedreno-android` 26.3.1-1 and `livecd-desktop` 0.2.0-52; see
-Promotion below; not yet installed on the phone or rechecked with `--mode installed`). The Bionic Turnip presents over **raw DRI3** today,
+Promotion below; the driver package is installed on the Note10+ and the 0.2.0-52 session passed `--mode installed`). The Bionic Turnip presents over **raw DRI3** today,
 and Termux:X11 copies every frame on the CPU (X server 61–65% of one core). A CI-built
 Android+X11 Turnip from the S20's Zenith tree with the shared AHB WSI and an opt-in
 `TU_KGSL_DRI3=ahb` presents through AHBs instead, and the server **flips every Shell frame**
@@ -187,11 +187,26 @@ summaries and captures in the ignored `temp/note10-turnip-ahb/evidence/`.
   DRI3, and Chrome's glibc Turnip is untouched. `"turnip_presentation": "raw"` in
   `~/.local/lib/livecd/config.json` opts out.
 
+Installed check on the Note10+ (2026-11-26): `mesa-vulkan-icd-freedreno-android` 26.3.1-1 from
+the refreshed v0.12.0 tarball installed through APT (driver sha256 matches); the
+`livecd-desktop` 0.2.0-52 controller, unpacked privately because the session guard refuses to
+upgrade it under the running desktop, passed to `panvk-desktop.py --integrated --mode
+installed --controller-dir`. The session chose the packaged ICD with `TU_KGSL_DRI3=ahb`, and
+Shell and GTK mapped `$PREFIX/lib/freedreno-android/libvulkan_freedreno.so`:
+
+| Check | Result |
+|---|---|
+| Colour/resize | 40 captures, max error 0 (opened) |
+| Restarts | 20/20 |
+| Race | 300 frames, 0 split |
+| Gears | total 126.0% at 59.7–60.2 FPS (installed raw path today: 155% at 45–49) |
+| Video | 114.5%, 0 drops; Shell window 895/895 flips |
+| Video at 10 FPS | 73.8%, 0 drops |
+
 ## Next steps, in order
 
-1. Install on the Note10+ through the refreshed release (or the package from CI), then
-   recheck with `tests/native/panvk-desktop.py --integrated --mode installed` and
-   `livecd validate`.
+1. The live desktop upgrades to `livecd-desktop` 0.2.0-52 at its next `install.sh` run or
+   `pkg upgrade` with the desktop stopped; then `livecd validate`.
 2. Measure the attached Android activity's sampling cost on the live desktop, and watch for
    the late fullscreen frame on resize (repeat the colour suite at 0.35 s settle a few more
    times).

@@ -205,15 +205,21 @@ Shell and GTK mapped `$PREFIX/lib/freedreno-android/libvulkan_freedreno.so`:
 
 ## Next steps, in order
 
-1. The live desktop upgrades to `livecd-desktop` 0.2.0-52 at its next `install.sh` run or
-   `pkg upgrade` with the desktop stopped; then `livecd validate`.
-2. Measure the attached Android activity's sampling cost on the live desktop, and watch for
+Live switch (2026-11-26, at the owner's request): desktop stopped, `livecd-desktop` 0.2.0-52
+installed, restarted. The live Shell maps `$PREFIX/lib/freedreno-android/libvulkan_freedreno.so`
+with `TU_KGSL_DRI3=ahb`, and `livecd validate` passes 30/30. The first restart still chose the
+Termux Turnip: `~/.local/lib/livecd-native/desktop.py` (with `audio.py` and `validate.py`) was a
+private copy from 2026-11-22 rather than the package's link, and that copy predates
+`session_presentation`. `runtime.py` (which `install.sh` runs) relinked them and saved the copies
+under `~/.local/state/livecd-native/runtime-backups/`.
+
+1. Measure the attached Android activity's sampling cost on the live desktop, and watch for
    the late fullscreen frame on resize (repeat the colour suite at 0.35 s settle a few more
    times).
-3. The CI Turnip is Mesa 26.3-devel and slower than the installed 26.2.6 on raw DRI3 (gears
+2. The CI Turnip is Mesa 26.3-devel and slower than the installed 26.2.6 on raw DRI3 (gears
    30 vs 45–49 FPS). AHB at 59 FPS / 133% already beats the installed raw path's
    47 FPS / 155%; compare the installed session against that baseline too.
-4. Foreign AHB import (`tools/panvk-probes/ahb-import.py`, which allocates its own buffer)
+3. Foreign AHB import (`tools/panvk-probes/ahb-import.py`, which allocates its own buffer)
    fails on this Turnip by design: only driver-owned buffers may be probed. The swapchain
    does not need it; a Qualcomm handle parser would.
 
@@ -237,6 +243,8 @@ Shell and GTK mapped `$PREFIX/lib/freedreno-android/libvulkan_freedreno.so`:
   `x11/` directory of links, which the harness puts on `LD_LIBRARY_PATH`.
 - The driver explains AHB import failures only in Android's log (`logcat`, tag `MESA`), for
   example `u_gralloc_get_buffer_basic_info failed` and the `cpu-linear-probe` result.
+- A private regular file in `~/.local/lib/livecd-native` shadows the package's link: check
+  `ls -l` there after upgrading `livecd-desktop`, and rerun `runtime.py` with the desktop stopped.
 - Stale `.X11-unix/X*` sockets of dead servers make the harness refuse to start; remove one
   only after `xdpyinfo` fails on it and its lock file's pid is gone.
 

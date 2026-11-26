@@ -439,6 +439,10 @@ jobs:
       if: steps.build.outcome == 'success' && contains(format(' {0} ', matrix.packages), ' mesa-vulkan-icd-panvk-kbase ')
       run: python3 tests/packaging/check-panvk-artifact.py termux-packages/output mesa-vulkan-icd-panvk-kbase
 
+    - name: Check the Android Turnip and its pinned provenance
+      if: steps.build.outcome == 'success' && contains(format(' {0} ', matrix.packages), ' mesa-vulkan-icd-freedreno-android ')
+      run: python3 tests/packaging/check-turnip-ahb-artifact.py termux-packages/output
+
     - name: Check source-built PanVK ABIs and pinned provenance
       if: steps.build.outcome == 'success' && contains(format(' {0} ', matrix.packages), ' mesa-vulkan-icd-panvk-kbase-source ')
       run: python3 tests/packaging/check-panvk-artifact.py termux-packages/output

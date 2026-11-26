@@ -1,7 +1,9 @@
 # Handoff: Note10+ Turnip presentation with Android hardware buffers
 
-State on 2026-11-25 UTC. **Steps 1–5 done on the Note10+; the done criteria are met.
-Promotion (step 6) waits for the owner.** The Bionic Turnip presents over **raw DRI3** today,
+State on 2026-11-25 UTC. **Steps 1–5 done on the Note10+; the done criteria are met. Promoted
+at the owner's request: the default install now presents the Adreno desktop session through
+AHBs** (`mesa-vulkan-icd-freedreno-android` 26.3.1-1 and `livecd-desktop` 0.2.0-52; see
+Promotion below; not yet installed on the phone or rechecked with `--mode installed`). The Bionic Turnip presents over **raw DRI3** today,
 and Termux:X11 copies every frame on the CPU (X server 61–65% of one core). A CI-built
 Android+X11 Turnip from the S20's Zenith tree with the shared AHB WSI and an opt-in
 `TU_KGSL_DRI3=ahb` presents through AHBs instead, and the server **flips every Shell frame**
@@ -9,8 +11,7 @@ Android+X11 Turnip from the S20's Zenith tree with the shared AHB WSI and an opt
 repeated on the final build: **gears total CPU −13% at twice the frame rate (59 vs 30 FPS),
 30 FPS video −16%, equal-output 10 FPS video −15 to −19%**, zero drops everywhere. Race
 (2 × 300 frames, zero split), 50 restarts and a 30-minute soak pass; 199 of 200 AHB
-colour/resize captures are exact (one late fullscreen frame, not reproduced, below). Nothing
-is installed or packaged.
+colour/resize captures are exact (one late fullscreen frame, not reproduced, below).
 The S20 work it builds on: [s20-panvk-ahb-present.md](s20-panvk-ahb-present.md).
 Shared rules: [README.md](README.md).
 
@@ -169,22 +170,34 @@ in Termux:X11.
 Evidence: phone `~/pl-tahb/` (`base-*`, `v10-*`, `q-*`, `q3-*`, `c-*`, `pw4-*`); retrieved
 summaries and captures in the ignored `temp/note10-turnip-ahb/evidence/`.
 
+## Promotion
+
+- [Release `turnip-ahb-26.3.1-1`](https://github.com/cnshing/debian-livecd-termux/releases/tag/turnip-ahb-26.3.1-1)
+  pins the qualified driver (CI 45617186801 from d3534c2, sha256 `d297b4df…`, Mesa tree
+  `432f482a…`) with its `SOURCE.json` and build provenance.
+- `packages/mesa-vulkan-icd-freedreno-android` installs it at `$PREFIX/lib/freedreno-android`
+  with a private `freedreno_icd.json` (not in `share/vulkan/icd.d`) and the `x11/` soname
+  links; `tests/packaging/check-turnip-ahb-artifact.py` checks the built package in CI.
+- `install.sh` adds it on `/dev/kgsl-3d0`, when the repository has it (older tarballs keep raw
+  DRI3).
+- `graphics.session_presentation` (livecd-desktop 0.2.0-52) points the Termux:X11 desktop
+  session at that ICD with `TU_KGSL_DRI3=ahb` and drops `$PREFIX/lib` from its library path,
+  as for PanVK. Only a qualified tree (`QUALIFIED_TURNIP_TREES`) is selected.
+  `apply_renderer` clears the switch, so browsers and mpv reselect the Termux Turnip on raw
+  DRI3, and Chrome's glibc Turnip is untouched. `"turnip_presentation": "raw"` in
+  `~/.local/lib/livecd/config.json` opts out.
+
 ## Next steps, in order
 
-1. **Promotion, only on the owner's go-ahead:** package the Android Turnip as its own package
-   (built by `turnip-ahb`, staged beside the Termux Turnip, never replacing
-   `~/.local/opt/livecd-native/gpu`), with the `x11/` soname links the PanVK package ships;
-   extend `graphics.session_presentation` to set `TU_KGSL_DRI3=ahb` only for the desktop
-   session on Termux:X11 and point that session at the new ICD (browsers and Chrome's glibc
-   Turnip stay as they are; Xvfb never gets it, because the AHB WSI has no fallback); install
-   through the local repo; recheck with `--mode installed`.
-2. Before or with promotion: measure the attached Android activity's sampling cost on the
-   live desktop, and watch for the late fullscreen frame on resize (repeat the colour suite
-   at 0.35 s settle a few more times).
+1. Install on the Note10+ through the refreshed release (or the package from CI), then
+   recheck with `tests/native/panvk-desktop.py --integrated --mode installed` and
+   `livecd validate`.
+2. Measure the attached Android activity's sampling cost on the live desktop, and watch for
+   the late fullscreen frame on resize (repeat the colour suite at 0.35 s settle a few more
+   times).
 3. The CI Turnip is Mesa 26.3-devel and slower than the installed 26.2.6 on raw DRI3 (gears
-   30 vs 45–49 FPS). Compare the promoted session against today's installed stack, not only
-   against the same build, before calling it a net win; AHB at 59 FPS / 133% already beats
-   the installed raw path's 47 FPS / 155%.
+   30 vs 45–49 FPS). AHB at 59 FPS / 133% already beats the installed raw path's
+   47 FPS / 155%; compare the installed session against that baseline too.
 4. Foreign AHB import (`tools/panvk-probes/ahb-import.py`, which allocates its own buffer)
    fails on this Turnip by design: only driver-owned buffers may be probed. The swapchain
    does not need it; a Qualcomm handle parser would.
@@ -219,4 +232,4 @@ summaries and captures in the ignored `temp/note10-turnip-ahb/evidence/`.
 - Either a recorded no-go, or an AHB Turnip whose total CPU for gears and equal-output video is
   clearly below the current path in both run orders, with no split frames in the race test, a
   completed soak, and captures opened and looked at. **Met** with CI 45615059345/45617186801;
-  promotion is the owner's call.
+  promoted at the owner's request.

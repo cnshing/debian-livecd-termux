@@ -10,6 +10,11 @@ GPU = Path.home() / '.local/opt/livecd-native/gpu'
 ICD = GPU / 'share/vulkan/icd.d/freedreno_icd.aarch64.json'
 # mesa-vulkan-icd-panvk-kbase: PanVK on Android's own Mali kernel driver, per ABI.
 PANVK = PREFIX / 'lib/panvk-kbase'
+# mesa-vulkan-icd-freedreno-android: Turnip built for Android and X11, for the Adreno desktop
+# session on Termux:X11 only (TU_KGSL_DRI3=ahb). Everything else keeps the Termux Turnip.
+TURNIP_AHB = PREFIX / 'lib/freedreno-android'
+# Qualified Android Turnip builds by Mesa content tree (docs/native/handoff/note10-turnip-ahb-present.md).
+QUALIFIED_TURNIP_TREES = {'432f482ad4a49e5f3f8378fe10efa6eca0437fdc'}
 
 
 def mali_usable():
@@ -47,23 +52,48 @@ def qualified_desktop_stack():
     return desktop_tree() is not None
 
 
+def config():
+    path = Path.home() / '.local/lib/livecd/config.json'
+    try:
+        data = json.loads(path.read_text()) if path.exists() else {}
+    except (OSError, ValueError):
+        data = {}
+    return data if isinstance(data, dict) else {}
+
+
 def ahb_presentation():
     """Whether the installed Bionic PanVK presents through AHBs, unless the user chose MIT-SHM."""
     tree = desktop_tree()
     if not tree or not QUALIFIED_TREES[tree]:
         return False
-    path = Path.home() / '.local/lib/livecd/config.json'
+    return config().get('panvk_presentation', 'ahb') != 'shm'
+
+
+def turnip_ahb():
+    """The qualified Android Turnip ICD, unless the user chose the Termux Turnip's raw DRI3."""
+    icd = TURNIP_AHB / 'freedreno_icd.json'
+    if not icd.is_file() or not os.access('/dev/kgsl-3d0', os.R_OK | os.W_OK):
+        return None
     try:
-        config = json.loads(path.read_text()) if path.exists() else {}
+        manifest = json.loads((PREFIX / 'share/doc/mesa-vulkan-icd-freedreno-android/SOURCE.json').read_text())
     except (OSError, ValueError):
-        config = {}
-    return config.get('panvk_presentation', 'ahb') != 'shm'
+        return None
+    if (not isinstance(manifest, dict) or manifest.get('variant') != 'turnip-ahb' or
+            manifest.get('mesa_tree') not in QUALIFIED_TURNIP_TREES):
+        return None
+    return icd if config().get('turnip_presentation', 'ahb') != 'raw' else None
 
 
 def session_presentation(env):
-    """AHB presentation needs Termux:X11's socket import, so only the session on its display gets it."""
-    if env.get('LIVECD_NATIVE_VULKAN_DRIVER') == 'panvk' and ahb_presentation():
+    """AHB presentation needs Termux:X11's socket import, so only the session on its display gets it.
+    Launchers that call apply_renderer again (browsers, mpv) drop it."""
+    driver = env.get('LIVECD_NATIVE_VULKAN_DRIVER')
+    if driver == 'panvk' and ahb_presentation():
         env['PANVK_KBASE_DRI3'] = 'ahb'
+    elif driver == 'turnip' and (icd := turnip_ahb()):
+        icd_library(icd, TURNIP_AHB)
+        env.update(VK_DRIVER_FILES=str(icd), VK_ICD_FILENAMES=str(icd), TU_KGSL_DRI3='ahb')
+        android_libraries(env, TURNIP_AHB / 'x11')
     return env
 
 
@@ -82,15 +112,21 @@ def use_panvk(env, abi):
         env.setdefault('PANVK_G77_NESTED', env['PANVK_G77_LWG'])
     # Bionic: versioned names for Termux's X11 libraries. glibc: newer xcb/Wayland
     # than Chrome bundles, so they must come first.
-    key, directory = (('LD_LIBRARY_PATH', icd.parent / 'x11') if abi == 'bionic'
-                      else ('BIONILUX_LIBRARY_PATH', icd.parent / 'lib'))
-    inherited = env.get(key, '').split(':')
     if abi == 'bionic':
-        # The desktop session names $PREFIX/lib, where libandroid-stub's libbinder_ndk.so
-        # would shadow Android's: the driver's libnativewindow -> /system/lib64/libui.so then
-        # fails to load. Termux programs find $PREFIX/lib through their RUNPATH anyway.
-        inherited = [p for p in inherited if p and Path(p).resolve() != (PREFIX / 'lib').resolve()]
-    env[key] = ':'.join(filter(None, [str(directory), *inherited]))
+        android_libraries(env, icd.parent / 'x11')
+    else:
+        inherited = env.get('BIONILUX_LIBRARY_PATH', '').split(':')
+        env['BIONILUX_LIBRARY_PATH'] = ':'.join(filter(None, [str(icd.parent / 'lib'), *inherited]))
+
+
+def android_libraries(env, directory):
+    """Libraries for a driver built for Android: versioned X11 sonames first, and no $PREFIX/lib.
+    The desktop session names $PREFIX/lib, where libandroid-stub's libbinder_ndk.so would shadow
+    Android's: the driver's libnativewindow -> /system/lib64/libui.so then fails to load. Termux
+    programs find $PREFIX/lib through their RUNPATH anyway."""
+    inherited = [p for p in env.get('LD_LIBRARY_PATH', '').split(':')
+                 if p and Path(p).resolve() != (PREFIX / 'lib').resolve()]
+    env['LD_LIBRARY_PATH'] = ':'.join([str(directory), *inherited])
 
 
 def icd_library(icd, root):
@@ -156,7 +192,7 @@ def apply_renderer(env, renderer):
                 'LIBGL_KOPPER_DISABLE', 'LIBGL_KOPPER_DRI2', 'ZINK_DEBUG',
                 'ZINK_DESCRIPTORS', 'TU_DEBUG', 'DRI_PRIME', 'MESA_VK_DEVICE_SELECT',
                 'vblank_mode', 'MESA_VK_WSI_PRESENT_MODE', 'MESA_VK_WSI_DEBUG', 'COGL_DRIVER',
-                'PANVK_KBASE_DRI3', 'LIVECD_NATIVE_VULKAN_DRIVER'):
+                'PANVK_KBASE_DRI3', 'TU_KGSL_DRI3', 'LIVECD_NATIVE_VULKAN_DRIVER'):
         env.pop(key, None)
     env['LIVECD_NATIVE_RENDERER'] = renderer
     if renderer == 'software':

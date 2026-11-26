@@ -1,0 +1,33 @@
+{
+  "format": 1,
+  "variant": "turnip-ahb",
+  "release": "https://github.com/cnshing/debian-livecd-termux/releases/download/turnip-ahb-26.3.1-1",
+  "build_run": "https://github.com/cnshing/debian-livecd-termux/actions/runs/45617186801",
+  "build_commit": "d3534c22fc4a425538e261323efb715c1b735150",
+  "zenith_commit": "cf70e02b918e1864cbcd746a7fefa57b96c673ce",
+  "base_tree": "4a8e9a8cbb34b9fb91a9ad2040319aceb075b973",
+  "base_source": "https://github.com/cnshing/debian-livecd-termux/releases/download/panvk-source-26.3.1-1/prepared-source.tar.zst",
+  "base_source_sha256": "d39f83ae0ddfacf3e27ab5eb9fe71392b8138830fa0c1982604e4c593d14f995",
+  "mesa_tree": "432f482ad4a49e5f3f8378fe10efa6eca0437fdc",
+  "meson": "-Dplatforms=android,x11 -Dvulkan-drivers=freedreno -Dfreedreno-kmds=msm,kgsl",
+  "driver_patches": [
+    {
+      "file": "tools/panvk-probes/platform-patches/0003-wsi-x11-wait-for-fences-without-implicit-sync.patch",
+      "sha256": "e0b3f9ede1d3fe935473fc49e0dded1422e6a2c023d83f450a2c8838e887200f"
+    },
+    {
+      "file": "tools/panvk-probes/platform-patches/0004-wsi-x11-termux-ahb.patch",
+      "sha256": "089002c5ff129b7127c70099cb60667be53a919252547c7515af9fb22d23829f"
+    },
+    {
+      "file": "tools/panvk-probes/turnip-patches/0101-turnip-wsi-termux-ahb.patch",
+      "sha256": "9880aba2a033e21b6310be6d3c38fb131e0b9902118e360d0cfebe5704dfaf15"
+    },
+    {
+      "file": "tools/panvk-probes/turnip-patches/0102-wsi-ahb-owned-linear-probe.patch",
+      "sha256": "873062164fdb8020fff6470a0d03dfde041cbba3dcfa5e2a24857f6d1792db4f"
+    }
+  ],
+  "provenance_sha256": "e39fa624d4854ca5b3c3fcf69ede785990fd2eb25c1194c3778a1a7fa22aa788",
+  "android_sha256": "d297b4df07ee46f829c863605199f5402faa15330ab585f9539182ef3b087427"
+}

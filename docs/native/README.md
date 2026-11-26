@@ -289,6 +289,17 @@ GL renderer. GPU sessions start Termux:X11 without `-legacy-drawing`; software
 sessions retain the earlier display configuration. This does not establish a
 zero-copy display path or hardware video decoding.
 
+The desktop session itself (Shell, GTK and terminal programs started from it) uses a second
+Turnip, `mesa-vulkan-icd-freedreno-android` 26.3.1-1, which `install.sh` adds on Adreno. It is
+built for Android and X11 and presents swapchain images to Termux:X11 as Android hardware
+buffers (`TU_KGSL_DRI3=ahb`, from `livecd-desktop` 0.2.0-52), so Termux:X11 flips Shell frames
+instead of copying each one on the CPU (gears −13% CPU at twice the frame rate, video −15 to
+−19%; [the handoff](handoff/note10-turnip-ahb-present.md)). Browsers and mpv reselect the
+Termux Turnip above and keep raw DRI3. It lives under `$PREFIX/lib/freedreno-android`, outside
+the Vulkan loader's search path, with versioned X11 soname links that only that session puts on
+its library path. `"turnip_presentation": "raw"` in `~/.local/lib/livecd/config.json` returns
+the session to the Termux Turnip.
+
 ## Native PanVK + Zink on Mali
 
 On the qualified Galaxy S20 x1s (Mali-G77, Linux 4.19.87, kbase JM 11.35),

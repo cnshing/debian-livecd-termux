@@ -747,7 +747,7 @@ def parent(args):
     if args.mode == 'installed':
         # Keep the installed controller's own presentation choice and record it.
         (args.out / 'presentation.json').write_text(json.dumps(
-            {'PANVK_KBASE_DRI3': env.get('PANVK_KBASE_DRI3')}) + '\n')
+            {key: env.get(key) for key in ('PANVK_KBASE_DRI3', 'TU_KGSL_DRI3', 'VK_DRIVER_FILES')}) + '\n')
     else:
         env.pop('PANVK_KBASE_DRI3', None)
         env.pop('TU_KGSL_DRI3', None)

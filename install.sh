@@ -148,6 +148,11 @@ fi
 # the ICD loader (tests/native/test-opencl.py). Mali keeps no OpenCL platform, as before.
 if test -e /dev/kgsl-3d0; then
     packages+=(ocl-icd clvk clinfo)
+    # The desktop session presents to Termux:X11 through Android hardware buffers with this
+    # Turnip (src/native/graphics.py). Older repositories lack it; the session then keeps raw DRI3.
+    if apt-cache show mesa-vulkan-icd-freedreno-android >/dev/null 2>&1; then
+        packages+=(mesa-vulkan-icd-freedreno-android)
+    fi
 fi
 "${apt[@]}" install --no-install-recommends "${packages[@]}"
 python "$repo/tools/install-panvk-desktop.py"

@@ -22,8 +22,9 @@ class Graphics(unittest.TestCase):
         self.panvk = self.prefix / 'lib/panvk-kbase'
         self.turnip = self.gpu / 'share/vulkan/icd.d/freedreno_icd.aarch64.json'
         self.devices = {'/dev/mali0'}
+        self.turnip_ahb = self.prefix / 'lib/freedreno-android'
         patches = (mock.patch.multiple(graphics, PREFIX=self.prefix, GPU=self.gpu,
-                                      PANVK=self.panvk, ICD=self.turnip),
+                                      PANVK=self.panvk, ICD=self.turnip, TURNIP_AHB=self.turnip_ahb),
                    mock.patch.object(graphics.os, 'access', side_effect=lambda path, mode: str(path) in self.devices))
         for patch in patches:
             patch.start()
@@ -130,6 +131,51 @@ class Graphics(unittest.TestCase):
         self.assertNotIn('PANVK_G77_LWG', self.session())
         env = graphics.session_presentation({'LIVECD_NATIVE_VULKAN_DRIVER': 'turnip'})
         self.assertNotIn('PANVK_KBASE_DRI3', env)
+
+    def install_turnip_ahb(self, tree=None):
+        icd = self.turnip_ahb / 'freedreno_icd.json'
+        self.manifest(icd, self.turnip_ahb / 'libvulkan_freedreno.so')
+        self.manifest(self.turnip, self.gpu / 'lib/libvulkan_freedreno.so')
+        source = self.prefix / 'share/doc/mesa-vulkan-icd-freedreno-android/SOURCE.json'
+        source.parent.mkdir(parents=True, exist_ok=True)
+        source.write_text(json.dumps({'variant': 'turnip-ahb',
+                                      'mesa_tree': tree or next(iter(graphics.QUALIFIED_TURNIP_TREES))}))
+        self.devices = {'/dev/kgsl-3d0'}
+        return icd
+
+    def turnip_session(self, config=None):
+        home = self.root / 'home'
+        if config is not None:
+            (home / '.local/lib/livecd').mkdir(parents=True, exist_ok=True)
+            (home / '.local/lib/livecd/config.json').write_text(json.dumps(config))
+        env = {'LD_LIBRARY_PATH': f'{self.prefix}/lib:/private/gnome/lib', 'TU_KGSL_DRI3': 'raw'}
+        with mock.patch.object(graphics.Path, 'home', return_value=home):
+            return graphics.session_presentation(graphics.apply_renderer(env, 'zink'))
+
+    def test_adreno_desktop_session_selects_the_android_turnip_with_ahb(self):
+        icd = self.install_turnip_ahb()
+        env = self.turnip_session()
+        self.assertEqual((env['VK_DRIVER_FILES'], env['VK_ICD_FILENAMES']), (str(icd), str(icd)))
+        self.assertEqual(env['TU_KGSL_DRI3'], 'ahb')
+        self.assertEqual(env['LD_LIBRARY_PATH'], f'{self.turnip_ahb}/x11:/private/gnome/lib')
+        self.assertFalse(graphics.legacy_drawing('zink'))
+        # Browsers and mpv reapply the renderer: back to the Termux Turnip, without the switch.
+        graphics.apply_renderer(env, 'zink')
+        self.assertEqual(env['VK_DRIVER_FILES'], str(self.turnip))
+        self.assertNotIn('TU_KGSL_DRI3', env)
+
+    def test_adreno_opt_out_unqualified_tree_or_software_keep_the_termux_turnip(self):
+        self.install_turnip_ahb()
+        env = self.turnip_session({'turnip_presentation': 'raw'})
+        self.assertEqual(env['VK_DRIVER_FILES'], str(self.turnip))
+        self.assertNotIn('TU_KGSL_DRI3', env)
+        self.install_turnip_ahb('0' * 40)
+        env = self.turnip_session()
+        self.assertEqual(env['VK_DRIVER_FILES'], str(self.turnip))
+        self.assertNotIn('TU_KGSL_DRI3', env)
+        env = graphics.session_presentation(graphics.apply_renderer({}, 'software'))
+        self.assertNotIn('TU_KGSL_DRI3', env)
+        self.assertNotIn(str(self.turnip_ahb), env.get('VK_DRIVER_FILES', ''))
 
     def test_glibc_never_receives_ahb(self):
         icd = self.panvk / 'glibc/panfrost_icd.json'
